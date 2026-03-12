@@ -195,17 +195,21 @@ def reindex(collection: str, path: str | None, full: bool) -> None:
         payload["path"] = path
 
     try:
-        resp = httpx.post(url, json=payload, timeout=60)
+        resp = httpx.post(url, json=payload, timeout=600)
         resp.raise_for_status()
         data = resp.json()
     except Exception as exc:
         _handle_http_error(exc)
         return
 
-    console.print(
-        f"[green]Reindexed[/green] collection [cyan]{data.get('collection')}[/cyan] "
-        f"— {data.get('chunks_indexed', 0)} chunks indexed."
-    )
+    status = data.get("status", "")
+    if status == "reindex_started":
+        console.print(
+            f"[green]Reindex started[/green] for collection [cyan]{data.get('collection')}[/cyan] "
+            f"at path [dim]{data.get('path', '')}[/dim]. Use [bold]rag status[/bold] to monitor progress."
+        )
+    else:
+        console.print(f"[yellow]{status}[/yellow]: {data}")
 
 
 # ---------------------------------------------------------------------------

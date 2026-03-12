@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from pydantic import BaseModel
 from qdrant_client.models import (
     Distance,
@@ -121,7 +121,11 @@ async def internal_reindex(body: ReindexInternalRequest, request: Request):
     if not safe_path.exists():
         raise HTTPException(status_code=404, detail=f"File not found: {body.file_path}")
 
-    content = safe_path.read_text(encoding="utf-8")
+    try:
+        content = safe_path.read_text(encoding="utf-8")
+    except (UnicodeDecodeError, OSError):
+        return {"status": "skipped", "file_path": body.file_path, "reason": "binary or unreadable"}
+
     request.app.state.indexer.ensure_collection(body.collection)
     count = request.app.state.indexer.index_file(
         content=content,
@@ -203,30 +207,40 @@ async def search_skills(body: SearchSkillsRequest, request: Request):
 # ---------------------------------------------------------------------------
 
 
+def _run_reindex(indexer, collection: str, base_path, full: bool) -> None:
+    """Background task: walk files and index them."""
+    import logging
+    logger = logging.getLogger("rag.reindex")
+
+    files = list(base_path.rglob("*")) if full else [base_path]
+    indexed = 0
+    skipped = 0
+    for fp in files:
+        if fp.is_file():
+            try:
+                content = fp.read_text(encoding="utf-8")
+                indexed += indexer.index_file(
+                    content=content,
+                    file_path=str(fp),
+                    collection=collection,
+                    file_mtime=fp.stat().st_mtime,
+                )
+            except Exception:
+                skipped += 1
+    logger.info(f"Reindex complete: collection={collection} indexed={indexed} skipped={skipped}")
+
+
 @api_router.post("/api/reindex")
-async def reindex(body: ReindexRequest, request: Request):
+async def reindex(body: ReindexRequest, request: Request, background_tasks: BackgroundTasks):
     indexer = request.app.state.indexer
     indexer.ensure_collection(body.collection)
 
-    base_path = _validate_path(body.path) if body.path else None
-    indexed = 0
+    if body.path:
+        base_path = _validate_path(body.path)
+        background_tasks.add_task(_run_reindex, indexer, body.collection, base_path, body.full)
+        return {"status": "reindex_started", "collection": body.collection, "path": str(base_path)}
 
-    if base_path is not None:
-        files = list(base_path.rglob("*")) if body.full else [base_path]
-        for fp in files:
-            if fp.is_file():
-                try:
-                    content = fp.read_text(encoding="utf-8")
-                    indexed += indexer.index_file(
-                        content=content,
-                        file_path=str(fp),
-                        collection=body.collection,
-                        file_mtime=fp.stat().st_mtime,
-                    )
-                except (UnicodeDecodeError, OSError):
-                    pass
-
-    return {"status": "reindexed", "collection": body.collection, "chunks_indexed": indexed}
+    return {"status": "no_path", "collection": body.collection}
 
 
 # ---------------------------------------------------------------------------

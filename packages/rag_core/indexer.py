@@ -68,7 +68,10 @@ class Indexer:
             }
             points.append(PointStruct(id=point_id, vector=vector, payload=payload))
 
-        self._qdrant.upsert(collection_name=collection, points=points)
+        # Batch upserts to stay under Qdrant payload size limits
+        batch_size = 50
+        for i in range(0, len(points), batch_size):
+            self._qdrant.upsert(collection_name=collection, points=points[i:i + batch_size])
         return len(points)
 
     def delete_file(self, file_path: str, collection: str) -> None:

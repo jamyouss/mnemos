@@ -197,7 +197,7 @@ async def test_api_reindex(app):
         )
     assert response.status_code == 200
     data = response.json()
-    assert data["status"] == "reindexed"
+    assert data["status"] == "no_path"
     assert data["collection"] == "rag_code_moby"
 
 
