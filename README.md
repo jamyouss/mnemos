@@ -43,15 +43,7 @@ This starts three services:
 
 By default the server mounts `~/Developments/Projects/digital-gigafactory` as the codebase and `~/.claude` as the config/skills directory. Edit `docker-compose.yml` to point these volumes at your paths.
 
-### 2. Initialize collections
-
-On first run, create the Qdrant collections:
-
-```bash
-docker compose exec rag-server python scripts/init_collections.py
-```
-
-### 3. Trigger an initial reindex
+### 2. Trigger an initial reindex
 
 The watcher only picks up file changes. To index existing content, use the CLI:
 
@@ -69,7 +61,7 @@ rag reindex --collection rag_docs --path /path/to/.claude/docs --full
 rag reindex --collection rag_code_moby --path /path/to/moby --full
 ```
 
-### 4. Verify
+### 3. Verify
 
 ```bash
 rag status

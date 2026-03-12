@@ -37,6 +37,11 @@ def create_app() -> FastAPI:
             embedding_service=app.state.embeddings,
         )
 
+        # Ensure all collections exist on startup
+        from rag_core.collections import COLLECTIONS
+        for coll in COLLECTIONS:
+            app.state.indexer.ensure_collection(coll.name, coll.vector_size)
+
         from server.mcp_tools import create_mcp_server
         mcp_server = create_mcp_server(
             search_service=app.state.search_service,
