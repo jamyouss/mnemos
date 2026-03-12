@@ -13,4 +13,4 @@ dependencies = [
 ]
 
 [project.scripts]
-rag = "cli.main:cli"
+rag = "main:cli"
