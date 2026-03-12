@@ -1,0 +1,60 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:6333/healthz || exit 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
+  rag-server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    ports:
+      - "8100:8100"
+    environment:
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6333
+      EMBEDDING_MODEL: all-MiniLM-L6-v2
+      CODEBASE_PATH: /data/codebase
+      CLAUDE_CONFIG_PATH: /data/claude-config
+      RAG_MODE: local
+      RAG_AUTH_ENABLED: "false"
+      RAG_STATE_DIR: /data/state
+    volumes:
+      - ~/Developments/Projects/digital-gigafactory:/data/codebase:ro
+      - ~/.claude:/data/claude-config:ro
+      - rag_state:/data/state
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8100/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+
+  watcher:
+    build:
+      context: .
+      dockerfile: watcher/Dockerfile
+    environment:
+      RAG_SERVER_URL: http://rag-server:8100
+      CODEBASE_PATH: /data/codebase
+      CLAUDE_CONFIG_PATH: /data/claude-config
+      WATCHER_DEBOUNCE_MS: 2000
+    volumes:
+      - ~/Developments/Projects/digital-gigafactory:/data/codebase:ro
+      - ~/.claude:/data/claude-config:ro
+    depends_on:
+      rag-server:
+        condition: service_healthy
+
+volumes:
+  qdrant_data:
+  rag_state:

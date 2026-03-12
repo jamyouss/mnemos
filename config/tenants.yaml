@@ -1,0 +1,5 @@
+tenants:
+  tenant_jamal:
+    api_key: "CHANGE_ME"
+    collections_prefix: "jamal_"
+    max_documents: 0  # 0 = unlimited (no quota enforcement)

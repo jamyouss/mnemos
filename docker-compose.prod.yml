@@ -1,0 +1,11 @@
+services:
+  rag-server:
+    environment:
+      RAG_MODE: deployed
+      RAG_AUTH_ENABLED: "true"
+    volumes:
+      - ./config/tenants.yaml:/data/config/tenants.yaml:ro
+
+  watcher:
+    profiles:
+      - disabled
