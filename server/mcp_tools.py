@@ -356,6 +356,7 @@ def _store_memory(
     from qdrant_client.models import PointStruct
 
     entry_id = str(uuid.uuid4())
+    point_id = str(uuid.uuid5(uuid.NAMESPACE_URL, entry_id))
     vector = indexer._embeddings.embed(content)
     now = datetime.now(timezone.utc).isoformat()
     payload = {
@@ -372,7 +373,7 @@ def _store_memory(
         "last_indexed_at": now,
         "file_mtime": time.time(),
     }
-    point = PointStruct(id=entry_id, vector=vector, payload=payload)
+    point = PointStruct(id=point_id, vector=vector, payload=payload)
     qdrant_client.upsert(collection_name="rag_memory", points=[point])
     return entry_id
 

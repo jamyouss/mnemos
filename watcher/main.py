@@ -114,15 +114,15 @@ class DebouncedHandler(FileSystemEventHandler):
                 httpx.post(
                     f"{RAG_SERVER_URL}/internal/reindex",
                     json={
-                        "file_path": rel_path,
+                        "file_path": abs_path,
                         "event": event_type,
                         "collection": collection,
                     },
                     timeout=30,
                 )
-                logger.info(f"Indexed {event_type}: {rel_path} -> {collection}")
+                logger.info(f"Indexed {event_type}: {abs_path} -> {collection}")
             except Exception as e:
-                logger.error(f"Failed to index {rel_path}: {e}")
+                logger.error(f"Failed to index {abs_path}: {e}")
 
 
 def main() -> None:

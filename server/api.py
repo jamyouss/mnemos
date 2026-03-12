@@ -17,9 +17,12 @@ from qdrant_client.models import (
     VectorParams,
 )
 
+from rag_core.collections import COLLECTIONS
 from server.config import settings
 
 api_router = APIRouter()
+
+_VALID_COLLECTIONS = {c.name for c in COLLECTIONS}
 
 
 # ---------------------------------------------------------------------------
@@ -136,6 +139,8 @@ async def internal_reindex(body: ReindexInternalRequest, request: Request):
 
 @api_router.post("/api/index")
 async def push_index(body: IndexPushRequest, request: Request):
+    if body.collection not in _VALID_COLLECTIONS:
+        raise HTTPException(status_code=400, detail=f"Unknown collection: {body.collection}")
     request.app.state.indexer.ensure_collection(body.collection)
     count = request.app.state.indexer.index_file(
         content=body.content,
@@ -203,7 +208,7 @@ async def reindex(body: ReindexRequest, request: Request):
     indexer = request.app.state.indexer
     indexer.ensure_collection(body.collection)
 
-    base_path = Path(body.path) if body.path else None
+    base_path = _validate_path(body.path) if body.path else None
     indexed = 0
 
     if base_path is not None:
