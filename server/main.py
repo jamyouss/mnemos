@@ -57,7 +57,7 @@ def create_app() -> FastAPI:
     app = FastAPI(title="RAG MCP Server", lifespan=lifespan)
 
     # --- MCP SSE transport ---
-    sse_transport = SseServerTransport("/mcp/messages/")
+    sse_transport = SseServerTransport("/messages/")
 
     async def handle_sse(request: Request) -> Response:
         mcp_server = _mcp_server_holder.get("server")
