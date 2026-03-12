@@ -48,15 +48,13 @@ By default the server mounts `~/Developments/Projects/digital-gigafactory` as th
 On first run, create the Qdrant collections:
 
 ```bash
-docker compose exec rag-server python scripts/init_collections.py
+PYTHONPATH=packages python scripts/init_collections.py
 ```
 
-Or from your host if you have Python available:
-
-```bash
-pip install qdrant-client
-QDRANT_HOST=localhost QDRANT_PORT=6333 python scripts/init_collections.py
-```
+> **Note**: Requires `qdrant-client` installed locally (`pip install qdrant-client`), or use the project venv:
+> ```bash
+> venv/bin/python scripts/init_collections.py
+> ```
 
 ### 3. Trigger an initial reindex
 
