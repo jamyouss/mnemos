@@ -48,6 +48,10 @@ By default the server mounts `~/Developments/Projects/digital-gigafactory` as th
 The watcher only picks up file changes. To index existing content, install and use the CLI:
 
 ```bash
+# Create and activate a virtual environment (once)
+python3 -m venv venv
+source venv/bin/activate
+
 # Install the CLI (once)
 pip install -e cli/
 
