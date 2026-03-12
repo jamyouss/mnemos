@@ -11,6 +11,7 @@ from starlette.responses import Response
 from starlette.routing import Mount, Route
 
 from server.config import settings
+from server.api import api_router
 from rag_core.embeddings import EmbeddingService
 from rag_core.indexer import Indexer
 
@@ -76,6 +77,8 @@ def create_app() -> FastAPI:
     @app.get("/health")
     async def health():
         return {"status": "healthy"}
+
+    app.include_router(api_router)
 
     return app
 
