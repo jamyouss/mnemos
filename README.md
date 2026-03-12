@@ -45,28 +45,28 @@ By default the server mounts `~/Developments/Projects/digital-gigafactory` as th
 
 ### 2. Trigger an initial reindex
 
-The watcher only picks up file changes. To index existing content, trigger a reindex via the REST API. Paths must be **container paths** (the server reads files from its own filesystem):
+The watcher only picks up file changes. To index existing content, install and use the CLI:
 
 ```bash
+# Install the CLI (once)
+pip install -e cli/
+
 # Reindex all skills
-curl -X POST http://localhost:8100/api/reindex \
-  -H 'Content-Type: application/json' \
-  -d '{"collection": "rag_skills", "path": "/data/claude-config/skills", "full": true}'
+rag reindex --collection rag_skills --path /data/claude-config/skills --full
 
 # Reindex documentation
-curl -X POST http://localhost:8100/api/reindex \
-  -H 'Content-Type: application/json' \
-  -d '{"collection": "rag_docs", "path": "/data/claude-config/docs", "full": true}'
+rag reindex --collection rag_docs --path /data/claude-config/docs --full
 
 # Reindex the moby codebase
-curl -X POST http://localhost:8100/api/reindex \
-  -H 'Content-Type: application/json' \
-  -d '{"collection": "rag_code_moby", "path": "/data/codebase/moby", "full": true}'
+rag reindex --collection rag_code_moby --path /data/codebase/moby --full
 ```
 
-> **Path mapping** (from `docker-compose.yml`):
-> - `~/Developments/Projects/digital-gigafactory` → `/data/codebase`
-> - `~/.claude` → `/data/claude-config`
+> **Note:** Paths must be **container paths** since the server reads files from its own filesystem.
+>
+> | Host path | Container path |
+> |-----------|---------------|
+> | `~/Developments/Projects/digital-gigafactory` | `/data/codebase` |
+> | `~/.claude` | `/data/claude-config` |
 
 ### 3. Verify
 
