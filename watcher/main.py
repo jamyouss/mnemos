@@ -14,6 +14,7 @@ logger = logging.getLogger("rag-watcher")
 
 IGNORE_PATTERNS = [
     "node_modules/",
+    ".pnpm-store/",
     "vendor/",
     ".git/",
     "dist/",
