@@ -7,9 +7,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install shared rag_core package first for layer caching
+# Copy and install rag_core dependencies
 COPY packages/rag_core /app/packages/rag_core
-RUN pip install --no-cache-dir /app/packages/rag_core
+RUN pip install --no-cache-dir \
+    "qdrant-client>=1.9.0" \
+    "sentence-transformers>=2.6.0" \
+    "tree-sitter>=0.22.0" \
+    "tree-sitter-go>=0.21.0" \
+    "pydantic>=2.6.0"
+
+# Make rag_core importable
+ENV PYTHONPATH="/app/packages:${PYTHONPATH}"
 
 # Install server dependencies
 COPY server/requirements.txt /app/server/requirements.txt
