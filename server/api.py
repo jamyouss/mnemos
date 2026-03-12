@@ -207,6 +207,19 @@ async def search_skills(body: SearchSkillsRequest, request: Request):
 # ---------------------------------------------------------------------------
 
 
+_REINDEX_IGNORE_DIRS = {
+    "node_modules", ".pnpm-store", "vendor", ".git", "dist", "build",
+    ".nuxt", ".output", "__pycache__", ".venv", "venv",
+}
+
+_REINDEX_IGNORE_EXTS = {".min.js", ".map", ".lock", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".woff", ".woff2", ".ttf", ".eot", ".svg", ".pdf", ".zip", ".tar", ".gz", ".exe", ".bin", ".so", ".dylib"}
+
+
+def _should_skip(fp) -> bool:
+    parts = set(fp.parts)
+    return bool(parts & _REINDEX_IGNORE_DIRS) or fp.suffix in _REINDEX_IGNORE_EXTS
+
+
 def _run_reindex(indexer, collection: str, base_path, full: bool) -> None:
     """Background task: walk files and index them."""
     import logging
@@ -216,7 +229,7 @@ def _run_reindex(indexer, collection: str, base_path, full: bool) -> None:
     indexed = 0
     skipped = 0
     for fp in files:
-        if fp.is_file():
+        if fp.is_file() and not _should_skip(fp):
             try:
                 content = fp.read_text(encoding="utf-8")
                 indexed += indexer.index_file(
