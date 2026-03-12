@@ -376,7 +376,7 @@ async def api_status(request: Request):
         try:
             info = qdrant.get_collection(coll.name)
             index_info[coll.name] = {
-                "vectors_count": info.vectors_count,
+                "vectors_count": info.indexed_vectors_count,
                 "points_count": info.points_count,
                 "status": str(info.status),
             }
