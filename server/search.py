@@ -49,12 +49,12 @@ class SearchService:
 
             query_filter = Filter(must=must_conditions) if must_conditions else None
 
-            hits = self._qdrant.search(
+            hits = self._qdrant.query_points(
                 collection_name=coll_name,
-                query_vector=vector,
+                query=vector,
                 query_filter=query_filter,
                 limit=limit,
-            )
+            ).points
             for hit in hits:
                 all_results.append(
                     SearchResult(
@@ -108,12 +108,12 @@ class SearchService:
 
             query_filter = Filter(must=must_conditions) if must_conditions else None
 
-            hits = self._qdrant.search(
+            hits = self._qdrant.query_points(
                 collection_name=coll_name,
-                query_vector=vector,
+                query=vector,
                 query_filter=query_filter,
                 limit=limit,
-            )
+            ).points
             for hit in hits:
                 all_results.append(
                     CodeSearchResult(
@@ -134,11 +134,11 @@ class SearchService:
 
     def search_skills(self, query: str, limit: int = 3) -> list[SkillResult]:
         vector = self._embeddings.embed(query)
-        hits = self._qdrant.search(
+        hits = self._qdrant.query_points(
             collection_name="rag_skills",
-            query_vector=vector,
+            query=vector,
             limit=limit,
-        )
+        ).points
         return [
             SkillResult(
                 skill_name=hit.payload.get("skill_name", ""),
@@ -170,12 +170,12 @@ class SearchService:
                 FieldCondition(key="memory_type", match=MatchValue(value=memory_type))
             )
 
-        hits = self._qdrant.search(
+        hits = self._qdrant.query_points(
             collection_name="rag_memory",
-            query_vector=vector,
+            query=vector,
             query_filter=Filter(must=must_conditions),
             limit=limit,
-        )
+        ).points
         return [
             MemoryResult(
                 id=hit.payload.get("id", ""),
