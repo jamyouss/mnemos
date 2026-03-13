@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from mcp.server import Server
 from mcp.server.sse import SseServerTransport
+from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from qdrant_client import QdrantClient
 from starlette.requests import Request
 from starlette.responses import Response
@@ -17,9 +18,8 @@ from rag_core.indexer import Indexer
 
 
 def create_app() -> FastAPI:
-    # Placeholder mcp_server; replaced in lifespan once real services are up.
-    # This allows the SSE route to be registered before lifespan runs.
     _mcp_server_holder: dict[str, Server] = {}
+    _session_manager_holder: dict[str, StreamableHTTPSessionManager] = {}
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -49,14 +49,34 @@ def create_app() -> FastAPI:
             qdrant_client=app.state.qdrant,
             embedding_service=app.state.embeddings,
         )
-        app.state.mcp_server = mcp_server
         _mcp_server_holder["server"] = mcp_server
-        yield
+
+        # Streamable HTTP session manager
+        session_manager = StreamableHTTPSessionManager(
+            app=mcp_server,
+            json_response=True,
+        )
+        _session_manager_holder["mgr"] = session_manager
+
+        async with session_manager.run():
+            yield
+
         app.state.qdrant.close()
 
     app = FastAPI(title="RAG MCP Server", lifespan=lifespan)
 
-    # --- MCP SSE transport ---
+    # --- MCP Streamable HTTP transport (modern) ---
+    async def mcp_http_handler(scope, receive, send):
+        mgr = _session_manager_holder.get("mgr")
+        if mgr is None:
+            response = Response("MCP server not initialised", status_code=503)
+            await response(scope, receive, send)
+            return
+        await mgr.handle_request(scope, receive, send)
+
+    app.mount("/mcp", app=mcp_http_handler)
+
+    # --- MCP SSE transport (legacy, for older clients) ---
     sse_transport = SseServerTransport("/messages/")
 
     async def handle_sse(request: Request) -> Response:
@@ -74,8 +94,8 @@ def create_app() -> FastAPI:
         return Response()
 
     app.mount(
-        "/mcp",
-        app=_build_mcp_starlette_app(sse_transport, handle_sse),
+        "/mcp-sse",
+        app=_build_sse_app(sse_transport, handle_sse),
     )
 
     # --- REST endpoints ---
@@ -88,10 +108,7 @@ def create_app() -> FastAPI:
     return app
 
 
-def _build_mcp_starlette_app(
-    sse_transport: SseServerTransport,
-    handle_sse,
-):
+def _build_sse_app(sse_transport: SseServerTransport, handle_sse):
     """Return a minimal Starlette ASGI app with SSE + message routes."""
     from starlette.applications import Starlette
 
