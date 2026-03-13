@@ -208,16 +208,52 @@ async def search_skills(body: SearchSkillsRequest, request: Request):
 
 
 _REINDEX_IGNORE_DIRS = {
-    "node_modules", ".pnpm-store", "vendor", ".git", "dist", "build",
-    ".nuxt", ".output", "__pycache__", ".venv", "venv",
+    # Dependencies & package managers
+    "node_modules", ".pnpm-store", "vendor",
+    # Version control
+    ".git",
+    # Build outputs
+    "dist", "build", ".nuxt", ".output",
+    # Caches & tooling
+    "__pycache__", ".nx", ".cache", ".pytest_cache", ".storybook",
+    # IDE & editors
+    ".idea", ".vscode",
+    # Virtualenvs
+    ".venv", "venv",
+    # Test artifacts
+    "test-results", "coverage",
 }
 
-_REINDEX_IGNORE_EXTS = {".min.js", ".map", ".lock", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".woff", ".woff2", ".ttf", ".eot", ".svg", ".pdf", ".zip", ".tar", ".gz", ".exe", ".bin", ".so", ".dylib"}
+_REINDEX_IGNORE_EXTS = {
+    ".min.js", ".map", ".lock",
+    # Logs & generated data
+    ".log",
+    # Binary & compiled
+    ".pyc", ".o", ".a",
+    # Images & fonts
+    ".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg",
+    ".woff", ".woff2", ".ttf", ".eot",
+    # Archives & binaries
+    ".pdf", ".zip", ".tar", ".gz", ".exe", ".bin", ".so", ".dylib",
+}
+
+_REINDEX_IGNORE_FILENAMES = {
+    "CHANGELOG.md",
+    "pnpm-lock.yaml",
+    "package-lock.json",
+    "yarn.lock",
+    "poetry.lock",
+    ".last-run.json",
+}
 
 
 def _should_skip(fp) -> bool:
     parts = set(fp.parts)
-    return bool(parts & _REINDEX_IGNORE_DIRS) or fp.suffix in _REINDEX_IGNORE_EXTS
+    return (
+        bool(parts & _REINDEX_IGNORE_DIRS)
+        or fp.suffix in _REINDEX_IGNORE_EXTS
+        or fp.name in _REINDEX_IGNORE_FILENAMES
+    )
 
 
 def _run_reindex(indexer, collection: str, base_path, full: bool) -> None:

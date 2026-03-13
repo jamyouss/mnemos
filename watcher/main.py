@@ -13,27 +13,66 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("rag-watcher")
 
 IGNORE_PATTERNS = [
+    # Dependencies & package managers
     "node_modules/",
     ".pnpm-store/",
     "vendor/",
+    # Version control
     ".git/",
+    # Build outputs
     "dist/",
     "build/",
     ".nuxt/",
     ".output/",
+    # Caches & tooling
     "__pycache__/",
+    ".nx/",
+    ".cache/",
+    ".pytest_cache/",
+    ".storybook/",
+    # IDE & editors
+    ".idea/",
+    ".vscode/",
+    # Virtualenvs
+    ".venv/",
+    "venv/",
+    # Test artifacts
+    "test-results/",
+    "coverage/",
 ]
 
-IGNORE_EXTENSIONS = [".min.js", ".map", ".lock"]
+IGNORE_EXTENSIONS = [
+    ".min.js", ".map", ".lock",
+    # Logs & generated data
+    ".log",
+    # Binary & compiled
+    ".pyc", ".o", ".a",
+    # Images & fonts
+    ".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg",
+    ".woff", ".woff2", ".ttf", ".eot",
+    # Archives & binaries
+    ".pdf", ".zip", ".tar", ".gz", ".exe", ".bin", ".so", ".dylib",
+]
+
+IGNORE_FILENAMES = [
+    "CHANGELOG.md",
+    "pnpm-lock.yaml",
+    "package-lock.json",
+    "yarn.lock",
+    "poetry.lock",
+    ".last-run.json",
+]
 
 RAG_SERVER_URL = os.getenv("RAG_SERVER_URL", "http://rag-server:8100")
 DEBOUNCE_MS = int(os.getenv("WATCHER_DEBOUNCE_MS", "2000"))
 
 
 def should_ignore(path: str) -> bool:
+    basename = path.rsplit("/", 1)[-1] if "/" in path else path
     return (
         any(pattern in path for pattern in IGNORE_PATTERNS)
         or any(path.endswith(ext) for ext in IGNORE_EXTENSIONS)
+        or basename in IGNORE_FILENAMES
     )
 
 
