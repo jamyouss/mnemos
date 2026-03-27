@@ -1,0 +1,47 @@
+<svg width="400" height="80" viewBox="0 0 400 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Brain/memory icon base -->
+  <!-- Left hemisphere -->
+  <path d="M20 40 C20 28 26 18 36 18 C40 18 43 20 44 23" stroke="#a78bfa" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  <path d="M20 40 C20 52 26 58 36 58 C40 58 43 56 44 53" stroke="#a78bfa" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  <path d="M20 40 C16 40 14 35 16 30" stroke="#a78bfa" stroke-width="2" fill="none" stroke-linecap="round" opacity="0.6"/>
+  <path d="M20 40 C16 40 14 45 16 50" stroke="#a78bfa" stroke-width="2" fill="none" stroke-linecap="round" opacity="0.6"/>
+
+  <!-- Right hemisphere -->
+  <path d="M56 40 C56 28 50 18 40 18 C36 18 33 20 32 23" stroke="#7c3aed" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  <path d="M56 40 C56 52 50 58 40 58 C36 58 33 56 32 53" stroke="#7c3aed" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  <path d="M56 40 C60 40 62 35 60 30" stroke="#7c3aed" stroke-width="2" fill="none" stroke-linecap="round" opacity="0.6"/>
+  <path d="M56 40 C60 40 62 45 60 50" stroke="#7c3aed" stroke-width="2" fill="none" stroke-linecap="round" opacity="0.6"/>
+
+  <!-- Center stem -->
+  <line x1="38" y1="18" x2="38" y2="58" stroke="#8b5cf6" stroke-width="2" opacity="0.4"/>
+
+  <!-- Neural nodes -->
+  <circle cx="38" cy="30" r="3" fill="#7c3aed"/>
+  <circle cx="38" cy="40" r="3.5" fill="#6d28d9"/>
+  <circle cx="38" cy="50" r="3" fill="#7c3aed"/>
+  <circle cx="26" cy="34" r="2.5" fill="#8b5cf6"/>
+  <circle cx="26" cy="46" r="2.5" fill="#8b5cf6"/>
+  <circle cx="50" cy="34" r="2.5" fill="#6d28d9"/>
+  <circle cx="50" cy="46" r="2.5" fill="#6d28d9"/>
+
+  <!-- Node connections -->
+  <line x1="26" y1="34" x2="38" y2="30" stroke="#7c3aed" stroke-width="1" opacity="0.35"/>
+  <line x1="26" y1="34" x2="38" y2="40" stroke="#7c3aed" stroke-width="1" opacity="0.35"/>
+  <line x1="26" y1="46" x2="38" y2="40" stroke="#7c3aed" stroke-width="1" opacity="0.35"/>
+  <line x1="26" y1="46" x2="38" y2="50" stroke="#7c3aed" stroke-width="1" opacity="0.35"/>
+  <line x1="50" y1="34" x2="38" y2="30" stroke="#7c3aed" stroke-width="1" opacity="0.35"/>
+  <line x1="50" y1="34" x2="38" y2="40" stroke="#7c3aed" stroke-width="1" opacity="0.35"/>
+  <line x1="50" y1="46" x2="38" y2="40" stroke="#7c3aed" stroke-width="1" opacity="0.35"/>
+  <line x1="50" y1="46" x2="38" y2="50" stroke="#7c3aed" stroke-width="1" opacity="0.35"/>
+
+  <!-- Search magnifier accent -->
+  <circle cx="54" cy="52" r="5" stroke="#a78bfa" stroke-width="1.8" fill="none" opacity="0.5"/>
+  <line x1="58" y1="56" x2="62" y2="60" stroke="#a78bfa" stroke-width="1.8" stroke-linecap="round" opacity="0.5"/>
+
+  <!-- Text: Mnemos -->
+  <text x="78" y="38" fill="#0f172a" font-family="system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="30" font-weight="700" letter-spacing="1">Mne</text>
+  <text x="145" y="38" fill="#7c3aed" font-family="system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="30" font-weight="700" letter-spacing="1">mos</text>
+
+  <!-- Tagline -->
+  <text x="78" y="56" fill="#64748b" font-family="system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="13" font-weight="400">Semantic memory for AI coding agents</text>
+</svg>
