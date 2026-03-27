@@ -1,6 +1,6 @@
-# RAG MCP Server
+# Mnemos
 
-A local RAG (Retrieval-Augmented Generation) server that indexes your codebase, skills, documentation, and conversation memory into a Qdrant vector database. Exposes both a REST API and an MCP (Model Context Protocol) server over SSE so AI assistants can search your indexed content semantically.
+Mnemos is an MCP server that brings RAG-powered context retrieval to your Claude agents — semantic search over your codebase, docs, and notes via embeddings + Qdrant.
 
 ## Architecture Overview
 
@@ -9,22 +9,23 @@ A local RAG (Retrieval-Augmented Generation) server that indexes your codebase, 
                      │   Claude Code / AI   │
                      │      (MCP client)    │
                      └──────────┬──────────┘
-                                │ SSE (MCP)
+                                │ Streamable HTTP (MCP)
                      ┌──────────▼──────────┐
-                     │    rag-server :8100  │
+                     │   mnemos-server      │
+                     │   :8100              │
                      │  FastAPI + MCP tools │
                      └──────────┬──────────┘
           ┌─────────────────────┼─────────────────────┐
           │                     │                     │
 ┌─────────▼────────┐  ┌─────────▼────────┐  ┌────────▼─────────┐
-│  Qdrant :6333    │  │  watcher service │  │   rag CLI        │
+│  Qdrant :6333    │  │  watcher service │  │   mnemos CLI     │
 │  Vector DB       │  │  (file watcher)  │  │  (local client)  │
 └──────────────────┘  └──────────────────┘  └──────────────────┘
 ```
 
 - **Embedding model**: `all-MiniLM-L6-v2` (384 dimensions, runs locally)
 - **Vector DB**: Qdrant
-- **Transport**: MCP over SSE at `http://localhost:8100/mcp/sse`
+- **Transport**: MCP over Streamable HTTP at `http://localhost:8100/mcp`
 
 ---
 
@@ -38,7 +39,7 @@ docker compose up -d
 
 This starts three services:
 - `qdrant` — vector database on port 6333
-- `rag-server` — FastAPI + MCP server on port 8100
+- `mnemos-server` — FastAPI + MCP server on port 8100
 - `watcher` — file system watcher that auto-indexes changes
 
 By default the server mounts `~/Developments/Projects/digital-gigafactory` as the codebase and `~/.claude` as the config/skills directory. Edit `docker-compose.yml` to point these volumes at your paths.
@@ -206,16 +207,16 @@ rag memory reject <id>
 
 ## MCP Integration
 
-The server exposes an MCP endpoint over SSE. Configure your AI assistant to connect to it.
+Mnemos exposes an MCP endpoint over Streamable HTTP. Configure your AI assistant to connect to it.
 
-### Claude Code (`~/.claude/claude_desktop_config.json`)
+### Claude Code (`~/.claude/settings.json`)
 
 ```json
 {
   "mcpServers": {
-    "rag": {
-      "type": "sse",
-      "url": "http://localhost:8100/mcp/sse"
+    "mnemos": {
+      "type": "url",
+      "url": "http://localhost:8100/mcp"
     }
   }
 }
@@ -226,8 +227,9 @@ The server exposes an MCP endpoint over SSE. Configure your AI assistant to conn
 ```json
 {
   "mcpServers": {
-    "rag": {
-      "url": "http://localhost:8100/mcp/sse"
+    "mnemos": {
+      "type": "url",
+      "url": "http://localhost:8100/mcp"
     }
   }
 }
@@ -461,7 +463,7 @@ jobs:
 
 ## Environment Variables
 
-### Server (`rag-server`)
+### Server (`mnemos-server`)
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -487,7 +489,7 @@ jobs:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `RAG_URL` | `http://localhost:8100` | Base URL of the RAG server |
+| `RAG_URL` | `http://localhost:8100` | Base URL of the Mnemos server |
 
 ---
 
@@ -534,7 +536,7 @@ pytest tests/
 ### Project structure
 
 ```
-rag-mcp/
+mnemos/
 ├── packages/
 │   └── rag_core/           # Shared library: models, embeddings, chunkers, indexer
 │       ├── chunkers/       # Language-aware chunkers (Go, Vue, Markdown, fallback)
@@ -545,7 +547,7 @@ rag-mcp/
 ├── server/                 # FastAPI + MCP server (port 8100)
 │   ├── api.py              # REST endpoints (search, reindex, memory, status)
 │   ├── config.py           # Settings via pydantic-settings
-│   ├── main.py             # App factory, MCP SSE mount
+│   ├── main.py             # App factory, MCP mount
 │   ├── mcp_tools.py        # MCP tool definitions and dispatch
 │   └── search.py           # SearchService
 ├── watcher/                # File watcher service
