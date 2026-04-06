@@ -167,6 +167,41 @@ export MNEMOS_URL=http://localhost:8100
 | `mnemos_reindex` | Trigger collection reindexing |
 | `mnemos_status` | Get status of all collections |
 
+## Recommended Agent Instructions
+
+To make your AI agent use Mnemos as the primary search mechanism, add the following to your `~/.claude/CLAUDE.md` (or equivalent agent config):
+
+```markdown
+## Mnemos MCP — Search Priority
+
+**ALWAYS try Mnemos MCP tools before falling back to traditional search (Grep, Glob, Read).** Mnemos provides semantic search across your indexed codebase, docs, skills, and memory — it is faster and more relevant than text-based search for most questions.
+
+### Search Order
+
+1. **First**: Use Mnemos MCP tools based on intent:
+   - `mnemos_search_code` — looking for functions, types, patterns, implementations
+   - `mnemos_search` — general cross-collection search (docs + code + skills)
+   - `mnemos_search_skills` — finding relevant agent skills
+   - `mnemos_search_memory` — past decisions, conventions, lessons learned
+   - `mnemos_status` — check if Mnemos is available and collections are populated
+
+2. **Fallback only if Mnemos returns no useful results**:
+   - No results at all, OR
+   - Results have low relevance scores (< 0.5), OR
+   - `mnemos_status` shows collection is empty or Mnemos is down
+
+   Then use Grep / Glob / Read as usual.
+
+3. **Always store insights**: After resolving a non-trivial question, use `mnemos_memory` to store the decision, pattern, or lesson — so future sessions benefit.
+
+### When to skip Mnemos
+
+- Reading a specific known file path → use Read directly
+- Listing directory contents → use Glob directly
+- Checking git state → use git commands directly
+- Searching in files just created in current session (not yet indexed)
+```
+
 ## Tech Stack
 
 | Layer | Technology |
