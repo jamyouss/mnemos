@@ -1,0 +1,41 @@
+#!/bin/sh
+# Mnemos global pre-push hook.
+# Extracts memories from all commits being pushed.
+# Non-blocking and fail-safe — never blocks git operations.
+
+HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$HOOK_DIR/mnemos-common.sh"
+
+# 1. Chain to repo-local hook
+mnemos_chain_local "pre-push" "$@"
+
+# 2. Check if this repo is watched
+mnemos_is_watched_repo || exit 0
+
+# 3. Check trigger config
+case "$MNEMOS_HOOK_TRIGGER" in
+    pre-push|both) ;;
+    *) exit 0 ;;
+esac
+
+# 4. Extract from all commits being pushed
+while read local_ref local_sha remote_ref remote_sha; do
+    if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
+        # New branch — diff against main/master
+        BASE=$(git rev-parse --verify origin/main 2>/dev/null \
+            || git rev-parse --verify origin/master 2>/dev/null \
+            || echo "")
+    else
+        BASE="$remote_sha"
+    fi
+
+    if [ -z "$BASE" ]; then
+        continue
+    fi
+
+    COMMIT_MSGS=$(git log --pretty=%B "$BASE".."$local_sha" 2>/dev/null || echo "")
+    DIFF=$(git diff "$BASE".."$local_sha" 2>/dev/null || echo "")
+    mnemos_extract "$COMMIT_MSGS" "$DIFF"
+done
+
+exit 0

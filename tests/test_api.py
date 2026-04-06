@@ -57,6 +57,17 @@ def app():
             embedding_service=mock_embeddings,
         )
 
+        mock_deduplicator = MagicMock()
+        from rag_core.models import DeduplicationResult
+        mock_deduplicator.deduplicate_and_store.return_value = DeduplicationResult(
+            action="inserted", memory_id="mock-dedup-id"
+        )
+        application.state.deduplicator = mock_deduplicator
+
+        mock_extractor = MagicMock()
+        mock_extractor.extract.return_value = []
+        application.state.memory_extractor = mock_extractor
+
         yield application
 
 
@@ -100,7 +111,7 @@ async def test_api_search_with_options(app):
             "/api/search",
             json={
                 "query": "auth middleware",
-                "collections": ["rag_code_moby"],
+                "collections": ["mnemos_code_moby"],
                 "file_types": ["go"],
                 "path_filter": "/src/auth.go",
                 "limit": 3,
@@ -157,7 +168,7 @@ async def test_api_push_index(app):
             "/api/index",
             json={
                 "file_path": "/data/codebase/src/main.go",
-                "collection": "rag_code_moby",
+                "collection": "mnemos_code_moby",
                 "content": "package main\n\nfunc main() {}\n",
             },
         )
@@ -175,11 +186,11 @@ async def test_api_push_index(app):
 async def test_api_delete_index(app):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.delete("/api/index/rag_code_moby/src/main.go")
+        response = await client.delete("/api/index/mnemos_code_moby/src/main.go")
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "deleted"
-    assert data["collection"] == "rag_code_moby"
+    assert data["collection"] == "mnemos_code_moby"
 
 
 # ---------------------------------------------------------------------------
@@ -193,12 +204,12 @@ async def test_api_reindex(app):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
             "/api/reindex",
-            json={"collection": "rag_code_moby", "full": False},
+            json={"collection": "mnemos_code_moby", "full": False},
         )
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "no_path"
-    assert data["collection"] == "rag_code_moby"
+    assert data["collection"] == "mnemos_code_moby"
 
 
 # ---------------------------------------------------------------------------
@@ -244,6 +255,7 @@ async def test_api_memory_create(app):
     data = response.json()
     assert data["status"] == "created"
     assert "id" in data
+    assert "action" in data
 
 
 @pytest.mark.anyio
@@ -323,7 +335,7 @@ async def test_internal_reindex_path_traversal_rejected(app):
             json={
                 "file_path": "/etc/passwd",
                 "event": "modified",
-                "collection": "rag_code_moby",
+                "collection": "mnemos_code_moby",
             },
         )
     assert response.status_code == 400
@@ -340,7 +352,7 @@ async def test_internal_reindex_deleted_event(app):
             json={
                 "file_path": "/data/codebase/src/main.go",
                 "event": "deleted",
-                "collection": "rag_code_moby",
+                "collection": "mnemos_code_moby",
             },
         )
     assert response.status_code == 200

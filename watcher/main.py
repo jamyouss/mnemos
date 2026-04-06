@@ -63,7 +63,7 @@ IGNORE_FILENAMES = [
     ".last-run.json",
 ]
 
-RAG_SERVER_URL = os.getenv("RAG_SERVER_URL", "http://rag-server:8100")
+RAG_SERVER_URL = os.getenv("MNEMOS_SERVER_URL", "http://rag-server:8100")
 DEBOUNCE_MS = int(os.getenv("WATCHER_DEBOUNCE_MS", "2000"))
 
 
@@ -85,19 +85,19 @@ class PathRouter:
         if abs_path.startswith(self._config_root + "/"):
             rel = abs_path[len(self._config_root) + 1:]
             if rel.startswith("skills/"):
-                return "rag_skills", rel
+                return "mnemos_skills", rel
             if rel.startswith("docs/"):
-                return "rag_docs", rel
+                return "mnemos_docs", rel
             return None
 
         if abs_path.startswith(self._codebase_root + "/"):
             rel = abs_path[len(self._codebase_root) + 1:]
             if rel.startswith("moby/"):
-                return "rag_code_moby", rel
+                return "mnemos_code_moby", rel
             if rel.startswith("trevio/"):
-                return "rag_code_trevio", rel
+                return "mnemos_code_trevio", rel
             if rel.startswith("infra/") or rel.startswith("github-cicd/"):
-                return "rag_code_infra", rel
+                return "mnemos_code_infra", rel
             return None
 
         return None

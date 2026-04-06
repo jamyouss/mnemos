@@ -13,32 +13,32 @@ class CollectionConfig:
 
 COLLECTIONS = [
     CollectionConfig(
-        name="rag_skills",
+        name="mnemos_skills",
         path_prefixes=["skills/"],
         description="Claude Code skills (metadata + instructions)",
     ),
     CollectionConfig(
-        name="rag_docs",
+        name="mnemos_docs",
         path_prefixes=["docs/"],
         description="Architecture and pattern documentation",
     ),
     CollectionConfig(
-        name="rag_memory",
+        name="mnemos_memory",
         path_prefixes=None,
         description="Conversation memory entries",
     ),
     CollectionConfig(
-        name="rag_code_moby",
+        name="mnemos_code_moby",
         path_prefixes=["moby/"],
         description="Moby application codebase",
     ),
     CollectionConfig(
-        name="rag_code_trevio",
+        name="mnemos_code_trevio",
         path_prefixes=["trevio/"],
         description="Trevio platform codebase",
     ),
     CollectionConfig(
-        name="rag_code_infra",
+        name="mnemos_code_infra",
         path_prefixes=["infra/", "github-cicd/"],
         description="Infrastructure and CI/CD",
     ),

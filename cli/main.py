@@ -14,7 +14,7 @@ DEFAULT_RAG_URL = "http://localhost:8100"
 
 
 def _base_url() -> str:
-    return os.environ.get("RAG_URL", DEFAULT_RAG_URL).rstrip("/")
+    return os.environ.get("MNEMOS_URL", DEFAULT_RAG_URL).rstrip("/")
 
 
 def _handle_http_error(exc: Exception) -> None:
@@ -29,7 +29,7 @@ def _handle_http_error(exc: Exception) -> None:
 
 @click.group()
 def cli() -> None:
-    """RAG MCP CLI — search, reindex, and manage memory."""
+    """Mnemos CLI — search, reindex, and manage memory."""
 
 
 # ---------------------------------------------------------------------------

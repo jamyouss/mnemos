@@ -15,7 +15,7 @@
 
 ---
 
-Mnemos is an MCP server that brings RAG-powered context retrieval to your AI coding agents. It runs entirely locally, indexes your files automatically, and integrates with any MCP-compatible client like Claude Code or Claude Desktop.
+Mnemos is an intelligent memory layer for AI coding agents. It runs entirely locally, indexes your codebase automatically, extracts memories from your git history, and integrates with any MCP-compatible client like Claude Code or Claude Desktop.
 
 ## Features
 
@@ -25,16 +25,18 @@ Mnemos is an MCP server that brings RAG-powered context retrieval to your AI cod
 - **Skill discovery** -- Find relevant agent skills by semantic similarity
 - **Memory search** -- Query approved conversation memory entries
 
+### Smart Memory
+- **Auto-extraction from commits** -- Ollama analyzes your git diffs to extract decisions, patterns, and lessons learned
+- **Deduplication with merge** -- Similar memories are automatically detected and consolidated via LLM
+- **Approval workflow** -- Extracted memories start as pending, require review before surfacing in search
+- **Project scoping** -- Tag memories by project for targeted retrieval
+- **Configurable strategy** -- Choose merge or replace for duplicate handling
+
 ### Automatic Indexing
 - **File watcher** -- Monitors your codebase and config directories, indexes changes on the fly
 - **Language-aware chunking** -- Go files split by declarations, Vue by sections, Markdown by headings
 - **Incremental reindex** -- Only re-processes changed files
 - **Push API** -- Send file content directly for CI/CD integration
-
-### Memory Management
-- **Conversation memory** -- Store decisions, patterns, and lessons learned
-- **Approval workflow** -- New memories start as pending, require review before surfacing in search
-- **Project scoping** -- Tag memories by project for targeted retrieval
 
 ### Deployed Mode
 - **Multi-tenant** -- API key auth with per-tenant collection prefixes
@@ -46,11 +48,19 @@ Mnemos is an MCP server that brings RAG-powered context retrieval to your AI cod
 ### Prerequisites
 
 - Docker & Docker Compose
+- [Ollama](https://ollama.ai) (for memory extraction) or use the bundled service
 
 ### Development
 
 ```bash
+# Start core services
 docker compose up -d
+
+# Optional: start with Ollama for memory extraction
+docker compose --profile llm up -d
+
+# Pull the default model (if using local Ollama)
+ollama pull llama3.1:8b
 ```
 
 This starts three services:
@@ -68,9 +78,9 @@ The watcher only picks up changes. To index existing content:
 python3 -m venv venv && source venv/bin/activate
 pip install -e cli/
 
-rag reindex --collection rag_skills --path /data/claude-config/skills --full
-rag reindex --collection rag_docs --path /data/claude-config/docs --full
-rag reindex --collection rag_code_moby --path /data/codebase/moby --full
+mnemos reindex --collection mnemos_skills --path /data/claude-config/skills --full
+mnemos reindex --collection mnemos_docs --path /data/claude-config/docs --full
+mnemos reindex --collection mnemos_code_moby --path /data/codebase/moby --full
 ```
 
 > **Note:** Paths are **container paths**. By default `~/Developments/Projects/digital-gigafactory` maps to `/data/codebase` and `~/.claude` maps to `/data/claude-config`. Edit `docker-compose.yml` to change.
@@ -78,7 +88,41 @@ rag reindex --collection rag_code_moby --path /data/codebase/moby --full
 ### Verify
 
 ```bash
-rag status
+mnemos status
+```
+
+## Git Hooks Setup
+
+Mnemos can automatically extract memories from your git commits using global hooks.
+
+### Install
+
+```bash
+./scripts/install-hooks.sh --global --watch ~/Developments/Projects/digital-gigafactory
+```
+
+This:
+1. Copies hooks to `~/.config/git/hooks/`
+2. Sets `git config --global core.hooksPath`
+3. Adds the path to `~/.config/mnemos/repos`
+
+### How it works
+
+- **pre-push** (default): analyzes all commits being pushed, extracts memories
+- **post-commit**: analyzes each commit individually
+- Hooks are **non-blocking** -- they fire and forget, never slow down git
+- Hooks are **fail-safe** -- if Mnemos is unreachable, they silently succeed
+- Hooks **chain** to repo-local hooks in `.git/hooks/` -- existing hooks still work
+- Only triggers for repos listed in `~/.config/mnemos/repos`
+
+### Configuration
+
+```bash
+# Change trigger mode (default: pre-push)
+export MNEMOS_HOOK_TRIGGER=both  # or: pre-push, post-commit
+
+# Change Mnemos server URL (default: http://localhost:8100)
+export MNEMOS_URL=http://localhost:8100
 ```
 
 ## MCP Integration
@@ -113,15 +157,15 @@ rag status
 
 | Tool | Description |
 |------|-------------|
-| `rag_search` | Semantic search across all collections |
-| `rag_search_code` | Code search with language/symbol/project filters |
-| `rag_search_skills` | Find relevant skills by semantic similarity |
-| `rag_search_memory` | Search approved memory entries |
-| `rag_index_memory` | Store a new memory entry (pending) |
-| `rag_memory_list` | List memory entries by project or status |
-| `rag_memory_review` | Approve or reject a pending entry |
-| `rag_reindex` | Trigger collection reindexing |
-| `rag_status` | Get status of all collections |
+| `mnemos_search` | Semantic search across all collections |
+| `mnemos_search_code` | Code search with language/symbol/project filters |
+| `mnemos_search_skills` | Find relevant skills by semantic similarity |
+| `mnemos_search_memory` | Search approved memory entries |
+| `mnemos_memory` | Store a new memory entry (with deduplication) |
+| `mnemos_memory_list` | List memory entries by project or status |
+| `mnemos_memory_review` | Approve or reject a pending entry |
+| `mnemos_reindex` | Trigger collection reindexing |
+| `mnemos_status` | Get status of all collections |
 
 ## Tech Stack
 
@@ -130,6 +174,7 @@ rag status
 | Server | FastAPI, MCP (Streamable HTTP), Python 3.12+ |
 | Embeddings | `all-MiniLM-L6-v2` (384 dims, sentence-transformers) |
 | Vector DB | Qdrant (cosine similarity) |
+| LLM | Ollama (`llama3.1:8b` default, configurable) |
 | Watcher | watchdog, debounced event batching |
 | CLI | Click, Rich |
 | Deployment | Docker Compose, multi-tenant auth |
@@ -138,34 +183,34 @@ rag status
 
 ```bash
 pip install -e cli/
-export RAG_URL=http://localhost:8100
+export MNEMOS_URL=http://localhost:8100
 ```
 
 ### Search
 
 ```bash
-rag search "authentication middleware pattern"
-rag search "error handling" --collection rag_code_moby --file-type go --limit 10
+mnemos search "authentication middleware pattern"
+mnemos search "error handling" --collection mnemos_code_moby --file-type go --limit 10
 
-rag search-code "JWT validation" --language go --symbol-type func --project moby
-rag search-skills "golang microservice development"
+mnemos search-code "JWT validation" --language go --symbol-type func --project moby
+mnemos search-skills "golang microservice development"
 ```
 
 ### Indexing
 
 ```bash
-rag reindex --collection rag_skills --path /data/claude-config/skills
-rag reindex --collection rag_code_moby --path /data/codebase/moby --full
+mnemos reindex --collection mnemos_skills --path /data/claude-config/skills
+mnemos reindex --collection mnemos_code_moby --path /data/codebase/moby --full
 ```
 
 ### Memory
 
 ```bash
-rag memory list
-rag memory list --status approved
-rag memory add "Always use flat resource paths" --project moby --type decision --tags routing
-rag memory approve <id>
-rag memory reject <id>
+mnemos memory list
+mnemos memory list --status approved
+mnemos memory add "Always use flat resource paths" --project moby --type decision --tags routing
+mnemos memory approve <id>
+mnemos memory reject <id>
 ```
 
 ## Collections
@@ -174,12 +219,12 @@ Six collections in Qdrant, all cosine similarity with 384-dimensional vectors:
 
 | Collection | Source | Description |
 |------------|--------|-------------|
-| `rag_skills` | `~/.claude/skills/` | Agent skill definitions |
-| `rag_docs` | `~/.claude/docs/` | Architecture & pattern docs |
-| `rag_memory` | _(API)_ | Memory entries with approval workflow |
-| `rag_code_moby` | `moby/` | Moby codebase (Go, Vue) |
-| `rag_code_trevio` | `trevio/` | Trevio platform (Go, UI modules) |
-| `rag_code_infra` | `infra/`, `github-cicd/` | Infrastructure & CI/CD |
+| `mnemos_skills` | `~/.claude/skills/` | Agent skill definitions |
+| `mnemos_docs` | `~/.claude/docs/` | Architecture & pattern docs |
+| `mnemos_memory` | _(API / git hooks)_ | Memory entries with approval workflow |
+| `mnemos_code_moby` | `moby/` | Moby codebase (Go, Vue) |
+| `mnemos_code_trevio` | `trevio/` | Trevio platform (Go, UI modules) |
+| `mnemos_code_infra` | `infra/`, `github-cicd/` | Infrastructure & CI/CD |
 
 ## Configuration
 
@@ -192,12 +237,18 @@ Six collections in Qdrant, all cosine similarity with 384-dimensional vectors:
 | `EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | Sentence-transformers model |
 | `CODEBASE_PATH` | `/data/codebase` | Root codebase path |
 | `CLAUDE_CONFIG_PATH` | `/data/claude-config` | Claude config path |
-| `RAG_MODE` | `local` | `local` or `deployed` |
-| `RAG_AUTH_ENABLED` | `false` | API key authentication |
-| `RAG_STATE_DIR` | `/data/state` | Persistent state directory |
-| `RAG_SERVER_URL` | `http://rag-server:8100` | RAG server URL (watcher) |
+| `MNEMOS_MODE` | `local` | `local` or `deployed` |
+| `MNEMOS_AUTH_ENABLED` | `false` | API key authentication |
+| `MNEMOS_STATE_DIR` | `/data/state` | Persistent state directory |
+| `MNEMOS_LLM_PROVIDER` | `ollama` | LLM provider |
+| `MNEMOS_LLM_MODEL` | `llama3.1:8b` | Ollama model for extraction |
+| `MNEMOS_OLLAMA_URL` | `http://localhost:11434` | Ollama API URL |
+| `MNEMOS_DEDUP_THRESHOLD` | `0.85` | Cosine similarity threshold for dedup |
+| `MNEMOS_DEDUP_STRATEGY` | `merge` | `merge` or `replace` |
+| `MNEMOS_HOOK_TRIGGER` | `pre-push` | Git hook trigger mode |
+| `MNEMOS_URL` | `http://localhost:8100` | Mnemos server URL (CLI/hooks) |
+| `MNEMOS_SERVER_URL` | `http://rag-server:8100` | Internal server URL (watcher) |
 | `WATCHER_DEBOUNCE_MS` | `2000` | Debounce delay in ms (watcher) |
-| `RAG_URL` | `http://localhost:8100` | Mnemos server URL (CLI) |
 
 ### Deployed Mode
 
@@ -224,10 +275,10 @@ tenants:
 # Index a file
 curl -X POST http://your-server:8100/api/index \
   -H "Content-Type: application/json" \
-  -d '{"file_path": "services/core/handler.go", "collection": "rag_code_moby", "content": "..."}'
+  -d '{"file_path": "services/core/handler.go", "collection": "mnemos_code_moby", "content": "..."}'
 
 # Delete from index
-curl -X DELETE http://your-server:8100/api/index/rag_code_moby/services/core/handler.go
+curl -X DELETE http://your-server:8100/api/index/mnemos_code_moby/services/core/handler.go
 ```
 
 ## Architecture
@@ -235,12 +286,15 @@ curl -X DELETE http://your-server:8100/api/index/rag_code_moby/services/core/han
 ```
 mnemos/
   packages/
-    rag_core/       -- Shared library: models, embeddings, chunkers, indexer
+    rag_core/       -- Shared library: models, embeddings, chunkers, indexer,
+                       memory_extractor, deduplicator
   server/           -- FastAPI + MCP server (port 8100)
   watcher/          -- File watcher service (watchdog)
   cli/              -- Click CLI client
   config/           -- Tenant configuration
-  scripts/          -- Init scripts
+  scripts/
+    hooks/          -- Global git hooks (post-commit, pre-push)
+    install-hooks.sh -- Hook installer
   tests/            -- Test suite
   docker-compose.yml      -- Local development stack
   docker-compose.prod.yml -- Production overrides

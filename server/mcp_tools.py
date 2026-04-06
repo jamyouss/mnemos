@@ -16,7 +16,7 @@ from server.search import SearchService
 # Registry of all tool definitions, used in list_tools and for testing
 TOOL_DEFINITIONS: list[types.Tool] = [
     types.Tool(
-        name="rag_search",
+        name="mnemos_search",
         description="Search across all indexed collections (docs, skills, code) using semantic similarity.",
         inputSchema={
             "type": "object",
@@ -46,7 +46,7 @@ TOOL_DEFINITIONS: list[types.Tool] = [
         },
     ),
     types.Tool(
-        name="rag_search_code",
+        name="mnemos_search_code",
         description="Search code-specific collections for functions, types, or logic.",
         inputSchema={
             "type": "object",
@@ -78,7 +78,7 @@ TOOL_DEFINITIONS: list[types.Tool] = [
         },
     ),
     types.Tool(
-        name="rag_search_skills",
+        name="mnemos_search_skills",
         description="Search Claude Code skills by semantic similarity.",
         inputSchema={
             "type": "object",
@@ -94,7 +94,7 @@ TOOL_DEFINITIONS: list[types.Tool] = [
         },
     ),
     types.Tool(
-        name="rag_search_memory",
+        name="mnemos_search_memory",
         description="Search approved memory entries for past decisions and context.",
         inputSchema={
             "type": "object",
@@ -118,7 +118,7 @@ TOOL_DEFINITIONS: list[types.Tool] = [
         },
     ),
     types.Tool(
-        name="rag_index_memory",
+        name="mnemos_memory",
         description="Store a new memory entry in the RAG memory collection.",
         inputSchema={
             "type": "object",
@@ -150,7 +150,7 @@ TOOL_DEFINITIONS: list[types.Tool] = [
         },
     ),
     types.Tool(
-        name="rag_memory_list",
+        name="mnemos_memory_list",
         description="List memory entries, optionally filtered by project or status.",
         inputSchema={
             "type": "object",
@@ -172,7 +172,7 @@ TOOL_DEFINITIONS: list[types.Tool] = [
         },
     ),
     types.Tool(
-        name="rag_memory_review",
+        name="mnemos_memory_review",
         description="Approve or reject a pending memory entry.",
         inputSchema={
             "type": "object",
@@ -191,7 +191,7 @@ TOOL_DEFINITIONS: list[types.Tool] = [
         },
     ),
     types.Tool(
-        name="rag_reindex",
+        name="mnemos_reindex",
         description="Trigger re-indexing of a collection or all collections.",
         inputSchema={
             "type": "object",
@@ -210,7 +210,7 @@ TOOL_DEFINITIONS: list[types.Tool] = [
         },
     ),
     types.Tool(
-        name="rag_status",
+        name="mnemos_status",
         description="Get the current status of all RAG collections and the indexer.",
         inputSchema={
             "type": "object",
@@ -225,9 +225,10 @@ def create_mcp_server(
     indexer: Indexer,
     qdrant_client: QdrantClient | None = None,
     embedding_service: EmbeddingService | None = None,
+    deduplicator=None,
 ) -> Server:
-    """Create and configure an MCP server with all 9 RAG tools."""
-    server = Server("rag-mcp")
+    """Create and configure an MCP server with all 9 Mnemos tools."""
+    server = Server("mnemos-mcp")
 
     @server.list_tools()
     async def handle_list_tools() -> list[types.Tool]:
@@ -239,7 +240,7 @@ def create_mcp_server(
     ) -> list[types.TextContent]:
         args = arguments or {}
         try:
-            result = await _dispatch_tool(name, args, search_service, indexer, qdrant_client)
+            result = await _dispatch_tool(name, args, search_service, indexer, qdrant_client, deduplicator)
             return [types.TextContent(type="text", text=json.dumps(result, indent=2))]
         except Exception as exc:
             return [types.TextContent(type="text", text=f"Error: {exc}")]
@@ -253,8 +254,9 @@ async def _dispatch_tool(
     search_service: SearchService,
     indexer: Indexer,
     qdrant_client: QdrantClient | None,
+    deduplicator=None,
 ) -> Any:
-    if name == "rag_search":
+    if name == "mnemos_search":
         results = search_service.search(
             query=args["query"],
             collections=args.get("collections"),
@@ -264,7 +266,7 @@ async def _dispatch_tool(
         )
         return [r.model_dump() for r in results]
 
-    if name == "rag_search_code":
+    if name == "mnemos_search_code":
         results = search_service.search_code(
             query=args["query"],
             language=args.get("language"),
@@ -275,14 +277,14 @@ async def _dispatch_tool(
         )
         return [r.model_dump() for r in results]
 
-    if name == "rag_search_skills":
+    if name == "mnemos_search_skills":
         results = search_service.search_skills(
             query=args["query"],
             limit=args.get("limit", 3),
         )
         return [r.model_dump() for r in results]
 
-    if name == "rag_search_memory":
+    if name == "mnemos_search_memory":
         results = search_service.search_memory(
             query=args["query"],
             project=args.get("project"),
@@ -291,23 +293,22 @@ async def _dispatch_tool(
         )
         return [r.model_dump() for r in results]
 
-    if name == "rag_index_memory":
-        if qdrant_client is None:
-            raise RuntimeError("qdrant_client required for rag_index_memory")
-        entry_id = _store_memory(
-            qdrant_client=qdrant_client,
-            indexer=indexer,
+    if name == "mnemos_memory":
+        if deduplicator is None:
+            raise RuntimeError("deduplicator required for mnemos_memory")
+        from rag_core.models import ExtractedMemory
+        memory = ExtractedMemory(
             content=args["content"],
-            project=args.get("project"),
-            topic=args.get("topic"),
             memory_type=args.get("memory_type", "note"),
+            project=args.get("project"),
             tags=args.get("tags", []),
         )
-        return {"id": entry_id, "status": "pending"}
+        result = deduplicator.deduplicate_and_store(memory)
+        return {"id": result.memory_id, "status": "pending", "action": result.action}
 
-    if name == "rag_memory_list":
+    if name == "mnemos_memory_list":
         if qdrant_client is None:
-            raise RuntimeError("qdrant_client required for rag_memory_list")
+            raise RuntimeError("qdrant_client required for mnemos_memory_list")
         entries = _list_memory(
             qdrant_client=qdrant_client,
             project=args.get("project"),
@@ -316,9 +317,9 @@ async def _dispatch_tool(
         )
         return entries
 
-    if name == "rag_memory_review":
+    if name == "mnemos_memory_review":
         if qdrant_client is None:
-            raise RuntimeError("qdrant_client required for rag_memory_review")
+            raise RuntimeError("qdrant_client required for mnemos_memory_review")
         _review_memory(
             qdrant_client=qdrant_client,
             memory_id=args["memory_id"],
@@ -326,14 +327,14 @@ async def _dispatch_tool(
         )
         return {"memory_id": args["memory_id"], "action": args["action"]}
 
-    if name == "rag_reindex":
+    if name == "mnemos_reindex":
         return {
             "collection": args.get("collection"),
             "mode": args.get("mode", "incremental"),
             "message": "Reindex triggered (watcher-driven; call from watcher service for full execution)",
         }
 
-    if name == "rag_status":
+    if name == "mnemos_status":
         if qdrant_client is None:
             return {"error": "qdrant_client not available"}
         return _get_status(qdrant_client)
@@ -374,7 +375,7 @@ def _store_memory(
         "file_mtime": time.time(),
     }
     point = PointStruct(id=point_id, vector=vector, payload=payload)
-    qdrant_client.upsert(collection_name="rag_memory", points=[point])
+    qdrant_client.upsert(collection_name="mnemos_memory", points=[point])
     return entry_id
 
 
@@ -398,7 +399,7 @@ def _list_memory(
 
     query_filter = Filter(must=must_conditions) if must_conditions else None
     records, _ = qdrant_client.scroll(
-        collection_name="rag_memory",
+        collection_name="mnemos_memory",
         scroll_filter=query_filter,
         limit=limit,
         with_payload=True,
@@ -415,7 +416,7 @@ def _review_memory(
 
     new_status = "approved" if action == "approve" else "rejected"
     qdrant_client.set_payload(
-        collection_name="rag_memory",
+        collection_name="mnemos_memory",
         payload={"status": new_status},
         points=[memory_id],
     )

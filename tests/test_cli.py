@@ -32,7 +32,7 @@ def test_status_healthy():
         {
             "status": "healthy",
             "collections": {
-                "rag_code_moby": {"vectors_count": 42, "points_count": 42, "status": "green"},
+                "mnemos_code_moby": {"vectors_count": 42, "points_count": 42, "status": "green"},
             },
         }
     )
@@ -156,22 +156,22 @@ def test_search_skills_returns_results():
 def test_reindex_success():
     runner = CliRunner()
     mock_resp = _mock_response(
-        {"status": "reindexed", "collection": "rag_code_moby", "chunks_indexed": 150}
+        {"status": "reindexed", "collection": "mnemos_code_moby", "chunks_indexed": 150}
     )
     with patch("httpx.post", return_value=mock_resp):
-        result = runner.invoke(cli, ["reindex", "--collection", "rag_code_moby"])
+        result = runner.invoke(cli, ["reindex", "--collection", "mnemos_code_moby"])
     assert result.exit_code == 0
-    assert "reindex" in result.output.lower() or "rag_code_moby" in result.output
+    assert "reindex" in result.output.lower() or "mnemos_code_moby" in result.output
 
 
 def test_reindex_with_path():
     runner = CliRunner()
     mock_resp = _mock_response(
-        {"status": "reindexed", "collection": "rag_code_moby", "chunks_indexed": 10}
+        {"status": "reindexed", "collection": "mnemos_code_moby", "chunks_indexed": 10}
     )
     with patch("httpx.post", return_value=mock_resp) as mock_post:
         result = runner.invoke(
-            cli, ["reindex", "--collection", "rag_code_moby", "--path", "/data/src", "--full"]
+            cli, ["reindex", "--collection", "mnemos_code_moby", "--path", "/data/src", "--full"]
         )
     assert result.exit_code == 0
     posted_json = mock_post.call_args[1].get("json") or mock_post.call_args[0][1]
@@ -295,16 +295,16 @@ def test_memory_reject():
 
 
 # ---------------------------------------------------------------------------
-# RAG_URL env var
+# MNEMOS_URL env var
 # ---------------------------------------------------------------------------
 
 
-def test_custom_rag_url():
+def test_custom_mnemos_url():
     runner = CliRunner()
     mock_resp = _mock_response({"status": "healthy", "collections": {}})
     with patch("httpx.get", return_value=mock_resp) as mock_get:
         result = runner.invoke(
-            cli, ["status"], env={"RAG_URL": "http://myserver:9999"}
+            cli, ["status"], env={"MNEMOS_URL": "http://myserver:9999"}
         )
     assert result.exit_code == 0
     called_url = mock_get.call_args[0][0]

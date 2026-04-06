@@ -32,7 +32,7 @@ class SearchService:
     ) -> list[SearchResult]:
         vector = self._embeddings.embed(query)
         target_collections = collections or [
-            c.name for c in COLLECTIONS if c.name != "rag_memory"
+            c.name for c in COLLECTIONS if c.name != "mnemos_memory"
         ]
 
         all_results = []
@@ -86,9 +86,9 @@ class SearchService:
         vector = self._embeddings.embed(query)
 
         if project:
-            collections = [f"rag_code_{project}"]
+            collections = [f"mnemos_code_{project}"]
         else:
-            collections = [c.name for c in COLLECTIONS if c.name.startswith("rag_code_")]
+            collections = [c.name for c in COLLECTIONS if c.name.startswith("mnemos_code_")]
 
         all_results = []
         for coll_name in collections:
@@ -135,7 +135,7 @@ class SearchService:
     def search_skills(self, query: str, limit: int = 3) -> list[SkillResult]:
         vector = self._embeddings.embed(query)
         hits = self._qdrant.query_points(
-            collection_name="rag_skills",
+            collection_name="mnemos_skills",
             query=vector,
             limit=limit,
         ).points
@@ -171,7 +171,7 @@ class SearchService:
             )
 
         hits = self._qdrant.query_points(
-            collection_name="rag_memory",
+            collection_name="mnemos_memory",
             query=vector,
             query_filter=Filter(must=must_conditions),
             limit=limit,
