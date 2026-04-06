@@ -63,7 +63,7 @@ IGNORE_FILENAMES = [
     ".last-run.json",
 ]
 
-RAG_SERVER_URL = os.getenv("RAG_SERVER_URL", "http://rag-server:8100")
+RAG_SERVER_URL = os.getenv("MNEMOS_SERVER_URL", "http://rag-server:8100")
 DEBOUNCE_MS = int(os.getenv("WATCHER_DEBOUNCE_MS", "2000"))
 
 

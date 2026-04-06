@@ -24,9 +24,14 @@ services:
       EMBEDDING_MODEL: all-MiniLM-L6-v2
       CODEBASE_PATH: /data/codebase
       CLAUDE_CONFIG_PATH: /data/claude-config
-      RAG_MODE: local
-      RAG_AUTH_ENABLED: "false"
-      RAG_STATE_DIR: /data/state
+      MNEMOS_MODE: local
+      MNEMOS_AUTH_ENABLED: "false"
+      MNEMOS_STATE_DIR: /data/state
+      MNEMOS_LLM_PROVIDER: ollama
+      MNEMOS_LLM_MODEL: "llama3.1:8b"
+      MNEMOS_OLLAMA_URL: http://ollama:11434
+      MNEMOS_DEDUP_THRESHOLD: "0.85"
+      MNEMOS_DEDUP_STRATEGY: merge
     volumes:
       - ~/Developments/Projects/digital-gigafactory:/data/codebase:ro
       - ~/.claude:/data/claude-config:ro
@@ -46,7 +51,7 @@ services:
       context: .
       dockerfile: watcher/Dockerfile
     environment:
-      RAG_SERVER_URL: http://rag-server:8100
+      MNEMOS_SERVER_URL: http://rag-server:8100
       CODEBASE_PATH: /data/codebase
       CLAUDE_CONFIG_PATH: /data/claude-config
       WATCHER_DEBOUNCE_MS: 2000
@@ -57,6 +62,16 @@ services:
       rag-server:
         condition: service_healthy
 
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+    profiles:
+      - llm
+
 volumes:
   qdrant_data:
   rag_state:
+  ollama_data:
