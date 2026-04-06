@@ -58,7 +58,7 @@ def create_app() -> FastAPI:
 
         app.state.qdrant.close()
 
-    app = FastAPI(title="RAG MCP Server", lifespan=lifespan)
+    app = FastAPI(title="Mnemos MCP Server", lifespan=lifespan)
 
     # --- MCP Streamable HTTP transport ---
     async def mcp_http_handler(scope, receive, send):

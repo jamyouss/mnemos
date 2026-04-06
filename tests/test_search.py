@@ -24,8 +24,15 @@ def search_service(mock_qdrant, mock_embeddings):
     return SearchService(qdrant_client=mock_qdrant, embedding_service=mock_embeddings)
 
 
+def _mock_query_points(mock_qdrant, hits):
+    """Helper to set up query_points mock with given hits."""
+    result = MagicMock()
+    result.points = hits
+    mock_qdrant.query_points.return_value = result
+
+
 def test_search_returns_search_results(search_service, mock_qdrant):
-    mock_qdrant.search.return_value = [
+    _mock_query_points(mock_qdrant, [
         MagicMock(
             score=0.87,
             payload={
@@ -35,10 +42,10 @@ def test_search_returns_search_results(search_service, mock_qdrant):
                 "language": "go",
             },
         )
-    ]
+    ])
     results = search_service.search(
         query="company creation",
-        collections=["rag_code_moby"],
+        collections=["mnemos_code_moby"],
         limit=5,
     )
     assert len(results) == 1
@@ -47,7 +54,7 @@ def test_search_returns_search_results(search_service, mock_qdrant):
 
 
 def test_search_code_returns_code_results(search_service, mock_qdrant):
-    mock_qdrant.search.return_value = [
+    _mock_query_points(mock_qdrant, [
         MagicMock(
             score=0.9,
             payload={
@@ -59,7 +66,7 @@ def test_search_code_returns_code_results(search_service, mock_qdrant):
                 "package": "application",
             },
         )
-    ]
+    ])
     results = search_service.search_code(
         query="company creation",
         language="go",
@@ -72,7 +79,7 @@ def test_search_code_returns_code_results(search_service, mock_qdrant):
 
 
 def test_search_skills(search_service, mock_qdrant):
-    mock_qdrant.search.return_value = [
+    _mock_query_points(mock_qdrant, [
         MagicMock(
             score=0.92,
             payload={
@@ -82,7 +89,7 @@ def test_search_skills(search_service, mock_qdrant):
                 "chunk_type": "skill",
             },
         )
-    ]
+    ])
     results = search_service.search_skills(query="moby service", limit=3)
     assert len(results) == 1
     assert isinstance(results[0], SkillResult)
@@ -90,7 +97,7 @@ def test_search_skills(search_service, mock_qdrant):
 
 
 def test_search_memory(search_service, mock_qdrant):
-    mock_qdrant.search.return_value = [
+    _mock_query_points(mock_qdrant, [
         MagicMock(
             score=0.85,
             payload={
@@ -104,7 +111,7 @@ def test_search_memory(search_service, mock_qdrant):
                 "created_at": "2026-03-12T14:30:00Z",
             },
         )
-    ]
+    ])
     results = search_service.search_memory(
         query="NATS issue", project="moby", limit=5
     )
@@ -115,7 +122,8 @@ def test_search_memory(search_service, mock_qdrant):
 
 def test_search_memory_filters_approved(search_service, mock_qdrant):
     """search_memory should only return approved entries by default."""
+    _mock_query_points(mock_qdrant, [])
     search_service.search_memory(query="test", limit=5)
-    call_args = mock_qdrant.search.call_args
+    call_args = mock_qdrant.query_points.call_args
     query_filter = call_args.kwargs.get("query_filter")
     assert query_filter is not None

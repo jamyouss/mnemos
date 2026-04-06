@@ -296,7 +296,7 @@ async def reindex(body: ReindexRequest, request: Request, background_tasks: Back
 # Memory API (used by CLI)
 # ---------------------------------------------------------------------------
 
-_MEMORY_COLLECTION = "rag_memory"
+_MEMORY_COLLECTION = "mnemos_memory"
 _MEMORY_VECTOR_SIZE = 384
 
 

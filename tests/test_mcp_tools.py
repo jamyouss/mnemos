@@ -15,15 +15,15 @@ def test_mcp_server_has_all_tools():
     # which is the canonical source used by the list_tools handler.
     tool_names = {tool.name for tool in TOOL_DEFINITIONS}
     expected = {
-        "rag_search",
-        "rag_search_code",
-        "rag_search_skills",
-        "rag_search_memory",
-        "rag_index_memory",
-        "rag_memory_list",
-        "rag_memory_review",
-        "rag_reindex",
-        "rag_status",
+        "mnemos_search",
+        "mnemos_search_code",
+        "mnemos_search_skills",
+        "mnemos_search_memory",
+        "mnemos_memory",
+        "mnemos_memory_list",
+        "mnemos_memory_review",
+        "mnemos_reindex",
+        "mnemos_status",
     }
     assert expected.issubset(tool_names)
 
@@ -42,7 +42,7 @@ def test_all_tools_have_valid_schemas():
 def test_required_tools_have_required_fields():
     """Tools that need a query or key parameter must list it as required."""
     query_tools = {
-        "rag_search", "rag_search_code", "rag_search_skills", "rag_search_memory"
+        "mnemos_search", "mnemos_search_code", "mnemos_search_skills", "mnemos_search_memory"
     }
     tool_map = {t.name: t for t in TOOL_DEFINITIONS}
     for name in query_tools:
@@ -50,7 +50,7 @@ def test_required_tools_have_required_fields():
         required = tool_map[name].inputSchema.get("required", [])
         assert "query" in required, f"Tool {name} should require 'query'"
 
-    review_tool = tool_map["rag_memory_review"]
+    review_tool = tool_map["mnemos_memory_review"]
     required = review_tool.inputSchema.get("required", [])
     assert "memory_id" in required
     assert "action" in required
