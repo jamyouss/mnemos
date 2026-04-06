@@ -57,6 +57,17 @@ def app():
             embedding_service=mock_embeddings,
         )
 
+        mock_deduplicator = MagicMock()
+        from rag_core.models import DeduplicationResult
+        mock_deduplicator.deduplicate_and_store.return_value = DeduplicationResult(
+            action="inserted", memory_id="mock-dedup-id"
+        )
+        application.state.deduplicator = mock_deduplicator
+
+        mock_extractor = MagicMock()
+        mock_extractor.extract.return_value = []
+        application.state.memory_extractor = mock_extractor
+
         yield application
 
 
@@ -244,6 +255,7 @@ async def test_api_memory_create(app):
     data = response.json()
     assert data["status"] == "created"
     assert "id" in data
+    assert "action" in data
 
 
 @pytest.mark.anyio

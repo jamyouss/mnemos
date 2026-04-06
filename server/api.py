@@ -82,6 +82,12 @@ class MemoryReviewRequest(BaseModel):
     action: str  # "approve" or "reject"
 
 
+class MemoryExtractRequest(BaseModel):
+    commit_message: str
+    diff: str
+    author: Optional[str] = None
+
+
 # ---------------------------------------------------------------------------
 # Internal endpoints (used by watcher)
 # ---------------------------------------------------------------------------
@@ -331,31 +337,18 @@ async def list_memory(request: Request, status: Optional[str] = None):
 
 @api_router.post("/api/memory")
 async def create_memory(body: MemoryCreateRequest, request: Request):
-    qdrant = request.app.state.qdrant
-    embeddings = request.app.state.embeddings
+    deduplicator = request.app.state.deduplicator
 
-    _ensure_memory_collection(qdrant)
-
-    mem_id = str(uuid.uuid4())
-    vector = embeddings.embed(body.content)
-    now = datetime.now(timezone.utc).isoformat()
-
-    payload = {
-        "id": mem_id,
-        "content": body.content,
-        "project": body.project,
-        "memory_type": body.memory_type,
-        "tags": body.tags,
-        "status": body.status,
-        "created_at": now,
-    }
-
-    point_id = str(uuid.uuid5(uuid.NAMESPACE_URL, mem_id))
-    qdrant.upsert(
-        collection_name=_MEMORY_COLLECTION,
-        points=[PointStruct(id=point_id, vector=vector, payload=payload)],
+    from rag_core.models import ExtractedMemory
+    memory = ExtractedMemory(
+        content=body.content,
+        memory_type=body.memory_type,
+        project=body.project,
+        tags=body.tags,
     )
-    return {"status": "created", "id": mem_id}
+
+    result = deduplicator.deduplicate_and_store(memory, status=body.status)
+    return {"status": "created", "id": result.memory_id, "action": result.action}
 
 
 @api_router.post("/api/memory/{mem_id}/review")
@@ -396,6 +389,29 @@ async def review_memory(mem_id: str, body: MemoryReviewRequest, request: Request
         ],
     )
     return {"status": new_status, "id": mem_id}
+
+
+@api_router.post("/api/memory/extract")
+async def extract_memories(body: MemoryExtractRequest, request: Request):
+    extractor = request.app.state.memory_extractor
+    deduplicator = request.app.state.deduplicator
+
+    extracted = extractor.extract(
+        commit_message=body.commit_message,
+        diff=body.diff,
+    )
+
+    results = []
+    for memory in extracted:
+        dedup_result = deduplicator.deduplicate_and_store(memory)
+        results.append({
+            "id": dedup_result.memory_id,
+            "content": memory.content,
+            "action": dedup_result.action,
+            "status": "pending",
+        })
+
+    return {"extracted": len(results), "memories": results}
 
 
 # ---------------------------------------------------------------------------

@@ -33,6 +33,21 @@ def create_app() -> FastAPI:
             embedding_service=app.state.embeddings,
         )
 
+        from rag_core.memory_extractor import MemoryExtractor
+        from rag_core.deduplicator import Deduplicator
+
+        app.state.memory_extractor = MemoryExtractor(
+            ollama_url=settings.mnemos_ollama_url,
+            model=settings.mnemos_llm_model,
+        )
+        app.state.deduplicator = Deduplicator(
+            qdrant_client=app.state.qdrant,
+            embedding_service=app.state.embeddings,
+            memory_extractor=app.state.memory_extractor,
+            threshold=settings.mnemos_dedup_threshold,
+            strategy=settings.mnemos_dedup_strategy,
+        )
+
         # Ensure all collections exist on startup
         from rag_core.collections import COLLECTIONS
         for coll in COLLECTIONS:
@@ -44,6 +59,7 @@ def create_app() -> FastAPI:
             indexer=app.state.indexer,
             qdrant_client=app.state.qdrant,
             embedding_service=app.state.embeddings,
+            deduplicator=app.state.deduplicator,
         )
 
         # Streamable HTTP session manager
