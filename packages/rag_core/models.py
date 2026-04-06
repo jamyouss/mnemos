@@ -68,3 +68,16 @@ class StatusReport(BaseModel):
     collections: dict[str, CollectionStatus]
     qdrant_healthy: bool
     watcher_active: bool = False
+
+
+class ExtractedMemory(BaseModel):
+    content: str
+    memory_type: str = "note"  # decision, pattern, lesson, convention, note
+    project: str | None = None
+    tags: list[str] = []
+
+
+class DeduplicationResult(BaseModel):
+    action: str  # "inserted", "merged", "replaced"
+    memory_id: str
+    merged_with: str | None = None
