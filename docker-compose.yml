@@ -33,7 +33,7 @@ services:
       MNEMOS_DEDUP_THRESHOLD: "0.85"
       MNEMOS_DEDUP_STRATEGY: merge
     volumes:
-      - ~/Developments/Projects/digital-gigafactory:/data/codebase:ro
+      - ~/Developments/Projects:/data/codebase:ro
       - ~/.claude:/data/claude-config:ro
       - rag_state:/data/state
     depends_on:
