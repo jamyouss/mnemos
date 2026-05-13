@@ -11,3 +11,7 @@ venv/
 .DS_Store
 .claude/
 uv.lock
+
+# Eval runs (generated artifacts)
+eval/runs/*.json
+eval/dataset/_candidates.yaml

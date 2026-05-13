@@ -208,6 +208,81 @@ async def search_skills(body: SearchSkillsRequest, request: Request):
     return {"results": [r.model_dump() for r in results]}
 
 
+class SearchMemoryRequest(BaseModel):
+    query: str
+    project: Optional[str] = None
+    memory_type: Optional[str] = None
+    limit: int = 5
+
+
+@api_router.post("/api/search-memory")
+async def search_memory(body: SearchMemoryRequest, request: Request):
+    results = request.app.state.search_service.search_memory(
+        query=body.query,
+        project=body.project,
+        memory_type=body.memory_type,
+        limit=body.limit,
+    )
+    # Map memory results to a search-result-compatible shape so eval/harness can consume them.
+    return {
+        "results": [
+            {
+                "file_path": f"memory://{r.id}",
+                "content": r.content,
+                "score": r.score,
+                "collection": "mnemos_memory",
+                "memory_type": r.memory_type,
+                "project": r.project,
+                "tags": r.tags,
+            }
+            for r in results
+        ]
+    }
+
+
+class EvalSampleRequest(BaseModel):
+    collection: str
+    count: int = 10
+    seed: Optional[int] = None
+
+
+@api_router.post("/api/eval/sample")
+async def eval_sample(body: EvalSampleRequest, request: Request):
+    """Return up to `count` random chunks from a collection (for golden-set generation)."""
+    if body.collection not in _VALID_COLLECTIONS:
+        raise HTTPException(status_code=400, detail=f"Unknown collection: {body.collection}")
+
+    import random
+
+    qdrant = request.app.state.qdrant
+    scroll_limit = max(body.count * 8, 200)
+    points, _ = qdrant.scroll(
+        collection_name=body.collection,
+        limit=scroll_limit,
+        with_payload=True,
+        with_vectors=False,
+    )
+    if not points:
+        return {"chunks": []}
+
+    rng = random.Random(body.seed)
+    sampled = rng.sample(points, min(body.count, len(points)))
+    chunks = []
+    for p in sampled:
+        payload = p.payload or {}
+        chunks.append(
+            {
+                "content": payload.get("content", ""),
+                "file_path": payload.get("file_path", ""),
+                "chunk_type": payload.get("chunk_type", ""),
+                "language": payload.get("language", ""),
+                "symbol_name": payload.get("symbol_name", ""),
+                "collection": body.collection,
+            }
+        )
+    return {"chunks": chunks}
+
+
 # ---------------------------------------------------------------------------
 # Reindex API (used by CLI)
 # ---------------------------------------------------------------------------

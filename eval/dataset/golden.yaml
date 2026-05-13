@@ -1,0 +1,3 @@
+# Mnemos evaluation golden set.
+# Populated via `mnemos eval generate` + manual review + `mnemos eval promote`.
+[]

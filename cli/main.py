@@ -361,5 +361,180 @@ def _print_skill_results(results: list) -> None:
         console.print()
 
 
+# ---------------------------------------------------------------------------
+# eval
+# ---------------------------------------------------------------------------
+
+
+@cli.group()
+def eval() -> None:
+    """Evaluation harness: golden set, baseline, comparisons."""
+
+
+def _eval_paths() -> dict:
+    from pathlib import Path
+
+    root = Path(os.environ.get("MNEMOS_EVAL_ROOT", "eval"))
+    return {
+        "root": root,
+        "golden": root / "dataset" / "golden.yaml",
+        "candidates": root / "dataset" / "_candidates.yaml",
+        "runs": root / "runs",
+    }
+
+
+@eval.command("generate")
+@click.option("--collection", required=True, help="Collection to sample chunks from.")
+@click.option("--count", default=10, show_default=True, help="Number of candidate questions to generate.")
+@click.option(
+    "--ollama-url",
+    default=lambda: os.environ.get("MNEMOS_OLLAMA_URL", "http://localhost:11434"),
+    help="Ollama base URL (default: $MNEMOS_OLLAMA_URL or http://localhost:11434).",
+)
+@click.option(
+    "--model",
+    default=lambda: os.environ.get("MNEMOS_LLM_MODEL", "llama3.1:8b"),
+    help="Ollama model (default: $MNEMOS_LLM_MODEL or llama3.1:8b).",
+)
+@click.option("--seed", default=None, type=int, help="Optional random seed for sampling.")
+def eval_generate(collection: str, count: int, ollama_url: str, model: str, seed: int | None) -> None:
+    """Generate candidate Q/A pairs via Ollama from a collection."""
+    from eval.harness import GoldenGenerator
+    from eval.harness.loader import load_candidates, save_candidates
+
+    sample_url = f"{_base_url()}/api/eval/sample"
+    try:
+        resp = httpx.post(
+            sample_url,
+            json={"collection": collection, "count": count, "seed": seed},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        chunks = resp.json().get("chunks", [])
+    except Exception as exc:
+        _handle_http_error(exc)
+        return
+
+    if not chunks:
+        console.print(f"[yellow]No chunks returned from {collection}.[/yellow]")
+        return
+
+    console.print(f"Generating questions from {len(chunks)} chunks via {model}…")
+    generator = GoldenGenerator(ollama_url=ollama_url, model=model)
+    new_candidates = generator.generate(chunks, count=len(chunks))
+
+    if not new_candidates:
+        console.print("[yellow]No candidates were generated (LLM returned empty).[/yellow]")
+        return
+
+    paths = _eval_paths()
+    existing = load_candidates(paths["candidates"])
+    save_candidates(paths["candidates"], existing + new_candidates)
+    console.print(
+        f"[green]+{len(new_candidates)}[/green] candidates written to {paths['candidates']}. "
+        "Edit the file to set [bold]reviewed: true[/bold] and [bold]accepted: true[/bold] for items "
+        "to keep, then run [bold]mnemos eval promote[/bold]."
+    )
+
+
+@eval.command("promote")
+def eval_promote() -> None:
+    """Move reviewed+accepted candidates into the golden set."""
+    from eval.harness.loader import promote_candidates
+
+    paths = _eval_paths()
+    promoted, remaining = promote_candidates(paths["candidates"], paths["golden"])
+    console.print(
+        f"Promoted [green]{promoted}[/green] candidates. "
+        f"{remaining} candidates remain pending review."
+    )
+
+
+@eval.command("run")
+@click.option("--tag", required=True, help="Tag for this run (e.g. baseline-2026-05-13).")
+@click.option("--limit", default=10, show_default=True, help="Top-K to request per query.")
+def eval_run(tag: str, limit: int) -> None:
+    """Execute the eval harness against the running Mnemos server."""
+    from eval.harness import (
+        EvalRun,
+        EvalRunner,
+        aggregate_metrics,
+        load_golden,
+        render_console,
+        write_json,
+    )
+
+    paths = _eval_paths()
+    items = load_golden(paths["golden"])
+    if not items:
+        console.print("[red]Golden set is empty.[/red] Generate questions first with [bold]mnemos eval generate[/bold].")
+        sys.exit(1)
+
+    runner = EvalRunner(mnemos_url=_base_url(), limit=limit)
+    try:
+        results = runner.run(items)
+    except Exception as exc:
+        _handle_http_error(exc)
+        return
+
+    report = aggregate_metrics(items, results, tag=tag)
+    run = EvalRun(
+        tag=tag,
+        mnemos_url=_base_url(),
+        golden_path=str(paths["golden"]),
+        results=results,
+        report=report,
+    )
+    out_path = paths["runs"] / f"{tag}.json"
+    write_json(out_path, run)
+    render_console(report)
+    console.print(f"\n[dim]Run saved to {out_path}[/dim]")
+
+
+@eval.command("compare")
+@click.argument("tag_a")
+@click.argument("tag_b")
+def eval_compare(tag_a: str, tag_b: str) -> None:
+    """Compare two eval runs by tag."""
+    import json
+    from eval.harness.reporter import compare_reports
+    from eval.harness.schema import MetricsReport
+
+    paths = _eval_paths()
+
+    def _load(tag: str) -> MetricsReport:
+        path = paths["runs"] / f"{tag}.json"
+        if not path.exists():
+            console.print(f"[red]Run not found:[/red] {path}")
+            sys.exit(1)
+        with path.open() as fh:
+            data = json.load(fh)
+        return MetricsReport(**data["report"])
+
+    compare_reports(_load(tag_a), _load(tag_b))
+
+
+@eval.command("list")
+def eval_list() -> None:
+    """List available eval runs."""
+    from pathlib import Path
+
+    paths = _eval_paths()
+    runs_dir: Path = paths["runs"]
+    if not runs_dir.exists():
+        console.print("[yellow]No runs directory yet.[/yellow]")
+        return
+    runs = sorted(runs_dir.glob("*.json"))
+    if not runs:
+        console.print("[yellow]No runs found.[/yellow]")
+        return
+    table = Table(title="Eval runs")
+    table.add_column("Tag", style="cyan")
+    table.add_column("Path")
+    for run in runs:
+        table.add_row(run.stem, str(run))
+    console.print(table)
+
+
 if __name__ == "__main__":
     cli()
