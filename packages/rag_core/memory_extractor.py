@@ -1,11 +1,10 @@
-"""Extract structured memories from git commit diffs using Ollama."""
+"""Extract structured memories from git commit diffs using a pluggable LLM provider."""
 from __future__ import annotations
 
 import json
 import logging
 
-import httpx
-
+from rag_core.llm import LLMError, LLMProvider
 from rag_core.models import ExtractedMemory
 
 logger = logging.getLogger("mnemos.extractor")
@@ -39,9 +38,8 @@ _USER_TEMPLATE = """## Commit Message
 
 
 class MemoryExtractor:
-    def __init__(self, ollama_url: str, model: str) -> None:
-        self._ollama_url = ollama_url.rstrip("/")
-        self._model = model
+    def __init__(self, llm: LLMProvider) -> None:
+        self._llm = llm
 
     def extract(self, commit_message: str, diff: str) -> list[ExtractedMemory]:
         truncated_diff = diff[:_MAX_DIFF_BYTES]
@@ -54,26 +52,19 @@ class MemoryExtractor:
         )
 
         try:
-            response = httpx.post(
-                f"{self._ollama_url}/api/chat",
-                json={
-                    "model": self._model,
-                    "messages": [
-                        {"role": "system", "content": _SYSTEM_PROMPT},
-                        {"role": "user", "content": user_content},
-                    ],
-                    "stream": False,
-                    "format": "json",
-                },
+            raw = self._llm.complete(
+                messages=[
+                    {"role": "system", "content": _SYSTEM_PROMPT},
+                    {"role": "user", "content": user_content},
+                ],
+                json_mode=True,
                 timeout=120,
             )
-            response.raise_for_status()
-        except Exception:
-            logger.exception("Failed to call Ollama for memory extraction")
+        except LLMError:
+            logger.exception("Memory extraction failed (provider=%s)", self._llm.name)
             return []
 
         try:
-            raw = response.json()["message"]["content"]
             parsed = json.loads(raw)
             if isinstance(parsed, dict) and "memories" in parsed:
                 parsed = parsed["memories"]
@@ -81,7 +72,7 @@ class MemoryExtractor:
                 return []
             return [ExtractedMemory(**item) for item in parsed]
         except (json.JSONDecodeError, KeyError, TypeError, ValueError):
-            logger.warning("Failed to parse Ollama response as memory list")
+            logger.warning("Failed to parse LLM response as memory list: %r", raw[:200])
             return []
 
     def merge_memories(self, existing: str, new: str) -> str:
@@ -93,19 +84,8 @@ class MemoryExtractor:
             "Write a single consolidated memory (1-3 sentences) that captures all information from both. "
             "Return ONLY the merged text, no explanation."
         )
-
         try:
-            response = httpx.post(
-                f"{self._ollama_url}/api/chat",
-                json={
-                    "model": self._model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "stream": False,
-                },
-                timeout=60,
-            )
-            response.raise_for_status()
-            return response.json()["message"]["content"].strip()
-        except Exception:
-            logger.exception("Failed to merge memories via Ollama")
+            return self._llm.complete_prompt(prompt, timeout=60).strip()
+        except LLMError:
+            logger.exception("Memory merge failed (provider=%s)", self._llm.name)
             return f"{existing}\n\n{new}"

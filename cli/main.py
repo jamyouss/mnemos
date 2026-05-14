@@ -387,20 +387,40 @@ def _eval_paths() -> dict:
 @click.option("--collection", required=True, help="Collection to sample chunks from.")
 @click.option("--count", default=10, show_default=True, help="Number of candidate questions to generate.")
 @click.option(
-    "--ollama-url",
-    default=lambda: os.environ.get("MNEMOS_OLLAMA_URL", "http://localhost:11434"),
-    help="Ollama base URL (default: $MNEMOS_OLLAMA_URL or http://localhost:11434).",
+    "--provider",
+    default=lambda: os.environ.get("MNEMOS_LLM_PROVIDER", "ollama"),
+    type=click.Choice(["ollama", "anthropic", "openai"]),
+    help="LLM provider (default: $MNEMOS_LLM_PROVIDER or ollama).",
 )
 @click.option(
     "--model",
     default=lambda: os.environ.get("MNEMOS_LLM_MODEL", "llama3.1:8b"),
-    help="Ollama model (default: $MNEMOS_LLM_MODEL or llama3.1:8b).",
+    help="Model name (default: $MNEMOS_LLM_MODEL).",
+)
+@click.option(
+    "--api-key",
+    default=lambda: os.environ.get("MNEMOS_LLM_API_KEY", ""),
+    help="API key for anthropic/openai (default: $MNEMOS_LLM_API_KEY).",
+)
+@click.option(
+    "--base-url",
+    default=lambda: os.environ.get("MNEMOS_LLM_BASE_URL", "") or os.environ.get("MNEMOS_OLLAMA_URL", ""),
+    help="Provider base URL override.",
 )
 @click.option("--seed", default=None, type=int, help="Optional random seed for sampling.")
-def eval_generate(collection: str, count: int, ollama_url: str, model: str, seed: int | None) -> None:
-    """Generate candidate Q/A pairs via Ollama from a collection."""
+def eval_generate(
+    collection: str,
+    count: int,
+    provider: str,
+    model: str,
+    api_key: str,
+    base_url: str,
+    seed: int | None,
+) -> None:
+    """Generate candidate Q/A pairs from a collection via the configured LLM."""
     from mnemos_eval import GoldenGenerator
     from mnemos_eval.loader import load_candidates, save_candidates
+    from rag_core.llm import LLMConfig, make_llm_provider
 
     sample_url = f"{_base_url()}/api/eval/sample"
     try:
@@ -419,8 +439,11 @@ def eval_generate(collection: str, count: int, ollama_url: str, model: str, seed
         console.print(f"[yellow]No chunks returned from {collection}.[/yellow]")
         return
 
-    console.print(f"Generating questions from {len(chunks)} chunks via {model}…")
-    generator = GoldenGenerator(ollama_url=ollama_url, model=model)
+    console.print(f"Generating questions from {len(chunks)} chunks via {provider}:{model}…")
+    llm = make_llm_provider(
+        LLMConfig(provider=provider, model=model, api_key=api_key, base_url=base_url)
+    )
+    generator = GoldenGenerator(llm=llm)
     new_candidates = generator.generate(chunks, count=len(chunks))
 
     if not new_candidates:

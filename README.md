@@ -209,7 +209,7 @@ To make your AI agent use Mnemos as the primary search mechanism, add the follow
 | Server | FastAPI, MCP (Streamable HTTP), Python 3.12+ |
 | Embeddings | `all-MiniLM-L6-v2` (384 dims, sentence-transformers) |
 | Vector DB | Qdrant (cosine similarity) |
-| LLM | Ollama (`llama3.1:8b` default, configurable) |
+| LLM | Pluggable provider — `ollama` (local default), `anthropic`, or any OpenAI-compatible endpoint (vLLM, LM Studio, Together, Groq, OpenRouter…) |
 | Watcher | watchdog, debounced event batching |
 | CLI | Click, Rich |
 | Deployment | Docker Compose, multi-tenant auth |
@@ -275,9 +275,11 @@ Six collections in Qdrant, all cosine similarity with 384-dimensional vectors:
 | `MNEMOS_MODE` | `local` | `local` or `deployed` |
 | `MNEMOS_AUTH_ENABLED` | `false` | API key authentication |
 | `MNEMOS_STATE_DIR` | `/data/state` | Persistent state directory |
-| `MNEMOS_LLM_PROVIDER` | `ollama` | LLM provider |
-| `MNEMOS_LLM_MODEL` | `llama3.1:8b` | Ollama model for extraction |
-| `MNEMOS_OLLAMA_URL` | `http://localhost:11434` | Ollama API URL |
+| `MNEMOS_LLM_PROVIDER` | `ollama` | LLM provider (`ollama`, `anthropic`, `openai`) |
+| `MNEMOS_LLM_MODEL` | `llama3.1:8b` | Model name (provider-specific) |
+| `MNEMOS_LLM_API_KEY` | _(empty)_ | API key — required for `anthropic` and `openai` |
+| `MNEMOS_LLM_BASE_URL` | _(empty)_ | Override base URL (vLLM, LM Studio, Together, Groq, OpenRouter…) |
+| `MNEMOS_OLLAMA_URL` | `http://localhost:11434` | Legacy ollama-only URL (ignored when `MNEMOS_LLM_BASE_URL` is set) |
 | `MNEMOS_DEDUP_THRESHOLD` | `0.85` | Cosine similarity threshold for dedup |
 | `MNEMOS_DEDUP_STRATEGY` | `merge` | `merge` or `replace` |
 | `MNEMOS_HOOK_TRIGGER` | `pre-push` | Git hook trigger mode |

@@ -27,9 +27,12 @@ services:
       MNEMOS_MODE: local
       MNEMOS_AUTH_ENABLED: "false"
       MNEMOS_STATE_DIR: /data/state
-      MNEMOS_LLM_PROVIDER: ollama
-      MNEMOS_LLM_MODEL: "llama3.1:8b"
-      MNEMOS_OLLAMA_URL: http://ollama:11434
+      # LLM (ollama | anthropic | openai). See .env.example for full reference.
+      MNEMOS_LLM_PROVIDER: "${MNEMOS_LLM_PROVIDER:-ollama}"
+      MNEMOS_LLM_MODEL: "${MNEMOS_LLM_MODEL:-llama3.1:8b}"
+      MNEMOS_LLM_API_KEY: "${MNEMOS_LLM_API_KEY:-}"
+      MNEMOS_LLM_BASE_URL: "${MNEMOS_LLM_BASE_URL:-}"
+      MNEMOS_OLLAMA_URL: "${MNEMOS_OLLAMA_URL:-http://ollama:11434}"
       MNEMOS_DEDUP_THRESHOLD: "0.85"
       MNEMOS_DEDUP_STRATEGY: merge
     volumes:

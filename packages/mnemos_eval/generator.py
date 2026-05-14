@@ -5,7 +5,7 @@ import random
 import uuid
 from typing import Iterable
 
-import httpx
+from rag_core.llm import LLMError, LLMProvider
 
 from mnemos_eval.schema import GoldenCandidate, Intent
 
@@ -39,17 +39,10 @@ _COLLECTION_TO_INTENT: dict[str, Intent] = {
 
 
 class GoldenGenerator:
-    """Generates candidate Q/A pairs via Ollama from random chunks in a collection."""
+    """Generates candidate Q/A pairs from indexed chunks via a pluggable LLM provider."""
 
-    def __init__(
-        self,
-        ollama_url: str,
-        model: str,
-        timeout: float = 60.0,
-    ) -> None:
-        self._ollama_url = ollama_url.rstrip("/")
-        self._model = model
-        self._timeout = timeout
+    def __init__(self, llm: LLMProvider) -> None:
+        self._llm = llm
 
     def generate(
         self,
@@ -64,14 +57,13 @@ class GoldenGenerator:
         sample = rng.sample(chunks_list, min(count, len(chunks_list)))
 
         candidates: list[GoldenCandidate] = []
-        with httpx.Client(timeout=self._timeout) as client:
-            for chunk in sample:
-                cand = self._gen_one(client, chunk)
-                if cand is not None:
-                    candidates.append(cand)
+        for chunk in sample:
+            cand = self._gen_one(chunk)
+            if cand is not None:
+                candidates.append(cand)
         return candidates
 
-    def _gen_one(self, client: httpx.Client, chunk: dict) -> GoldenCandidate | None:
+    def _gen_one(self, chunk: dict) -> GoldenCandidate | None:
         content = chunk.get("content", "")[:1500]
         prompt = _DEFAULT_PROMPT.format(
             file_path=chunk.get("file_path", "<unknown>"),
@@ -80,20 +72,13 @@ class GoldenGenerator:
             content=content,
         )
         try:
-            response = client.post(
-                f"{self._ollama_url}/api/generate",
-                json={
-                    "model": self._model,
-                    "prompt": prompt,
-                    "stream": False,
-                    "format": "json",
-                    "options": {"temperature": 0.4},
-                },
-            )
-            response.raise_for_status()
-            data = response.json()
-            payload = json.loads(data.get("response", "{}"))
-        except (httpx.HTTPError, json.JSONDecodeError):
+            raw = self._llm.complete_prompt(prompt, json_mode=True, timeout=60)
+        except LLMError:
+            return None
+
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
             return None
 
         question = (payload.get("question") or "").strip()

@@ -37,7 +37,7 @@ MEMORY (git hook / API):
 | Server | FastAPI + MCP Streamable HTTP, Python 3.12+ |
 | Vector DB | Qdrant (cosine, 384 dims) |
 | Embeddings | `sentence-transformers/all-MiniLM-L6-v2` |
-| LLM | Ollama (`llama3.1:8b` par défaut) — extraction + dedup merge |
+| LLM | Pluggable provider (ollama / anthropic / openai-compatible) — extraction + dedup merge, contextual chunking, grader, rewriter |
 | Chunkers | tree-sitter (Go), regex SFC (Vue), heading-based (MD) |
 | Watcher | `watchdog`, debounce 2s |
 | CLI | `click` + `rich` |
@@ -160,9 +160,22 @@ Conventions tests :
 3. Tester avec un fichier réel du codebase indexé
 
 ### Modifications memory pipeline
-1. Toute extraction passe par `MemoryExtractor` (Ollama)
+1. Toute extraction passe par `MemoryExtractor` (LLM provider injecté)
 2. Toute écriture passe par `Deduplicator` (jamais d'upsert direct sur `mnemos_memory`)
 3. Préserver le workflow `pending → approved`
+
+### LLM provider — abstraction (`rag_core.llm`)
+Toute composante qui appelle un LLM (extractor, dedup merge, futur contextual chunker, grader, rewriter, eval generator) **doit** :
+1. Recevoir un `LLMProvider` par constructeur (jamais instancier en interne)
+2. Utiliser uniquement `complete()` ou `complete_prompt()` de l'interface
+3. Gérer `LLMError` (fallback ou propagation)
+
+Providers supportés :
+- `ollama` (par défaut, local, self-hosted)
+- `anthropic` (cloud, prompt caching, idéal pour contextual chunking)
+- `openai` (cloud OU endpoint compatible : vLLM, LM Studio, Together, Groq, OpenRouter…)
+
+Switch via `MNEMOS_LLM_PROVIDER` env var (voir `.env.example`).
 
 ### Ajout d'une collection
 1. Déclarer dans `rag_core/collections.py` (avec `path_prefixes` et `description`)

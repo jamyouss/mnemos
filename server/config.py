@@ -12,8 +12,11 @@ class Settings(BaseSettings):
     mnemos_mode: str = "local"
     mnemos_auth_enabled: bool = False
     mnemos_state_dir: str = "/data/state"
+    # LLM configuration (ollama | anthropic | openai)
     mnemos_llm_provider: str = "ollama"
     mnemos_llm_model: str = "llama3.1:8b"
+    mnemos_llm_api_key: str = ""               # required for anthropic + openai
+    mnemos_llm_base_url: str = ""              # generic base url (overrides ollama_url when set)
     mnemos_ollama_url: str = "http://localhost:11434"
     mnemos_hook_trigger: str = "pre-push"
     mnemos_dedup_threshold: float = 0.85

@@ -35,11 +35,20 @@ def create_app() -> FastAPI:
 
         from rag_core.memory_extractor import MemoryExtractor
         from rag_core.deduplicator import Deduplicator
+        from rag_core.llm import LLMConfig, make_llm_provider
 
-        app.state.memory_extractor = MemoryExtractor(
-            ollama_url=settings.mnemos_ollama_url,
-            model=settings.mnemos_llm_model,
+        llm_base_url = settings.mnemos_llm_base_url or (
+            settings.mnemos_ollama_url if settings.mnemos_llm_provider == "ollama" else ""
         )
+        app.state.llm = make_llm_provider(
+            LLMConfig(
+                provider=settings.mnemos_llm_provider,
+                model=settings.mnemos_llm_model,
+                api_key=settings.mnemos_llm_api_key,
+                base_url=llm_base_url,
+            )
+        )
+        app.state.memory_extractor = MemoryExtractor(llm=app.state.llm)
         app.state.deduplicator = Deduplicator(
             qdrant_client=app.state.qdrant,
             embedding_service=app.state.embeddings,
