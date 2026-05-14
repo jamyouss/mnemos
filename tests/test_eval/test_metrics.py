@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from eval.harness.metrics import (
+from mnemos_eval.metrics import (
     aggregate_metrics,
     hit_rate_at_k,
     mrr,
@@ -12,7 +12,7 @@ from eval.harness.metrics import (
     precision_at_k,
     recall_at_k,
 )
-from eval.harness.schema import GoldenItem, QueryResult
+from mnemos_eval.schema import GoldenItem, QueryResult
 
 
 def test_recall_at_k_full_match():

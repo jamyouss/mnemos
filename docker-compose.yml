@@ -56,7 +56,7 @@ services:
       CLAUDE_CONFIG_PATH: /data/claude-config
       WATCHER_DEBOUNCE_MS: 2000
     volumes:
-      - ~/Developments/Projects/digital-gigafactory:/data/codebase:ro
+      - ~/Developments/Projects:/data/codebase:ro
       - ~/.claude:/data/claude-config:ro
     depends_on:
       rag-server:

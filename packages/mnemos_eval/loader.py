@@ -4,7 +4,7 @@ from pathlib import Path
 
 import yaml
 
-from eval.harness.schema import GoldenCandidate, GoldenItem
+from mnemos_eval.schema import GoldenCandidate, GoldenItem
 
 
 def load_golden(path: Path) -> list[GoldenItem]:

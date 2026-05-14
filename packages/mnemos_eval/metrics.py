@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 
-from eval.harness.schema import (
+from mnemos_eval.schema import (
     GoldenItem,
     IntentMetrics,
     MetricsReport,
@@ -60,8 +60,17 @@ def ndcg_at_k(
             return float(grades[doc])
         return 1.0 if doc in expected else 0.0
 
+    # Deduplicate retrieved keeping first-seen rank — multiple chunks from
+    # the same file otherwise produce DCG > IDCG.
+    seen: set[str] = set()
+    dedup_retrieved: list[str] = []
+    for doc in retrieved:
+        if doc not in seen:
+            seen.add(doc)
+            dedup_retrieved.append(doc)
+
     dcg = 0.0
-    for i, doc in enumerate(retrieved[:k]):
+    for i, doc in enumerate(dedup_retrieved[:k]):
         rel = gain(doc)
         if rel > 0:
             dcg += (math.pow(2, rel) - 1) / math.log2(i + 2)

@@ -7,7 +7,7 @@ from typing import Iterable
 
 import httpx
 
-from eval.harness.schema import GoldenCandidate, Intent
+from mnemos_eval.schema import GoldenCandidate, Intent
 
 
 _DEFAULT_PROMPT = """You generate evaluation questions for a code/docs RAG system.

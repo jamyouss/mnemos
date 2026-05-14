@@ -399,8 +399,8 @@ def _eval_paths() -> dict:
 @click.option("--seed", default=None, type=int, help="Optional random seed for sampling.")
 def eval_generate(collection: str, count: int, ollama_url: str, model: str, seed: int | None) -> None:
     """Generate candidate Q/A pairs via Ollama from a collection."""
-    from eval.harness import GoldenGenerator
-    from eval.harness.loader import load_candidates, save_candidates
+    from mnemos_eval import GoldenGenerator
+    from mnemos_eval.loader import load_candidates, save_candidates
 
     sample_url = f"{_base_url()}/api/eval/sample"
     try:
@@ -440,7 +440,7 @@ def eval_generate(collection: str, count: int, ollama_url: str, model: str, seed
 @eval.command("promote")
 def eval_promote() -> None:
     """Move reviewed+accepted candidates into the golden set."""
-    from eval.harness.loader import promote_candidates
+    from mnemos_eval.loader import promote_candidates
 
     paths = _eval_paths()
     promoted, remaining = promote_candidates(paths["candidates"], paths["golden"])
@@ -455,7 +455,7 @@ def eval_promote() -> None:
 @click.option("--limit", default=10, show_default=True, help="Top-K to request per query.")
 def eval_run(tag: str, limit: int) -> None:
     """Execute the eval harness against the running Mnemos server."""
-    from eval.harness import (
+    from mnemos_eval import (
         EvalRun,
         EvalRunner,
         aggregate_metrics,
@@ -497,8 +497,8 @@ def eval_run(tag: str, limit: int) -> None:
 def eval_compare(tag_a: str, tag_b: str) -> None:
     """Compare two eval runs by tag."""
     import json
-    from eval.harness.reporter import compare_reports
-    from eval.harness.schema import MetricsReport
+    from mnemos_eval.reporter import compare_reports
+    from mnemos_eval.schema import MetricsReport
 
     paths = _eval_paths()
 

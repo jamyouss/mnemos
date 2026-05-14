@@ -5,7 +5,7 @@ from typing import Iterable
 
 import httpx
 
-from eval.harness.schema import GoldenItem, QueryResult
+from mnemos_eval.schema import GoldenItem, QueryResult
 
 
 class EvalRunner:
@@ -41,8 +41,14 @@ class EvalRunner:
         )
 
     def _build_request(self, item: GoldenItem) -> tuple[str, dict]:
+        # /api/search-skills returns SkillResult (no file_path), so route skill_discovery
+        # through /api/search restricted to mnemos_skills — keeps file_path matching consistent.
         if item.intent == "skill_discovery":
-            return "/api/search-skills", {"query": item.query, "limit": self._limit}
+            return "/api/search", {
+                "query": item.query,
+                "limit": self._limit,
+                "collections": ["mnemos_skills"],
+            }
         if item.intent == "memory_recall":
             return "/api/search-memory", {"query": item.query, "limit": self._limit}
         if item.intent == "code_search":
