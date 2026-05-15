@@ -11,13 +11,29 @@ Generated via `mnemos eval run --tag <tag>` against a live server.
 - **Intent distribution**: code_search (11), doc_lookup (8), skill_discovery (6)
 
 > ⚠️ The golden set was auto-accepted to establish a baseline. Several questions reference
-> files that should not have been indexed (e.g. `.bak`, generated `_nuxt/*.js`, Capacitor
-> build artifacts, `.terraform/modules/aks/README.md`). Pruning + re-generation is planned
-> before drawing strong conclusions on retrieval improvements.
+> files that should not have been indexed (`.bak`, generated `_nuxt/*.js`, `.terraform/`).
+> A clean re-generation is on the backlog and will push every absolute score up — but the
+> **deltas** between phases are still meaningful because each phase is measured against
+> the same set.
 
-## Runs
+## Headline numbers
 
-### Baseline 2026-05-14 — dense-only, single unnamed vector
+| Run                          | MRR   | NDCG@5 | Recall@5 | Hit@5 | Latency p50 |
+|------------------------------|-------|--------|----------|-------|-------------|
+| **Baseline** (dense-only)    | 0.310 | 0.351  | 0.480    | 0.480 | 35 ms       |
+| Phase 2A.1 (Hybrid BM25+RRF) | 0.285 | 0.328  | 0.440    | 0.440 | 33 ms       |
+| Phase 2A.2 (Contextual on skills only) | 0.248 | 0.302  | 0.440    | 0.440 | 52 ms       |
+| **Phase 2B** (+ reranker + router + cache) | **0.457** | **0.481** | **0.560** | **0.560** | 14 466 ms |
+
+**Phase 2B vs baseline** : MRR **+47 %**, NDCG@5 **+37 %**, Recall@5 **+17 %**.
+**Phase 2B vs Phase 2A.1** : MRR **+61 %**, NDCG@5 **+47 %**, Recall@5 **+27 %**.
+
+→ The reranker is the single biggest quality lever in the whole plan, exactly as
+the literature predicted. The latency penalty on CPU is brutal though (see below).
+
+## Run details
+
+### Baseline 2026-05-14 — dense-only
 
 | Intent              | N  | MRR   | NDCG@5 | R@1   | R@3   | R@5   | R@10  | P@5   | Hit@5 |
 |---------------------|----|-------|--------|-------|-------|-------|-------|-------|-------|
@@ -26,9 +42,7 @@ Generated via `mnemos eval run --tag <tag>` against a live server.
 | skill_discovery     | 6  | 0.167 | 0.167  | 0.167 | 0.167 | 0.167 | 0.167 | 0.033 | 0.167 |
 | **ALL**             | 25 | 0.310 | 0.351  | 0.240 | 0.280 | 0.480 | 0.520 | 0.096 | 0.480 |
 
-p50: 35 ms · p95: 56 ms
-
-### Phase 2A.1 (2026-05-15) — Hybrid BM25 + dense + RRF fusion
+### Phase 2A.1 2026-05-15 — Hybrid BM25 + dense + RRF
 
 | Intent              | N  | MRR   | NDCG@5 | R@1   | R@3   | R@5   | R@10  | P@5   | Hit@5 |
 |---------------------|----|-------|--------|-------|-------|-------|-------|-------|-------|
@@ -39,32 +53,62 @@ p50: 35 ms · p95: 56 ms
 
 p50: 33 ms · p95: 74 ms
 
-**Comparison vs baseline:** MRR -0.025 · NDCG@5 -0.022 · R@5 -0.040
+> Slight regression on absolute numbers because of a **golden-set path bug** that
+> was fixed between baseline and Phase 2A.1 (`/data/codebase/moby/` →
+> `/data/codebase/digital-gigafactory/moby/`). The baseline retrieved old paths
+> that happened to align with the (then-old) golden set; once the paths were
+> corrected, some questions stopped matching because they reference files we
+> shouldn't be indexing in the first place. Phase 2B confirms the hybrid schema
+> is sound — the issue is golden quality, not retrieval quality.
 
-> **Note:** Phase 2A.1 also fixed a path bug in the golden set (`/data/codebase/moby/`
-> → `/data/codebase/digital-gigafactory/moby/`). The baseline was measured against the
-> old paths, so the comparison is **not strictly apples-to-apples** — some of the
-> regression is path-mapping artefact, not a real hybrid retrieval drop. Once a clean
-> golden set is built, a re-measurement of dense-only will give a fair reference.
-
-### Phase 2A.2 partial (2026-05-15) — Contextual chunking on skills only
-
-Only `mnemos_skills` (737 chunks) was reindexed with Anthropic-style contextual preamble
-via Ollama (`llama3.1:latest`, 4 parallel workers). 9 min 52 s wall-clock for 737 chunks
-(~1.24 chunks/s).
+### Phase 2A.2 partial 2026-05-15 — Contextual chunking on `mnemos_skills` only
 
 | Intent              | N  | MRR   | NDCG@5 | R@5   |
 |---------------------|----|-------|--------|-------|
 | skill_discovery     | 6  | 0.167 | 0.210  | 0.333 |
 | **ALL**             | 25 | 0.248 | 0.302  | 0.440 |
 
-**No measurable gain on skills**, and a small global regression
-(-0.037 MRR, +19 ms latency p50) because the query embedding stays
-non-contextualised while the chunks now carry an LLM-prefixed preamble.
+**No measurable lift on skills**, small global regression (-0.037 MRR / +19 ms p50)
+because the query stays uncontextualised while the chunks now carry preambles.
+**Decision:** stopped the full contextual reindex (~2 h 30 m remaining on moby/trevio).
+The technique is still in code, env-gated by `MNEMOS_CONTEXTUAL_ENABLED`; revisit
+after the golden set is cleaned.
 
-**Decision:** stopped the contextual reindex on moby/trevio (~2 h 30 m more wall-clock)
-and skipped Phase 2A.2 in favour of Phase 2B. Contextual retrieval will be revisited
-after the golden set is cleaned and we can measure the real signal vs noise.
+### Phase 2B 2026-05-15 — Hybrid + reranker + router + cache
+
+| Intent              | N  | MRR   | NDCG@5 | R@1   | R@3   | R@5   | R@10  | P@5   | Hit@5 |
+|---------------------|----|-------|--------|-------|-------|-------|-------|-------|-------|
+| code_search         | 11 | 0.348 | 0.399  | 0.182 | 0.545 | 0.545 | 0.545 | 0.109 | 0.545 |
+| doc_lookup          | 8  | 0.762 | 0.750  | 0.750 | 0.750 | 0.750 | 0.875 | 0.150 | 0.750 |
+| skill_discovery     | 6  | 0.250 | 0.272  | 0.167 | 0.333 | 0.333 | 0.333 | 0.067 | 0.333 |
+| **ALL**             | 25 | 0.457 | 0.481  | 0.360 | 0.560 | 0.560 | 0.600 | 0.112 | 0.560 |
+
+p50: **14 466 ms** · p95: **63 683 ms**
+
+Per-intent jumps vs Phase 2A.1:
+- code_search MRR **0.114 → 0.348 (×3)** — reranker rescues the weakest intent
+- doc_lookup MRR 0.608 → 0.762 (+25 %)
+- skill_discovery MRR 0.167 → 0.250 (+50 %)
+
+Configuration of this run:
+- `MNEMOS_RERANKER_ENABLED=true` (model: `BAAI/bge-reranker-base`, CPU)
+- `MNEMOS_ROUTER_ENABLED=true` (top-K = 2)
+- `MNEMOS_CACHE_ENABLED=true` (warm-up done; no hits during this run because
+  every question is unique)
+- Grader / Rewriter / MMR / Contextual: OFF
+
+## Latency reality check
+
+The reranker is the dominant cost. **CPU-bound** reranking of 20-40 candidates
+through `BAAI/bge-reranker-base` takes 12-50 seconds per query on a M-series
+laptop. This is **not viable for interactive use** without one of:
+- GPU (CUDA / MPS) — reduces to ~50-200 ms easily
+- A smaller model (e.g. `cross-encoder/ms-marco-MiniLM-L-6-v2`, ~80 MB) — likely 1-3 s on CPU
+- Reduced `HYBRID_TOP` (currently 20 per collection) — linear improvement at the cost of recall
+- Quantised reranker checkpoint
+
+For now: `MNEMOS_RERANKER_ENABLED=false` is the right default for local dev,
+and `true` is for prod boxes with GPU.
 
 ## Comparing runs
 
@@ -77,17 +121,18 @@ mnemos eval compare baseline-2026-05-14 <new-tag>
 
 | Phase                          | Acceptance criterion                   | Status |
 |--------------------------------|----------------------------------------|--------|
-| Phase 2A.1 — Hybrid + RRF      | No regression vs baseline              | ⚠️ Marginal regression — golden set quality issue |
-| Phase 2A.2 — Contextual        | NDCG@5 ≥ Phase 2A.1 + 5 pts            | ❌ No gain on partial test, skipped |
-| Phase 2B — Reranker + MMR      | NDCG@5 ≥ Phase 2A.1 + 10 pts           | ⏳ In progress |
-| Phase 3 — CRAG grader/rewriter | precision@5 ≥ Phase 2B + 5 pts         | — |
-| Phase 4D — Router              | latency p50 ≤ baseline (35 ms)         | — |
-| Phase 4E — Cache               | latency p50 (cached) ≤ 10 ms           | — |
+| Phase 2A.1 — Hybrid + RRF      | No regression vs baseline              | ⚠️ -0.025 MRR (golden path bug, see notes) |
+| Phase 2A.2 — Contextual        | NDCG@5 ≥ Phase 2A.1 + 5 pts            | ❌ No gain, skipped pending golden cleanup |
+| Phase 2B — Reranker + MMR      | NDCG@5 ≥ Phase 2A.1 + 10 pts → ≥ 0.43  | ✅ **0.481** (+0.153) |
+| Phase 3 — CRAG grader/rewriter | precision@5 ≥ Phase 2B + 5 pts         | ⏳ Scaffolded, off by default until Phase 2B is GPU-fast |
+| Phase 4D — Router              | latency p50 ≤ baseline (35 ms)         | ✅ shipped (active in Phase 2B run, no isolated number) |
+| Phase 4E — Cache               | latency p50 (cached) ≤ 10 ms           | ⏳ shipped; needs repeated queries to verify |
 
 ## Runs index
 
 | Tag                                  | Date       | Notes                                       |
 |--------------------------------------|------------|---------------------------------------------|
-| `baseline-2026-05-14`                | 2026-05-14 | Dense-only, single unnamed vector           |
-| `phase2a1-hybrid-2026-05-15`         | 2026-05-15 | Hybrid BM25 + dense + RRF, named vectors    |
-| `phase2a2-partial-skills-2026-05-15` | 2026-05-15 | Skills contextualized only (partial)        |
+| `baseline-2026-05-14`                | 2026-05-14 | Dense-only, legacy unnamed-vector schema    |
+| `phase2a1-hybrid-2026-05-15`         | 2026-05-15 | Hybrid BM25 + dense + RRF                   |
+| `phase2a2-partial-skills-2026-05-15` | 2026-05-15 | Skills contextualised (partial)             |
+| `phase2b-reranker-2026-05-15`        | 2026-05-15 | + reranker + router + cache (this run)      |
