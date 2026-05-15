@@ -248,6 +248,23 @@ pytest tests/
 
 ---
 
+## 🛣️ Next milestone
+
+The current default-on production setup (hybrid + reranker + router + cache)
+delivers **+47 % MRR** over plain dense retrieval on our golden set. The next
+iteration tightens the corners:
+
+| Item | Why it matters | Status |
+|------|---------------|--------|
+| **GPU host for the reranker** | `bge-reranker-base` on CPU takes ~14 s p50; on GPU it's ~250 ms. Unlocks the reranker as a default-on feature, not an opt-in. | 🔜 |
+| **CRAG rewriter with a fast LLM** (Anthropic Haiku, Groq) | Currently the rewriter is wired but disabled because grader+rewriter on local Ollama pushes per-query latency past 100 s. With a cloud LLM it should land at +5–10 % recall on vague queries. | 🔜 |
+| **`project_hint` from git hook → memory extractor** | Stops the LLM from inferring (and occasionally hallucinating) the `project` field. The hook already knows the repo it's running in; pass it through. | 🔜 |
+| **Full re-index after the `_should_skip` fix** | All 4 source collections (`mnemos_skills`, `mnemos_docs`, `mnemos_code_moby`, `mnemos_code_trevio`) were indexed before the latest skip rules. A full re-index purges accidentally-included junk paths. | 🔜 |
+| **`contextual chunking` retry** with cleaner golden | First attempt showed no gain because the golden was noisy. Now that the golden is clean, contextual via Anthropic API (prompt caching) deserves a second measurement. | 🔜 |
+
+Track this list and the rolling design notes in
+[`docs/ROADMAP.md`](docs/ROADMAP.md).
+
 ## License
 
 MIT — see [LICENSE](LICENSE) for the boring legal bits.

@@ -11,24 +11,34 @@ logger = logging.getLogger("mnemos.extractor")
 
 _MAX_DIFF_BYTES = 32_768
 
-_SYSTEM_PROMPT = """You are a memory extraction assistant for a software development team.
-Given a git commit message and diff, extract actionable memories worth remembering for future work.
+_SYSTEM_PROMPT = """You extract memories from git commits for a software team's
+long-term knowledge base. Every memory you produce MUST be grounded in concrete
+text from the diff provided below — never invent or paraphrase from your training data.
 
-Types of memories to extract:
-- "decision": Architectural or design decisions made (e.g., "Chose flat API routes over nested")
-- "pattern": Code patterns introduced or established (e.g., "All handlers follow middleware chain pattern")
-- "convention": Naming or structural conventions (e.g., "Services use Create/Get/Update/Delete naming")
-- "lesson": Bugs fixed or workarounds applied (e.g., "Qdrant scroll requires with_vectors=True for updates")
+Memory categories (use exactly one per memory):
+- "decision"   : an architectural or design choice the author made
+- "pattern"    : a code pattern introduced or reinforced
+- "convention" : a naming or structural rule the change establishes
+- "lesson"     : a bug fixed, workaround applied, or pitfall the change documents
 
-Rules:
-- Return a JSON array of objects with keys: content, memory_type, project, tags
-- project should be inferred from file paths in the diff (e.g., "moby", "trevio", "infra")
-- If nothing worth remembering, return []
-- Be concise: each memory should be 1-2 sentences
-- Focus on WHY decisions were made, not WHAT code was written
-- Do NOT extract trivial changes (typos, formatting, import ordering)
+Hard rules — break any and your output is invalid:
+1. Every memory MUST quote, paraphrase, or directly summarise content that
+   appears in the diff. If you can't point to specific lines, do not emit it.
+2. DO NOT use the placeholder example phrasings shown elsewhere ("flat API
+   routes", "middleware chain", "Create/Get/Update/Delete naming",
+   "Qdrant scroll", etc.) unless those exact words appear in the diff.
+3. Skip trivial / mechanical changes: typo fixes, import re-ordering, version
+   bumps, formatting, generated files, vendored code.
+4. Each memory is 1–3 sentences and explains the WHY when possible, not the WHAT.
+5. If the diff has nothing worth remembering, return an empty array. Empty is
+   a valid and frequent answer.
 
-Return ONLY the JSON array, no markdown fences, no explanation."""
+Output format:
+- JSON array of objects with keys: content (string), memory_type (one of the
+  four above), project (string or null), tags (array of short strings).
+- project: if a project name is given in the input, use it verbatim. Otherwise
+  infer it from file paths in the diff, or set it to null. Do not guess.
+- Return ONLY the JSON array. No markdown fences, no surrounding prose."""
 
 _USER_TEMPLATE = """## Commit Message
 {commit_message}
