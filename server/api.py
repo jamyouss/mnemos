@@ -411,6 +411,12 @@ async def reindex(body: ReindexRequest, request: Request, background_tasks: Back
     else:
         indexer.ensure_collection(body.collection)
 
+    # Semantic cache (if enabled) is invalidated on any reindex so stale results
+    # can never be served after the underlying index has changed.
+    cache = getattr(request.app.state, "cache", None)
+    if cache is not None and cache.enabled:
+        cache.invalidate()
+
     if body.path:
         base_path = _validate_path(body.path)
         background_tasks.add_task(

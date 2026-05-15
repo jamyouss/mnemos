@@ -33,6 +33,27 @@ class Settings(BaseSettings):
     mnemos_mmr_enabled: bool = False
     mnemos_mmr_lambda: float = 0.5
 
+    # CRAG corrective loop (Phase 3): document grader + query rewriter
+    mnemos_grader_enabled: bool = False
+    mnemos_grader_workers: int = 4
+    mnemos_rewriter_enabled: bool = False
+    mnemos_rewriter_strategy: str = "expansion"     # expansion | decompose | hyde
+    mnemos_rewriter_max_variants: int = 3
+
+    # Semantic router (Phase 4D)
+    mnemos_router_enabled: bool = False
+    mnemos_router_top_k: int = 2
+    mnemos_router_min_score: float = 0.4
+
+    # Semantic cache (Phase 4E)
+    mnemos_cache_enabled: bool = False
+    mnemos_cache_threshold: float = 0.95
+    mnemos_cache_ttl_seconds: int = 3600
+
+    # Observability (Phase 4 / 9): query logging JSONL
+    mnemos_query_log_enabled: bool = False
+    mnemos_query_log_path: str = "/data/state/query-log.jsonl"
+
     class Config:
         env_prefix = ""
 

@@ -7,345 +7,279 @@
 </p>
 
 <p align="center">
-  <a href="#quick-start">Quick Start</a> &middot;
-  <a href="#features">Features</a> &middot;
-  <a href="#mcp-integration">MCP Integration</a> &middot;
-  <a href="#tech-stack">Tech Stack</a>
+  <b>The self-hosted memory layer for AI coding agents.</b>
+</p>
+
+<p align="center">
+  <a href="#why-mnemos">Why</a> &middot;
+  <a href="#whats-inside">What's inside</a> &middot;
+  <a href="#quick-start">Quick start</a> &middot;
+  <a href="#mcp-integration">MCP</a> &middot;
+  <a href="#configuration">Configuration</a> &middot;
+  <a href="#architecture">Architecture</a>
 </p>
 
 ---
 
-Mnemos is an intelligent memory layer for AI coding agents. It runs entirely locally, indexes your codebase automatically, extracts memories from your git history, and integrates with any MCP-compatible client like Claude Code or Claude Desktop.
+Mnemos turns your codebase, your docs, your skills, and your **git history** into a
+queryable memory layer that any MCP-compatible agent (Claude Code, Claude Desktop,
+Continue, Cursor via wrapper) can call.
 
-## Features
+- **Runs entirely on your machine.** No SaaS, no cloud calls — Qdrant + Ollama + sentence-transformers.
+- **Code-aware indexing.** Tree-sitter chunking for Go, SFC sections for Vue, heading splits for Markdown.
+- **Memories from git.** Pre-push hooks extract decisions, patterns, and lessons from every commit via an LLM, dedupe them, and surface them once you approve.
+- **State-of-the-art retrieval.** Hybrid BM25 + dense + RRF fusion, cross-encoder reranker, CRAG corrective loop, semantic cache. All toggleable.
+- **MCP-native.** Drop the endpoint into your Claude Code config and you're done.
 
-### Semantic Search
-- **Multi-collection search** -- Search across code, docs, skills, and memory simultaneously
-- **Code-aware search** -- Filter by language, symbol type, and project
-- **Skill discovery** -- Find relevant agent skills by semantic similarity
-- **Memory search** -- Query approved conversation memory entries
+## Why Mnemos
 
-### Smart Memory
-- **Auto-extraction from commits** -- Ollama analyzes your git diffs to extract decisions, patterns, and lessons learned
-- **Deduplication with merge** -- Similar memories are automatically detected and consolidated via LLM
-- **Approval workflow** -- Extracted memories start as pending, require review before surfacing in search
-- **Project scoping** -- Tag memories by project for targeted retrieval
-- **Configurable strategy** -- Choose merge or replace for duplicate handling
+| | Mnemos | Cursor / Copilot | Continue.dev | Sourcegraph Cody | mem0 |
+|---|---|---|---|---|---|
+| **Self-hosted, zero SaaS** | ✅ | ❌ | ✅ | ⚠️ enterprise | ✅ |
+| **MCP server (native)** | ✅ | ❌ | client only | ❌ | partial |
+| **Memories from git history** | ✅ unique | ❌ | ❌ | ❌ | ❌ |
+| **Approval workflow on memories** | ✅ unique | ❌ | ❌ | ❌ | ❌ |
+| **Hybrid retrieval (BM25 + dense)** | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Cross-encoder reranker** | ✅ optional | ✅ | ✅ | ✅ | partial |
+| **CRAG corrective loop** | ✅ optional | ❌ | ❌ | ❌ | ❌ |
+| **Code-aware AST chunking** | ✅ Go/Vue | ?? | partial | ✅ | n/a |
+| **Skill indexing for agents** | ✅ unique | ❌ | ❌ | ❌ | ❌ |
 
-### Automatic Indexing
-- **File watcher** -- Monitors your codebase and config directories, indexes changes on the fly
-- **Language-aware chunking** -- Go files split by declarations, Vue by sections, Markdown by headings
-- **Incremental reindex** -- Only re-processes changed files
-- **Push API** -- Send file content directly for CI/CD integration
+If you ship code with an AI agent, want full data control, and care about the
+agent _remembering_ the decisions you've already made — Mnemos is the only tool
+that does all of that in one place.
 
-### Deployed Mode
-- **Multi-tenant** -- API key auth with per-tenant collection prefixes
-- **Push-only indexing** -- No filesystem access required, files sent via API
-- **GitHub Actions** -- Reusable workflow to sync collections on every commit
+## What's inside
 
-## Quick Start
+```
+Indexing pipeline
+    file change  →  AST chunker  →  [contextual preamble*]  →  dense embed
+                                                            →  BM25 sparse
+                                                            →  Qdrant upsert
+Retrieval pipeline
+    query  →  [semantic router*]  →  hybrid query (dense + BM25, RRF k=60)
+           →  [cross-encoder reranker*]  →  [MMR diversification*]
+           →  [CRAG grader → query rewriter retry*]
+           →  results
+                ↑
+           [semantic cache shortcut*]
+
+Memory pipeline
+    git commit  →  pre-push hook  →  LLM extraction  →  LLM dedup
+                                  →  pending  →  human review  →  approved
+                                  →  searchable via MCP
+
+(* = togglable feature flag)
+```
+
+| Layer | Tech |
+|-------|------|
+| Server | FastAPI + MCP Streamable HTTP, Python 3.12+ |
+| Vector DB | Qdrant (cosine, hybrid named vectors with `Modifier.IDF`) |
+| Embeddings | `sentence-transformers/all-MiniLM-L6-v2` (384 dims, normalised) |
+| Sparse | Lightweight BM25 encoder (camelCase / snake_case aware) |
+| Reranker | `BAAI/bge-reranker-base` by default — swap to `bge-reranker-v2-m3` for max quality |
+| LLM | Pluggable provider — Ollama (local), Anthropic API, or any OpenAI-compatible endpoint |
+| Watcher | `watchdog`, debounced batching |
+| CLI | Click + Rich |
+
+## Quick start
 
 ### Prerequisites
-
 - Docker & Docker Compose
-- [Ollama](https://ollama.ai) (for memory extraction) or use the bundled service
+- [Ollama](https://ollama.ai) (bundled) or an Anthropic / OpenAI-compatible API key
 
-### Development
-
+### Boot the stack
 ```bash
-# Start core services
-docker compose up -d
-
-# Optional: start with Ollama for memory extraction
-docker compose --profile llm up -d
-
-# Pull the default model (if using local Ollama)
-ollama pull llama3.1:8b
+docker compose up -d                     # qdrant + rag-server + watcher
+docker compose --profile llm up -d       # adds bundled ollama
+ollama pull llama3.1:8b                  # default model for extraction / grading
 ```
 
-This starts three services:
-- `qdrant` -- Vector database on port 6333
-- `mnemos-server` -- FastAPI + MCP server on port 8100
-- `watcher` -- File system watcher that auto-indexes changes
+Three containers start:
+- `qdrant` — vector DB on `:6333`
+- `mnemos-rag-server` — FastAPI + MCP on `:8100`
+- `watcher` — incremental indexer
 
-Open the MCP endpoint at `http://localhost:8100/mcp`.
+MCP endpoint: `http://localhost:8100/mcp`
 
-### Initial Reindex
-
-The watcher only picks up changes. To index existing content:
-
+### CLI
 ```bash
-python3 -m venv venv && source venv/bin/activate
-pip install -e cli/
-
-mnemos reindex --collection mnemos_skills --path /data/claude-config/skills --full
-mnemos reindex --collection mnemos_docs --path /data/claude-config/docs --full
-mnemos reindex --collection mnemos_code_moby --path /data/codebase/moby --full
-```
-
-> **Note:** Paths are **container paths**. By default `~/Developments/Projects/digital-gigafactory` maps to `/data/codebase` and `~/.claude` maps to `/data/claude-config`. Edit `docker-compose.yml` to change.
-
-### Verify
-
-```bash
-mnemos status
-```
-
-## Git Hooks Setup
-
-Mnemos can automatically extract memories from your git commits using global hooks.
-
-### Install
-
-```bash
-./scripts/install-hooks.sh --global --watch ~/Developments/Projects/digital-gigafactory
-```
-
-This:
-1. Copies hooks to `~/.config/git/hooks/`
-2. Sets `git config --global core.hooksPath`
-3. Adds the path to `~/.config/mnemos/repos`
-
-### How it works
-
-- **pre-push** (default): analyzes all commits being pushed, extracts memories
-- **post-commit**: analyzes each commit individually
-- Hooks are **non-blocking** -- they fire and forget, never slow down git
-- Hooks are **fail-safe** -- if Mnemos is unreachable, they silently succeed
-- Hooks **chain** to repo-local hooks in `.git/hooks/` -- existing hooks still work
-- Only triggers for repos listed in `~/.config/mnemos/repos`
-
-### Configuration
-
-```bash
-# Change trigger mode (default: pre-push)
-export MNEMOS_HOOK_TRIGGER=both  # or: pre-push, post-commit
-
-# Change Mnemos server URL (default: http://localhost:8100)
+make install                             # creates ./venv + installs the CLI
+source venv/bin/activate
 export MNEMOS_URL=http://localhost:8100
+
+mnemos status                            # collection counts
+mnemos search "JWT validation"
+mnemos search-code "ride cancel" --project moby --language go
+mnemos memory list
 ```
 
-## MCP Integration
-
-### Claude Code (`~/.claude/settings.json`)
-
-```json
-{
-  "mcpServers": {
-    "mnemos": {
-      "type": "url",
-      "url": "http://localhost:8100/mcp"
-    }
-  }
-}
+### Initial reindex
+The watcher only catches changes — the first time, you need to ingest:
+```bash
+mnemos reindex --recreate --full --collection mnemos_skills        --path /data/claude-config/skills
+mnemos reindex --recreate --full --collection mnemos_docs          --path /data/claude-config/docs
+mnemos reindex --recreate --full --collection mnemos_code_moby     --path /data/codebase/digital-gigafactory/moby
 ```
 
-### Claude Desktop (`claude_desktop_config.json`)
+(`--recreate` migrates a legacy unnamed-dense collection to the hybrid schema; drop it after the first run.)
 
-```json
-{
-  "mcpServers": {
-    "mnemos": {
-      "type": "url",
-      "url": "http://localhost:8100/mcp"
-    }
-  }
-}
-```
-
-### Available MCP Tools
-
-| Tool | Description |
-|------|-------------|
-| `mnemos_search` | Semantic search across all collections |
-| `mnemos_search_code` | Code search with language/symbol/project filters |
-| `mnemos_search_skills` | Find relevant skills by semantic similarity |
-| `mnemos_search_memory` | Search approved memory entries |
-| `mnemos_memory` | Store a new memory entry (with deduplication) |
-| `mnemos_memory_list` | List memory entries by project or status |
-| `mnemos_memory_review` | Approve or reject a pending entry |
-| `mnemos_reindex` | Trigger collection reindexing |
-| `mnemos_status` | Get status of all collections |
-
-## Recommended Agent Instructions
-
-To make your AI agent use Mnemos as the primary search mechanism, add the following to your `~/.claude/CLAUDE.md` (or equivalent agent config):
-
-```markdown
-## Mnemos MCP — Search Priority
-
-**ALWAYS try Mnemos MCP tools before falling back to traditional search (Grep, Glob, Read).** Mnemos provides semantic search across your indexed codebase, docs, skills, and memory — it is faster and more relevant than text-based search for most questions.
-
-### Search Order
-
-1. **First**: Use Mnemos MCP tools based on intent:
-   - `mnemos_search_code` — looking for functions, types, patterns, implementations
-   - `mnemos_search` — general cross-collection search (docs + code + skills)
-   - `mnemos_search_skills` — finding relevant agent skills
-   - `mnemos_search_memory` — past decisions, conventions, lessons learned
-   - `mnemos_status` — check if Mnemos is available and collections are populated
-
-2. **Fallback only if Mnemos returns no useful results**:
-   - No results at all, OR
-   - Results have low relevance scores (< 0.5), OR
-   - `mnemos_status` shows collection is empty or Mnemos is down
-
-   Then use Grep / Glob / Read as usual.
-
-3. **Always store insights**: After resolving a non-trivial question, use `mnemos_memory` to store the decision, pattern, or lesson — so future sessions benefit.
-
-### When to skip Mnemos
-
-- Reading a specific known file path → use Read directly
-- Listing directory contents → use Glob directly
-- Checking git state → use git commands directly
-- Searching in files just created in current session (not yet indexed)
-```
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Server | FastAPI, MCP (Streamable HTTP), Python 3.12+ |
-| Embeddings | `all-MiniLM-L6-v2` (384 dims, sentence-transformers) |
-| Vector DB | Qdrant (cosine similarity) |
-| LLM | Pluggable provider — `ollama` (local default), `anthropic`, or any OpenAI-compatible endpoint (vLLM, LM Studio, Together, Groq, OpenRouter…) |
-| Watcher | watchdog, debounced event batching |
-| CLI | Click, Rich |
-| Deployment | Docker Compose, multi-tenant auth |
-
-## CLI Reference
+## Git memory hooks
+Memories from your commits, with a review gate.
 
 ```bash
-pip install -e cli/
-export MNEMOS_URL=http://localhost:8100
+./scripts/install-hooks.sh --global --watch ~/Developments/Projects/your-org
 ```
 
-### Search
+What you get:
+- **pre-push** hook (default): every `git push` triggers an async LLM extraction over the commits being pushed.
+- Memories land in `mnemos_memory` with `status=pending`. Until you approve them, they're invisible to search.
+- LLM dedup (cosine ≥ 0.85): similar memories are merged or replaced, your call (`MNEMOS_DEDUP_STRATEGY`).
+- Hooks are **non-blocking** and **fail-safe**: if Mnemos is down, git never slows down.
 
-```bash
-mnemos search "authentication middleware pattern"
-mnemos search "error handling" --collection mnemos_code_moby --file-type go --limit 10
-
-mnemos search-code "JWT validation" --language go --symbol-type func --project moby
-mnemos search-skills "golang microservice development"
-```
-
-### Indexing
-
-```bash
-mnemos reindex --collection mnemos_skills --path /data/claude-config/skills
-mnemos reindex --collection mnemos_code_moby --path /data/codebase/moby --full
-```
-
-### Memory
-
+Approve / reject:
 ```bash
 mnemos memory list
-mnemos memory list --status approved
-mnemos memory add "Always use flat resource paths" --project moby --type decision --tags routing
 mnemos memory approve <id>
 mnemos memory reject <id>
 ```
 
-## Collections
+## MCP integration
 
-Six collections in Qdrant, all cosine similarity with 384-dimensional vectors:
+`~/.claude/settings.json` (Claude Code) or `claude_desktop_config.json` (Claude Desktop):
 
-| Collection | Source | Description |
-|------------|--------|-------------|
-| `mnemos_skills` | `~/.claude/skills/` | Agent skill definitions |
-| `mnemos_docs` | `~/.claude/docs/` | Architecture & pattern docs |
-| `mnemos_memory` | _(API / git hooks)_ | Memory entries with approval workflow |
-| `mnemos_code_moby` | `moby/` | Moby codebase (Go, Vue) |
-| `mnemos_code_trevio` | `trevio/` | Trevio platform (Go, UI modules) |
-| `mnemos_code_infra` | `infra/`, `github-cicd/` | Infrastructure & CI/CD |
+```json
+{
+  "mcpServers": {
+    "mnemos": {
+      "type": "url",
+      "url": "http://localhost:8100/mcp"
+    }
+  }
+}
+```
+
+Once connected, every agent gets these tools:
+
+| Tool | Use it for |
+|------|------------|
+| `mnemos_search` | Semantic search across all collections |
+| `mnemos_search_code` | Code-only search with language / symbol / project filters |
+| `mnemos_search_skills` | Find the right skill by description |
+| `mnemos_search_memory` | Recall past decisions and patterns |
+| `mnemos_memory` | Store a new memory (goes to `pending`) |
+| `mnemos_memory_list` | List memories by project / status |
+| `mnemos_memory_review` | Approve or reject |
+| `mnemos_reindex` | Trigger a reindex |
+| `mnemos_status` | Health + collection counts |
+
+### Recommended agent prompt
+Add this to your `~/.claude/CLAUDE.md` so the agent uses Mnemos first:
+
+```markdown
+## Mnemos MCP — Search Priority
+
+ALWAYS try Mnemos MCP tools before falling back to Grep / Glob / Read. Mnemos has
+language-aware chunking, hybrid retrieval, and your indexed memory; it's faster
+and more relevant than text search for most questions.
+
+1. mnemos_search_code  — functions, types, implementations
+2. mnemos_search       — cross-collection (docs + code + skills)
+3. mnemos_search_skills— find the right agent skill
+4. mnemos_search_memory— past decisions, patterns, lessons learned
+
+Fallback to Grep / Glob only when Mnemos returns nothing or scores < 0.5.
+After resolving a non-trivial question, use `mnemos_memory` to persist the insight.
+```
 
 ## Configuration
 
-### Environment Variables
+Every retrieval upgrade is **toggleable** so you can ship features one at a time
+and roll them back instantly.
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `QDRANT_HOST` | `localhost` | Qdrant hostname |
-| `QDRANT_PORT` | `6333` | Qdrant port |
-| `EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | Sentence-transformers model |
-| `CODEBASE_PATH` | `/data/codebase` | Root codebase path |
-| `CLAUDE_CONFIG_PATH` | `/data/claude-config` | Claude config path |
-| `MNEMOS_MODE` | `local` | `local` or `deployed` |
-| `MNEMOS_AUTH_ENABLED` | `false` | API key authentication |
-| `MNEMOS_STATE_DIR` | `/data/state` | Persistent state directory |
-| `MNEMOS_LLM_PROVIDER` | `ollama` | LLM provider (`ollama`, `anthropic`, `openai`) |
-| `MNEMOS_LLM_MODEL` | `llama3.1:8b` | Model name (provider-specific) |
-| `MNEMOS_LLM_API_KEY` | _(empty)_ | API key — required for `anthropic` and `openai` |
-| `MNEMOS_LLM_BASE_URL` | _(empty)_ | Override base URL (vLLM, LM Studio, Together, Groq, OpenRouter…) |
-| `MNEMOS_OLLAMA_URL` | `http://localhost:11434` | Legacy ollama-only URL (ignored when `MNEMOS_LLM_BASE_URL` is set) |
-| `MNEMOS_DEDUP_THRESHOLD` | `0.85` | Cosine similarity threshold for dedup |
-| `MNEMOS_DEDUP_STRATEGY` | `merge` | `merge` or `replace` |
-| `MNEMOS_HOOK_TRIGGER` | `pre-push` | Git hook trigger mode |
-| `MNEMOS_URL` | `http://localhost:8100` | Mnemos server URL (CLI/hooks) |
-| `MNEMOS_SERVER_URL` | `http://rag-server:8100` | Internal server URL (watcher) |
-| `WATCHER_DEBOUNCE_MS` | `2000` | Debounce delay in ms (watcher) |
+| Variable | Default | Phase | What it does |
+|---|---|---|---|
+| `MNEMOS_LLM_PROVIDER` | `ollama` | 1.5 | `ollama` / `anthropic` / `openai` |
+| `MNEMOS_LLM_MODEL` | `llama3.1:8b` | 1.5 | Provider-specific model |
+| `MNEMOS_LLM_API_KEY` | _empty_ | 1.5 | Required for `anthropic` / `openai` |
+| `MNEMOS_LLM_BASE_URL` | _empty_ | 1.5 | Override URL — works with vLLM, LM Studio, Groq, Together, OpenRouter… |
+| `MNEMOS_CONTEXTUAL_ENABLED` | `false` | 2A.2 | Prepend LLM preamble to every chunk (Anthropic-style) |
+| `MNEMOS_RERANKER_ENABLED` | `false` | 2B | Apply a cross-encoder rerank on top-20 → top-K |
+| `MNEMOS_RERANKER_MODEL` | `BAAI/bge-reranker-base` | 2B | Reranker checkpoint |
+| `MNEMOS_MMR_ENABLED` | `false` | 2B | MMR diversification post-rerank |
+| `MNEMOS_GRADER_ENABLED` | `false` | 3 | CRAG document grader (LLM judges each chunk) |
+| `MNEMOS_REWRITER_ENABLED` | `false` | 3 | When grader fails, rewrite the query and retry |
+| `MNEMOS_ROUTER_ENABLED` | `false` | 4D | Pick top-K relevant collections per query |
+| `MNEMOS_CACHE_ENABLED` | `false` | 4E | Cosine-similarity result cache (invalidated on reindex) |
+| `MNEMOS_QUERY_LOG_ENABLED` | `false` | 9 | Append every retrieval to a JSONL log |
+| `MNEMOS_DEDUP_THRESHOLD` | `0.85` | 1 | Memory dedup cosine threshold |
+| `MNEMOS_DEDUP_STRATEGY` | `merge` | 1 | `merge` or `replace` |
 
-### Deployed Mode
+Full reference: [`.env.example`](.env.example). All flags are also surfaced via `docker-compose.yml`.
 
-For shared servers or CI/CD push-based indexing:
+## Deploying for a team
 
 ```bash
 cp docker-compose.prod.yml docker-compose.override.yml
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+docker compose up -d
 ```
 
-Configure tenants in `config/tenants.yaml`:
-
-```yaml
-tenants:
-  tenant_yourname:
-    api_key: "your-secret-key-here"
-    collections_prefix: "yourname_"
-    max_documents: 0
-```
-
-### Push API
-
-```bash
-# Index a file
-curl -X POST http://your-server:8100/api/index \
-  -H "Content-Type: application/json" \
-  -d '{"file_path": "services/core/handler.go", "collection": "mnemos_code_moby", "content": "..."}'
-
-# Delete from index
-curl -X DELETE http://your-server:8100/api/index/mnemos_code_moby/services/core/handler.go
-```
+Multi-tenant mode (per-team API keys, push-only indexing, GitHub Actions
+workflow for CI sync) is configured in `config/tenants.yaml`. See
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the deployment model.
 
 ## Architecture
 
 ```
 mnemos/
   packages/
-    rag_core/       -- Shared library: models, embeddings, chunkers, indexer,
-                       memory_extractor, deduplicator
-  server/           -- FastAPI + MCP server (port 8100)
-  watcher/          -- File watcher service (watchdog)
-  cli/              -- Click CLI client
-  config/           -- Tenant configuration
-  scripts/
-    hooks/          -- Global git hooks (post-commit, pre-push)
-    install-hooks.sh -- Hook installer
-  tests/            -- Test suite
-  docker-compose.yml      -- Local development stack
-  docker-compose.prod.yml -- Production overrides
+    rag_core/                          shared library: indexing + retrieval
+      chunkers/                          AST chunking per language
+      llm/                               provider abstraction (ollama/anthropic/openai)
+      sparse.py                          BM25 encoder
+      contextual.py                      Anthropic-style preamble enricher
+      reranker.py                        cross-encoder + MMR
+      grader.py / rewriter.py            CRAG corrective loop
+      router.py                          semantic query router
+      cache.py                           cosine-similarity result cache
+      observability.py                   JSONL query log
+      memory_extractor.py / deduplicator.py
+    mnemos_eval/                       evaluation harness (recall@k, MRR, NDCG@k, hit-rate)
+  server/                              FastAPI + MCP Streamable HTTP
+  watcher/                             filesystem watchdog
+  cli/                                 Click + Rich
+  scripts/hooks/                       global git hooks
+  eval/                                golden set + run artefacts
+  docs/
+    ROADMAP.md                         CRAG/SOTA improvement plan
+    EVAL.md                            measured retrieval metrics
 ```
 
-## Development
+## Evaluating
+
+Mnemos ships its own harness so you can prove every change improves quality
+before merging.
 
 ```bash
-pip install pytest pytest-asyncio
-pip install -e packages/rag_core/
-pip install -r server/requirements.txt
+# Generate candidate questions from your indexed collections (semi-auto via LLM)
+mnemos eval generate --collection mnemos_code_moby --count 10
 
-pytest tests/
+# Review eval/dataset/_candidates.yaml, then:
+mnemos eval promote
+
+# Measure
+mnemos eval run --tag baseline
+mnemos eval run --tag with-reranker
+
+# Diff
+mnemos eval compare baseline with-reranker
 ```
+
+Metrics: recall@k, precision@k, MRR, **NDCG@k**, hit-rate@k, p50/p95 latency.
+Reports land in `eval/runs/<tag>.json` and a summary table in the terminal.
+
+Current numbers and history live in [`docs/EVAL.md`](docs/EVAL.md).
 
 ## License
 

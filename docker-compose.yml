@@ -44,6 +44,23 @@ services:
       MNEMOS_RERANKER_TYPE: "${MNEMOS_RERANKER_TYPE:-cross-encoder}"
       MNEMOS_MMR_ENABLED: "${MNEMOS_MMR_ENABLED:-false}"
       MNEMOS_MMR_LAMBDA: "${MNEMOS_MMR_LAMBDA:-0.5}"
+      # CRAG corrective loop (Phase 3)
+      MNEMOS_GRADER_ENABLED: "${MNEMOS_GRADER_ENABLED:-false}"
+      MNEMOS_GRADER_WORKERS: "${MNEMOS_GRADER_WORKERS:-4}"
+      MNEMOS_REWRITER_ENABLED: "${MNEMOS_REWRITER_ENABLED:-false}"
+      MNEMOS_REWRITER_STRATEGY: "${MNEMOS_REWRITER_STRATEGY:-expansion}"
+      MNEMOS_REWRITER_MAX_VARIANTS: "${MNEMOS_REWRITER_MAX_VARIANTS:-3}"
+      # Semantic router (Phase 4D)
+      MNEMOS_ROUTER_ENABLED: "${MNEMOS_ROUTER_ENABLED:-false}"
+      MNEMOS_ROUTER_TOP_K: "${MNEMOS_ROUTER_TOP_K:-2}"
+      MNEMOS_ROUTER_MIN_SCORE: "${MNEMOS_ROUTER_MIN_SCORE:-0.4}"
+      # Semantic cache (Phase 4E)
+      MNEMOS_CACHE_ENABLED: "${MNEMOS_CACHE_ENABLED:-false}"
+      MNEMOS_CACHE_THRESHOLD: "${MNEMOS_CACHE_THRESHOLD:-0.95}"
+      MNEMOS_CACHE_TTL_SECONDS: "${MNEMOS_CACHE_TTL_SECONDS:-3600}"
+      # Observability (Phase 9)
+      MNEMOS_QUERY_LOG_ENABLED: "${MNEMOS_QUERY_LOG_ENABLED:-false}"
+      MNEMOS_QUERY_LOG_PATH: "${MNEMOS_QUERY_LOG_PATH:-/data/state/query-log.jsonl}"
     volumes:
       - ~/Developments/Projects:/data/codebase:ro
       - ~/.claude:/data/claude-config:ro

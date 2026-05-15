@@ -12,15 +12,22 @@ from qdrant_client.models import (
     SparseVector,
 )
 
+import time
+
+from rag_core.cache import SemanticCache
 from rag_core.collections import COLLECTIONS, DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME
 from rag_core.embeddings import EmbeddingService
+from rag_core.grader import DocumentGrader
 from rag_core.models import (
     CodeSearchResult,
     MemoryResult,
     SearchResult,
     SkillResult,
 )
+from rag_core.observability import QueryLogger
 from rag_core.reranker import CrossEncoderReranker, mmr_select
+from rag_core.rewriter import QueryRewriter
+from rag_core.router import QueryRouter
 from rag_core.sparse import bm25_sparse
 
 
@@ -39,12 +46,22 @@ class SearchService:
         reranker: CrossEncoderReranker | None = None,
         mmr_enabled: bool = False,
         mmr_lambda: float = 0.5,
+        grader: DocumentGrader | None = None,
+        rewriter: QueryRewriter | None = None,
+        router: QueryRouter | None = None,
+        cache: SemanticCache | None = None,
+        query_logger: QueryLogger | None = None,
     ) -> None:
         self._qdrant = qdrant_client
         self._embeddings = embedding_service
         self._reranker = reranker
         self._mmr_enabled = mmr_enabled
         self._mmr_lambda = mmr_lambda
+        self._grader = grader
+        self._rewriter = rewriter
+        self._router = router
+        self._cache = cache
+        self._query_logger = query_logger
 
     # ------------------------------------------------------------------
     # Core hybrid retrieval — used by every public search method.
@@ -126,37 +143,20 @@ class SearchService:
 
         return ordered[:limit]
 
-    def search(
+    def _retrieve_all(
         self,
         query: str,
-        collections: list[str] | None = None,
-        file_types: list[str] | None = None,
-        path_filter: str | None = None,
-        limit: int = 5,
+        target_collections: list[str],
+        query_filter: Filter | None,
+        per_collection: int,
     ) -> list[SearchResult]:
         dense_vec = self._embeddings.embed(query)
         sparse_vec = bm25_sparse(query)
-
-        target_collections = collections or [
-            c.name for c in COLLECTIONS if c.name != "mnemos_memory"
-        ]
-
-        must_conditions: list = []
-        if file_types:
-            must_conditions.append(FieldCondition(key="language", match=MatchAny(any=file_types)))
-        if path_filter:
-            must_conditions.append(FieldCondition(key="file_path", match=MatchValue(value=path_filter)))
-        query_filter = Filter(must=must_conditions) if must_conditions else None
-
-        # Pull a wider candidate pool per collection when a reranker is going to
-        # re-score them; otherwise pulling only `limit` per collection is fine.
-        per_collection = _HYBRID_TOP if (self._reranker and self._reranker.enabled) else limit
-
-        all_results: list[SearchResult] = []
+        out: list[SearchResult] = []
         for coll_name in target_collections:
             hits = self._hybrid_query(coll_name, dense_vec, sparse_vec, query_filter, per_collection)
             for hit in hits:
-                all_results.append(
+                out.append(
                     SearchResult(
                         content=hit.payload.get("content", ""),
                         file_path=hit.payload.get("file_path", ""),
@@ -170,8 +170,122 @@ class SearchService:
                         },
                     )
                 )
+        return out
 
-        return self._rerank_and_select(query, all_results, limit)
+    @staticmethod
+    def _dedupe_by_path(results: list[SearchResult]) -> list[SearchResult]:
+        seen: set[str] = set()
+        out: list[SearchResult] = []
+        for r in results:
+            key = f"{r.collection}::{r.file_path}"
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(r)
+        return out
+
+    def search(
+        self,
+        query: str,
+        collections: list[str] | None = None,
+        file_types: list[str] | None = None,
+        path_filter: str | None = None,
+        limit: int = 5,
+    ) -> list[SearchResult]:
+        t_start = time.perf_counter()
+
+        # --- 0. Cache lookup (Phase 4E) ---
+        # Cache key includes the limit and filter set so that a more permissive
+        # entry can never be reused for a stricter call.
+        cache_namespace = (
+            "search:"
+            f"limit={limit}:"
+            f"colls={','.join(sorted(collections)) if collections else 'auto'}:"
+            f"types={','.join(sorted(file_types)) if file_types else ''}:"
+            f"path={path_filter or ''}"
+        )
+        if self._cache and self._cache.enabled:
+            cached = self._cache.lookup(query, namespace=cache_namespace)
+            if cached is not None:
+                hit_results = [SearchResult(**r) for r in cached.payload]
+                if self._query_logger and self._query_logger.enabled:
+                    self._query_logger.log(
+                        query,
+                        hit_results,
+                        latency_ms=(time.perf_counter() - t_start) * 1000.0,
+                        intent="search",
+                        extra={"cache_hit": True, "cache_score": cached.score},
+                    )
+                return hit_results
+
+        default_pool = [c.name for c in COLLECTIONS if c.name != "mnemos_memory"]
+        target_collections = collections or default_pool
+
+        # Semantic router (Phase 4D): trim the collection set to the most relevant
+        # ones. Only kicks in when the caller did NOT pin specific collections,
+        # so explicit calls to e.g. `mnemos search --collection x` are honoured.
+        if collections is None and self._router and self._router.enabled:
+            routed = self._router.route(query, allowed=target_collections)
+            if routed:
+                target_collections = [r.name for r in routed]
+
+        must_conditions: list = []
+        if file_types:
+            must_conditions.append(FieldCondition(key="language", match=MatchAny(any=file_types)))
+        if path_filter:
+            must_conditions.append(FieldCondition(key="file_path", match=MatchValue(value=path_filter)))
+        query_filter = Filter(must=must_conditions) if must_conditions else None
+
+        # Pull a wider candidate pool per collection when a reranker is going to
+        # re-score them; otherwise pulling only `limit` per collection is fine.
+        per_collection = _HYBRID_TOP if (self._reranker and self._reranker.enabled) else limit
+
+        # --- 1. Initial retrieval ---
+        all_results = self._retrieve_all(query, target_collections, query_filter, per_collection)
+
+        # --- 2. CRAG corrective loop ---
+        if self._grader and self._grader.enabled and all_results:
+            graded = self._grader.grade(query, [(r.content, r) for r in all_results])
+            if self._grader.all_low(graded):
+                # Retrieval failed → try rewritten queries
+                if self._rewriter and self._rewriter.enabled:
+                    for alt in self._rewriter.rewrite(query):
+                        if alt == query:
+                            continue
+                        all_results.extend(
+                            self._retrieve_all(alt, target_collections, query_filter, per_collection)
+                        )
+                    all_results = self._dedupe_by_path(all_results)
+            else:
+                # Drop the low-graded chunks before reranking
+                kept = [(g, r) for g, r in zip(graded, all_results) if g.grade != "low"]
+                all_results = [r for _, r in kept]
+
+        # --- 3. Rerank + (optional) MMR ---
+        final = self._rerank_and_select(query, all_results, limit)
+
+        # --- 4. Cache write-through ---
+        if self._cache and self._cache.enabled and final:
+            self._cache.store(query, final, namespace=cache_namespace)
+
+        # --- 5. Observability ---
+        if self._query_logger and self._query_logger.enabled:
+            self._query_logger.log(
+                query,
+                final,
+                latency_ms=(time.perf_counter() - t_start) * 1000.0,
+                intent="search",
+                extra={
+                    "cache_hit": False,
+                    "collections": target_collections,
+                    "n_candidates": len(all_results),
+                    "reranker": bool(self._reranker and self._reranker.enabled),
+                    "grader": bool(self._grader and self._grader.enabled),
+                    "router": bool(self._router and self._router.enabled),
+                },
+            )
+
+        return final
 
     def search_code(
         self,

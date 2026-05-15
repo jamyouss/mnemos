@@ -33,14 +33,9 @@ def create_app() -> FastAPI:
             enabled=settings.mnemos_reranker_enabled,
         )
 
-        from server.search import SearchService
-        app.state.search_service = SearchService(
-            qdrant_client=app.state.qdrant,
-            embedding_service=app.state.embeddings,
-            reranker=app.state.reranker,
-            mmr_enabled=settings.mnemos_mmr_enabled,
-            mmr_lambda=settings.mnemos_mmr_lambda,
-        )
+        # Wait — search_service needs grader+rewriter which need the LLM provider,
+        # so we defer construction until after the LLM is built (a few lines below).
+        app.state.search_service = None  # placeholder; will be set below
 
         from rag_core.memory_extractor import MemoryExtractor
         from rag_core.deduplicator import Deduplicator
@@ -68,6 +63,62 @@ def create_app() -> FastAPI:
             qdrant_client=app.state.qdrant,
             embedding_service=app.state.embeddings,
             contextual_enricher=app.state.contextual,
+        )
+
+        # CRAG components (Phase 3): grader + rewriter
+        from rag_core.grader import DocumentGrader
+        from rag_core.rewriter import QueryRewriter
+        app.state.grader = DocumentGrader(
+            llm=app.state.llm,
+            enabled=settings.mnemos_grader_enabled,
+            workers=settings.mnemos_grader_workers,
+        )
+        app.state.rewriter = QueryRewriter(
+            llm=app.state.llm,
+            enabled=settings.mnemos_rewriter_enabled,
+            strategy=settings.mnemos_rewriter_strategy,  # type: ignore[arg-type]
+            max_variants=settings.mnemos_rewriter_max_variants,
+        )
+
+        # Semantic router (Phase 4D): pre-computes collection-description embeddings.
+        from rag_core.router import QueryRouter
+        app.state.router = QueryRouter(
+            embedding_service=app.state.embeddings,
+            enabled=settings.mnemos_router_enabled,
+            top_k=settings.mnemos_router_top_k,
+            min_score=settings.mnemos_router_min_score,
+        )
+
+        # Semantic cache (Phase 4E): cosine-similarity cache backed by Qdrant.
+        from rag_core.cache import SemanticCache
+        app.state.cache = SemanticCache(
+            qdrant_client=app.state.qdrant,
+            embedding_service=app.state.embeddings,
+            enabled=settings.mnemos_cache_enabled,
+            threshold=settings.mnemos_cache_threshold,
+            ttl_seconds=settings.mnemos_cache_ttl_seconds,
+        )
+
+        # Observability (Phase 9): per-query JSONL log.
+        from rag_core.observability import QueryLogger
+        app.state.query_logger = QueryLogger(
+            path=settings.mnemos_query_log_path,
+            enabled=settings.mnemos_query_log_enabled,
+        )
+
+        # Now we can build the SearchService with all the wiring it needs.
+        from server.search import SearchService
+        app.state.search_service = SearchService(
+            qdrant_client=app.state.qdrant,
+            embedding_service=app.state.embeddings,
+            reranker=app.state.reranker,
+            mmr_enabled=settings.mnemos_mmr_enabled,
+            mmr_lambda=settings.mnemos_mmr_lambda,
+            grader=app.state.grader,
+            rewriter=app.state.rewriter,
+            router=app.state.router,
+            cache=app.state.cache,
+            query_logger=app.state.query_logger,
         )
         app.state.deduplicator = Deduplicator(
             qdrant_client=app.state.qdrant,
