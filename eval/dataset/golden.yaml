@@ -125,7 +125,7 @@
   expected_collections:
   - mnemos_code_moby
   expected_files:
-  - /data/codebase/moby/webapp/android/app/src/main/assets/public/_nuxt/BA_PPEKB.js
+  - /data/codebase/digital-gigafactory/moby/webapp/android/app/src/main/assets/public/_nuxt/BA_PPEKB.js
   expected_chunks: []
   relevance_grades: {}
   k_relevant: 1
@@ -136,7 +136,7 @@
   expected_collections:
   - mnemos_code_moby
   expected_files:
-  - /data/codebase/moby/webapp/ios/App/App/public/_nuxt/BA_PPEKB.js
+  - /data/codebase/digital-gigafactory/moby/webapp/ios/App/App/public/_nuxt/BA_PPEKB.js
   expected_chunks: []
   relevance_grades: {}
   k_relevant: 1
@@ -147,7 +147,7 @@
   expected_collections:
   - mnemos_code_moby
   expected_files:
-  - /data/codebase/moby/services/moby/pkg/pricing/domain/model/zone_fare.go
+  - /data/codebase/digital-gigafactory/moby/services/moby/pkg/pricing/domain/model/zone_fare.go
   expected_chunks: []
   relevance_grades: {}
   k_relevant: 1
@@ -158,7 +158,7 @@
   expected_collections:
   - mnemos_code_moby
   expected_files:
-  - /data/codebase/moby/webapp/android/app/src/main/assets/public/_nuxt/CCW5A8mk.js
+  - /data/codebase/digital-gigafactory/moby/webapp/android/app/src/main/assets/public/_nuxt/CCW5A8mk.js
   expected_chunks: []
   relevance_grades: {}
   k_relevant: 1
@@ -169,7 +169,7 @@
   expected_collections:
   - mnemos_code_moby
   expected_files:
-  - /data/codebase/moby/infra/prod/terraform/.terraform/modules/aks/README.md
+  - /data/codebase/digital-gigafactory/moby/infra/prod/terraform/.terraform/modules/aks/README.md
   expected_chunks: []
   relevance_grades: {}
   k_relevant: 1
@@ -181,7 +181,7 @@
   expected_collections:
   - mnemos_code_moby
   expected_files:
-  - /data/codebase/moby/services/moby/pkg/dispatch/domain/error/no_eligible_drivers.go
+  - /data/codebase/digital-gigafactory/moby/services/moby/pkg/dispatch/domain/error/no_eligible_drivers.go
   expected_chunks: []
   relevance_grades: {}
   k_relevant: 1
@@ -192,7 +192,7 @@
   expected_collections:
   - mnemos_code_moby
   expected_files:
-  - /data/codebase/moby/services/moby/pkg/ride/domain/model/ride.go
+  - /data/codebase/digital-gigafactory/moby/services/moby/pkg/ride/domain/model/ride.go
   expected_chunks: []
   relevance_grades: {}
   k_relevant: 1
@@ -203,7 +203,7 @@
   expected_collections:
   - mnemos_code_trevio
   expected_files:
-  - /data/codebase/trevio/ui-modules/.github/workflows/ci.yml
+  - /data/codebase/digital-gigafactory/trevio/ui-modules/.github/workflows/ci.yml
   expected_chunks: []
   relevance_grades: {}
   k_relevant: 1
@@ -214,7 +214,7 @@
   expected_collections:
   - mnemos_code_trevio
   expected_files:
-  - /data/codebase/trevio/ui-modules/packages/core/src/runtime/components/core/MoreBtn.vue
+  - /data/codebase/digital-gigafactory/trevio/ui-modules/packages/core/src/runtime/components/core/MoreBtn.vue
   expected_chunks: []
   relevance_grades: {}
   k_relevant: 1
@@ -225,7 +225,7 @@
   expected_collections:
   - mnemos_code_trevio
   expected_files:
-  - /data/codebase/trevio/ui-modules/packages/orchestrator/src/runtime/pages/orchestrator/jobs/[id].vue
+  - /data/codebase/digital-gigafactory/trevio/ui-modules/packages/orchestrator/src/runtime/pages/orchestrator/jobs/[id].vue
   expected_chunks: []
   relevance_grades: {}
   k_relevant: 1
@@ -236,7 +236,7 @@
   expected_collections:
   - mnemos_code_trevio
   expected_files:
-  - /data/codebase/trevio/go-modules/logger/logger.go
+  - /data/codebase/digital-gigafactory/trevio/go-modules/logger/logger.go
   expected_chunks: []
   relevance_grades: {}
   k_relevant: 1
@@ -247,7 +247,7 @@
   expected_collections:
   - mnemos_code_trevio
   expected_files:
-  - /data/codebase/trevio/go-modules/notification/domain/model/notification.go
+  - /data/codebase/digital-gigafactory/trevio/go-modules/notification/domain/model/notification.go
   expected_chunks: []
   relevance_grades: {}
   k_relevant: 1
@@ -258,7 +258,7 @@
   expected_collections:
   - mnemos_code_trevio
   expected_files:
-  - /data/codebase/trevio/go-modules/geoip/main.go
+  - /data/codebase/digital-gigafactory/trevio/go-modules/geoip/main.go
   expected_chunks: []
   relevance_grades: {}
   k_relevant: 1
@@ -269,7 +269,7 @@
   expected_collections:
   - mnemos_code_trevio
   expected_files:
-  - /data/codebase/trevio/ui-modules/packages/core/src/runtime/assets/iconify/icons-bundle.js
+  - /data/codebase/digital-gigafactory/trevio/ui-modules/packages/core/src/runtime/assets/iconify/icons-bundle.js
   expected_chunks: []
   relevance_grades: {}
   k_relevant: 1

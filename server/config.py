@@ -22,6 +22,17 @@ class Settings(BaseSettings):
     mnemos_dedup_threshold: float = 0.85
     mnemos_dedup_strategy: str = "merge"
 
+    # Contextual retrieval (Anthropic-style preamble per chunk)
+    mnemos_contextual_enabled: bool = False
+    mnemos_contextual_workers: int = 4
+
+    # Cross-encoder reranker (Phase 2B)
+    mnemos_reranker_enabled: bool = False
+    mnemos_reranker_model: str = "BAAI/bge-reranker-base"
+    mnemos_reranker_type: str = "cross-encoder"
+    mnemos_mmr_enabled: bool = False
+    mnemos_mmr_lambda: float = 0.5
+
     class Config:
         env_prefix = ""
 

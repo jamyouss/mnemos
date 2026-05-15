@@ -23,19 +23,29 @@ def create_app() -> FastAPI:
             host=settings.qdrant_host, port=settings.qdrant_port
         )
         app.state.embeddings = EmbeddingService(model_name=settings.embedding_model)
-        app.state.indexer = Indexer(
-            qdrant_client=app.state.qdrant,
-            embedding_service=app.state.embeddings,
+
+        # Reranker is constructed up-front with `enabled` flag wired through;
+        # the heavyweight model load happens lazily on the first rerank call.
+        from rag_core.reranker import CrossEncoderReranker
+        app.state.reranker = CrossEncoderReranker(
+            model_name=settings.mnemos_reranker_model,
+            model_type=settings.mnemos_reranker_type,
+            enabled=settings.mnemos_reranker_enabled,
         )
+
         from server.search import SearchService
         app.state.search_service = SearchService(
             qdrant_client=app.state.qdrant,
             embedding_service=app.state.embeddings,
+            reranker=app.state.reranker,
+            mmr_enabled=settings.mnemos_mmr_enabled,
+            mmr_lambda=settings.mnemos_mmr_lambda,
         )
 
         from rag_core.memory_extractor import MemoryExtractor
         from rag_core.deduplicator import Deduplicator
         from rag_core.llm import LLMConfig, make_llm_provider
+        from rag_core.contextual import ContextualEnricher
 
         llm_base_url = settings.mnemos_llm_base_url or (
             settings.mnemos_ollama_url if settings.mnemos_llm_provider == "ollama" else ""
@@ -49,6 +59,16 @@ def create_app() -> FastAPI:
             )
         )
         app.state.memory_extractor = MemoryExtractor(llm=app.state.llm)
+        app.state.contextual = ContextualEnricher(
+            llm=app.state.llm,
+            enabled=settings.mnemos_contextual_enabled,
+            workers=settings.mnemos_contextual_workers,
+        )
+        app.state.indexer = Indexer(
+            qdrant_client=app.state.qdrant,
+            embedding_service=app.state.embeddings,
+            contextual_enricher=app.state.contextual,
+        )
         app.state.deduplicator = Deduplicator(
             qdrant_client=app.state.qdrant,
             embedding_service=app.state.embeddings,
@@ -57,7 +77,8 @@ def create_app() -> FastAPI:
             strategy=settings.mnemos_dedup_strategy,
         )
 
-        # Ensure all collections exist on startup
+        # Ensure all collections exist on startup (creates new ones as hybrid;
+        # legacy unnamed-dense collections stay untouched until `reindex --recreate`).
         from rag_core.collections import COLLECTIONS
         for coll in COLLECTIONS:
             app.state.indexer.ensure_collection(coll.name, coll.vector_size)

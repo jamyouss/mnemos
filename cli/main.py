@@ -187,10 +187,28 @@ def search_skills(query: str, limit: int) -> None:
 @click.option("--collection", required=True, help="Collection to reindex.")
 @click.option("--path", default=None, help="Base path to scan for files.")
 @click.option("--full", is_flag=True, default=False, help="Recursively reindex all files under path.")
-def reindex(collection: str, path: str | None, full: bool) -> None:
+@click.option(
+    "--recreate",
+    is_flag=True,
+    default=False,
+    help="Drop the collection before reindexing (required to migrate to the hybrid schema).",
+)
+@click.option(
+    "--workers",
+    default=1,
+    show_default=True,
+    type=int,
+    help="Parallel worker threads (use 4 for contextual chunking).",
+)
+def reindex(collection: str, path: str | None, full: bool, recreate: bool, workers: int) -> None:
     """Trigger a reindex operation on the server."""
     url = f"{_base_url()}/api/reindex"
-    payload: dict = {"collection": collection, "full": full}
+    payload: dict = {
+        "collection": collection,
+        "full": full,
+        "recreate": recreate,
+        "workers": workers,
+    }
     if path:
         payload["path"] = path
 
@@ -204,9 +222,11 @@ def reindex(collection: str, path: str | None, full: bool) -> None:
 
     status = data.get("status", "")
     if status == "reindex_started":
+        suffix = " [yellow](recreated)[/yellow]" if data.get("recreated") else ""
         console.print(
-            f"[green]Reindex started[/green] for collection [cyan]{data.get('collection')}[/cyan] "
-            f"at path [dim]{data.get('path', '')}[/dim]. Use [bold]rag status[/bold] to monitor progress."
+            f"[green]Reindex started[/green] for collection [cyan]{data.get('collection')}[/cyan]"
+            f"{suffix} at path [dim]{data.get('path', '')}[/dim] with [bold]{data.get('workers', 1)}[/bold] workers. "
+            "Use [bold]mnemos status[/bold] to monitor progress."
         )
     else:
         console.print(f"[yellow]{status}[/yellow]: {data}")

@@ -9,8 +9,10 @@ from datetime import datetime, timezone
 from qdrant_client import QdrantClient
 from qdrant_client.models import PointStruct
 
+from rag_core.collections import DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME
 from rag_core.embeddings import EmbeddingService
 from rag_core.models import DeduplicationResult, ExtractedMemory
+from rag_core.sparse import bm25_sparse
 
 logger = logging.getLogger("mnemos.deduplicator")
 
@@ -35,11 +37,20 @@ class Deduplicator:
     def deduplicate_and_store(self, memory: ExtractedMemory, status: str = "pending") -> DeduplicationResult:
         vector = self._embeddings.embed(memory.content)
 
-        hits = self._qdrant.query_points(
-            collection_name=_MEMORY_COLLECTION,
-            query=vector,
-            limit=1,
-        ).points
+        try:
+            hits = self._qdrant.query_points(
+                collection_name=_MEMORY_COLLECTION,
+                query=vector,
+                using=DENSE_VECTOR_NAME,
+                limit=1,
+            ).points
+        except Exception:
+            # Legacy unnamed-dense fallback
+            hits = self._qdrant.query_points(
+                collection_name=_MEMORY_COLLECTION,
+                query=vector,
+                limit=1,
+            ).points
 
         if hits and hits[0].score >= self._threshold:
             existing = hits[0]
@@ -49,6 +60,12 @@ class Deduplicator:
                 return self._replace(existing, memory, vector, status)
 
         return self._insert(memory, vector, status)
+
+    def _named_vector(self, dense: list[float], text: str) -> dict:
+        return {
+            DENSE_VECTOR_NAME: dense,
+            SPARSE_VECTOR_NAME: bm25_sparse(text),
+        }
 
     def _insert(self, memory: ExtractedMemory, vector: list[float], status: str) -> DeduplicationResult:
         mem_id = str(uuid.uuid4())
@@ -71,7 +88,13 @@ class Deduplicator:
 
         self._qdrant.upsert(
             collection_name=_MEMORY_COLLECTION,
-            points=[PointStruct(id=point_id, vector=vector, payload=payload)],
+            points=[
+                PointStruct(
+                    id=point_id,
+                    vector=self._named_vector(vector, memory.content),
+                    payload=payload,
+                )
+            ],
         )
         return DeduplicationResult(action="inserted", memory_id=mem_id)
 
@@ -93,7 +116,13 @@ class Deduplicator:
 
         self._qdrant.upsert(
             collection_name=_MEMORY_COLLECTION,
-            points=[PointStruct(id=existing.id, vector=merged_vector, payload=updated_payload)],
+            points=[
+                PointStruct(
+                    id=existing.id,
+                    vector=self._named_vector(merged_vector, merged_content),
+                    payload=updated_payload,
+                )
+            ],
         )
         return DeduplicationResult(action="merged", memory_id=existing_id, merged_with=existing_id)
 

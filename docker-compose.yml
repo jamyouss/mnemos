@@ -35,6 +35,15 @@ services:
       MNEMOS_OLLAMA_URL: "${MNEMOS_OLLAMA_URL:-http://ollama:11434}"
       MNEMOS_DEDUP_THRESHOLD: "0.85"
       MNEMOS_DEDUP_STRATEGY: merge
+      # Contextual retrieval (Anthropic-style preamble per chunk via LLM)
+      MNEMOS_CONTEXTUAL_ENABLED: "${MNEMOS_CONTEXTUAL_ENABLED:-false}"
+      MNEMOS_CONTEXTUAL_WORKERS: "${MNEMOS_CONTEXTUAL_WORKERS:-4}"
+      # Cross-encoder reranker (Phase 2B). Default model: bge-reranker-base (~280MB).
+      MNEMOS_RERANKER_ENABLED: "${MNEMOS_RERANKER_ENABLED:-false}"
+      MNEMOS_RERANKER_MODEL: "${MNEMOS_RERANKER_MODEL:-BAAI/bge-reranker-base}"
+      MNEMOS_RERANKER_TYPE: "${MNEMOS_RERANKER_TYPE:-cross-encoder}"
+      MNEMOS_MMR_ENABLED: "${MNEMOS_MMR_ENABLED:-false}"
+      MNEMOS_MMR_LAMBDA: "${MNEMOS_MMR_LAMBDA:-0.5}"
     volumes:
       - ~/Developments/Projects:/data/codebase:ro
       - ~/.claude:/data/claude-config:ro

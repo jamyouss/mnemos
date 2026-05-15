@@ -121,9 +121,15 @@ def test_search_memory(search_service, mock_qdrant):
 
 
 def test_search_memory_filters_approved(search_service, mock_qdrant):
-    """search_memory should only return approved entries by default."""
+    """search_memory should only return approved entries by default.
+
+    Under the hybrid schema the filter is applied to each Prefetch leg
+    (dense + sparse) rather than at the top level — verify it's present there.
+    """
     _mock_query_points(mock_qdrant, [])
     search_service.search_memory(query="test", limit=5)
     call_args = mock_qdrant.query_points.call_args
-    query_filter = call_args.kwargs.get("query_filter")
-    assert query_filter is not None
+    prefetch = call_args.kwargs.get("prefetch") or []
+    assert prefetch, "expected hybrid prefetch with dense+sparse legs"
+    # Both legs must carry the approval filter
+    assert all(p.filter is not None for p in prefetch)

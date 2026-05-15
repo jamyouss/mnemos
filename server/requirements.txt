@@ -7,3 +7,5 @@ pydantic-settings>=2.2.0
 # Optional LLM SDKs — installed but only loaded when the corresponding provider is selected.
 anthropic>=0.39.0
 openai>=1.40.0
+# Phase 2B: cross-encoder reranker. Tirs torch (~700MB).
+rerankers[transformers]>=0.5.0

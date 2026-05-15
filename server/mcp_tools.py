@@ -356,9 +356,13 @@ def _store_memory(
     from datetime import datetime, timezone
     from qdrant_client.models import PointStruct
 
+    from rag_core.collections import DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME
+    from rag_core.sparse import bm25_sparse
+
     entry_id = str(uuid.uuid4())
     point_id = str(uuid.uuid5(uuid.NAMESPACE_URL, entry_id))
-    vector = indexer._embeddings.embed(content)
+    dense = indexer._embeddings.embed(content)
+    sparse = bm25_sparse(content)
     now = datetime.now(timezone.utc).isoformat()
     payload = {
         "id": entry_id,
@@ -374,7 +378,11 @@ def _store_memory(
         "last_indexed_at": now,
         "file_mtime": time.time(),
     }
-    point = PointStruct(id=point_id, vector=vector, payload=payload)
+    point = PointStruct(
+        id=point_id,
+        vector={DENSE_VECTOR_NAME: dense, SPARSE_VECTOR_NAME: sparse},
+        payload=payload,
+    )
     qdrant_client.upsert(collection_name="mnemos_memory", points=[point])
     return entry_id
 

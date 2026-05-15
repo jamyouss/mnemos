@@ -3,6 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+# Named-vector identifiers used in every collection that supports hybrid retrieval.
+DENSE_VECTOR_NAME = "dense"
+SPARSE_VECTOR_NAME = "sparse"
+
+
 @dataclass
 class CollectionConfig:
     name: str

@@ -68,6 +68,8 @@ class ReindexRequest(BaseModel):
     collection: str
     path: Optional[str] = None
     full: bool = False
+    recreate: bool = False           # Drop + recreate (needed when migrating to hybrid schema)
+    workers: int = 1                 # Parallel worker threads for indexing
 
 
 class MemoryCreateRequest(BaseModel):
@@ -294,15 +296,23 @@ _REINDEX_IGNORE_DIRS = {
     # Version control
     ".git",
     # Build outputs
-    "dist", "build", ".nuxt", ".output",
+    "dist", "build", ".nuxt", ".output", "_nuxt", "public",
+    # Mobile build artifacts (Capacitor / Cordova / native projects)
+    "ios", "android", "Pods",
+    # Infra / IaC state
+    ".terraform", "terraform.tfstate.d",
+    # Local backup / data snapshots
+    "backup", "backups", "snapshots", "data",
     # Caches & tooling
-    "__pycache__", ".nx", ".cache", ".pytest_cache", ".storybook",
+    "__pycache__", ".nx", ".cache", ".pytest_cache", ".storybook", ".turbo", ".next",
     # IDE & editors
     ".idea", ".vscode",
     # Virtualenvs
     ".venv", "venv",
     # Test artifacts
-    "test-results", "coverage",
+    "test-results", "coverage", "tmp", "temp",
+    # Generated Go module artifacts
+    "testdata",
 }
 
 _REINDEX_IGNORE_EXTS = {
@@ -337,38 +347,82 @@ def _should_skip(fp) -> bool:
     )
 
 
-def _run_reindex(indexer, collection: str, base_path, full: bool) -> None:
-    """Background task: walk files and index them."""
+def _index_one_file(indexer, collection: str, fp) -> int:
+    """Index a single file. Returns the number of chunks indexed (0 on error)."""
+    try:
+        content = fp.read_text(encoding="utf-8")
+        return indexer.index_file(
+            content=content,
+            file_path=str(fp),
+            collection=collection,
+            file_mtime=fp.stat().st_mtime,
+        )
+    except Exception:
+        return -1  # sentinel for "skipped on error"
+
+
+def _run_reindex(indexer, collection: str, base_path, full: bool, workers: int = 1) -> None:
+    """Background task: walk files and index them, optionally in parallel."""
     import logging
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     logger = logging.getLogger("rag.reindex")
 
-    files = list(base_path.rglob("*")) if full else [base_path]
+    files = [fp for fp in (base_path.rglob("*") if full else [base_path])
+             if fp.is_file() and not _should_skip(fp)]
+
+    if not files:
+        logger.info(f"Reindex: collection={collection} no files to index")
+        return
+
     indexed = 0
     skipped = 0
-    for fp in files:
-        if fp.is_file() and not _should_skip(fp):
-            try:
-                content = fp.read_text(encoding="utf-8")
-                indexed += indexer.index_file(
-                    content=content,
-                    file_path=str(fp),
-                    collection=collection,
-                    file_mtime=fp.stat().st_mtime,
-                )
-            except Exception:
+    workers = max(1, int(workers))
+
+    if workers == 1:
+        for fp in files:
+            n = _index_one_file(indexer, collection, fp)
+            if n < 0:
                 skipped += 1
-    logger.info(f"Reindex complete: collection={collection} indexed={indexed} skipped={skipped}")
+            else:
+                indexed += n
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [pool.submit(_index_one_file, indexer, collection, fp) for fp in files]
+            for fut in as_completed(futures):
+                n = fut.result()
+                if n < 0:
+                    skipped += 1
+                else:
+                    indexed += n
+
+    logger.info(
+        f"Reindex complete: collection={collection} files={len(files)} "
+        f"indexed_chunks={indexed} skipped_files={skipped} workers={workers}"
+    )
 
 
 @api_router.post("/api/reindex")
 async def reindex(body: ReindexRequest, request: Request, background_tasks: BackgroundTasks):
     indexer = request.app.state.indexer
-    indexer.ensure_collection(body.collection)
+
+    if body.recreate:
+        indexer.recreate_collection_hybrid(body.collection)
+    else:
+        indexer.ensure_collection(body.collection)
 
     if body.path:
         base_path = _validate_path(body.path)
-        background_tasks.add_task(_run_reindex, indexer, body.collection, base_path, body.full)
-        return {"status": "reindex_started", "collection": body.collection, "path": str(base_path)}
+        background_tasks.add_task(
+            _run_reindex, indexer, body.collection, base_path, body.full, body.workers
+        )
+        return {
+            "status": "reindex_started",
+            "collection": body.collection,
+            "path": str(base_path),
+            "workers": body.workers,
+            "recreated": body.recreate,
+        }
 
     return {"status": "no_path", "collection": body.collection}
 
