@@ -179,6 +179,52 @@ def search_skills(query: str, limit: int) -> None:
 
 
 # ---------------------------------------------------------------------------
+# rag search-memory
+# ---------------------------------------------------------------------------
+
+
+@cli.command("search-memory")
+@click.argument("query")
+@click.option("--limit", default=5, show_default=True, help="Number of results to return.")
+@click.option("--project", default=None, help="Restrict to a specific project.")
+@click.option("--type", "memory_type", default=None, help="Filter by memory_type (decision, pattern, lesson, convention).")
+def search_memory(query: str, limit: int, project: str | None, memory_type: str | None) -> None:
+    """Search approved memory entries."""
+    url = f"{_base_url()}/api/search-memory"
+    payload: dict = {"query": query, "limit": limit}
+    if project:
+        payload["project"] = project
+    if memory_type:
+        payload["memory_type"] = memory_type
+
+    try:
+        resp = httpx.post(url, json=payload, timeout=30)
+        resp.raise_for_status()
+        results = resp.json().get("results", [])
+    except Exception as exc:
+        _handle_http_error(exc)
+        return
+
+    if not results:
+        console.print("[yellow]No memories found.[/yellow]")
+        return
+
+    for i, r in enumerate(results, start=1):
+        score = r.get("score", 0)
+        mtype = r.get("memory_type", "")
+        project = r.get("project") or "-"
+        tags = ", ".join(r.get("tags", []) or [])
+        console.print(
+            f"[bold]{i}.[/bold] [cyan]{mtype}[/cyan] [dim]({project})[/dim] "
+            f"[dim](score: {score:.3f})[/dim]"
+        )
+        console.print(f"   {r.get('content', '')[:300]}")
+        if tags:
+            console.print(f"   [dim]tags: {tags}[/dim]")
+        console.print()
+
+
+# ---------------------------------------------------------------------------
 # rag reindex
 # ---------------------------------------------------------------------------
 

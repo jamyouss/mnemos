@@ -68,6 +68,31 @@ def test_extract_handles_malformed_json():
     assert extractor.extract(commit_message="feat: something", diff="some diff") == []
 
 
+def test_extract_unwraps_single_object_response():
+    """Smaller LLMs sometimes emit a bare {content,memory_type,project,tags}
+    instead of a list. The extractor must salvage it."""
+    llm = FakeLLM(responses=['{"content":"X","memory_type":"decision","project":"y","tags":["a"]}'])
+    extractor = MemoryExtractor(llm=llm)
+    results = extractor.extract(commit_message="m", diff="d")
+    assert len(results) == 1
+    assert results[0].content == "X"
+
+
+def test_extract_unwraps_wrapped_memories_key():
+    llm = FakeLLM(responses='{"memories": [{"content":"X","memory_type":"pattern","project":"p","tags":[]}]}'.split("\x00"))
+    extractor = MemoryExtractor(llm=llm)
+    results = extractor.extract(commit_message="m", diff="d")
+    assert len(results) == 1
+
+
+def test_extract_drops_non_dict_items():
+    llm = FakeLLM(responses=['[{"content":"X","memory_type":"decision","project":"p","tags":[]}, "garbage"]'])
+    extractor = MemoryExtractor(llm=llm)
+    results = extractor.extract(commit_message="m", diff="d")
+    assert len(results) == 1
+    assert results[0].content == "X"
+
+
 def test_merge_memories():
     llm = FakeLLM(responses=["Merged memory text"])
     extractor = MemoryExtractor(llm=llm)

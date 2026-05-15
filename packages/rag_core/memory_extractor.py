@@ -66,11 +66,21 @@ class MemoryExtractor:
 
         try:
             parsed = json.loads(raw)
-            if isinstance(parsed, dict) and "memories" in parsed:
-                parsed = parsed["memories"]
+            # Some smaller LLMs (llama3.2, mistral 7B, …) like to wrap the
+            # array in a top-level object or emit a single bare memory.
+            # Be defensive: accept whatever shape we can salvage.
+            if isinstance(parsed, dict):
+                if "memories" in parsed:
+                    parsed = parsed["memories"]
+                elif "content" in parsed and "memory_type" in parsed:
+                    parsed = [parsed]
+                else:
+                    # Last-ditch: any list value inside?
+                    list_vals = [v for v in parsed.values() if isinstance(v, list)]
+                    parsed = list_vals[0] if list_vals else []
             if not isinstance(parsed, list):
                 return []
-            return [ExtractedMemory(**item) for item in parsed]
+            return [ExtractedMemory(**item) for item in parsed if isinstance(item, dict)]
         except (json.JSONDecodeError, KeyError, TypeError, ValueError):
             logger.warning("Failed to parse LLM response as memory list: %r", raw[:200])
             return []
