@@ -335,25 +335,34 @@ _REINDEX_IGNORE_DIRS = {
     "node_modules", ".pnpm-store", "vendor",
     # Version control
     ".git",
-    # Build outputs
-    "dist", "build", ".nuxt", ".output", "_nuxt", "public",
-    # Mobile build artifacts (Capacitor / Cordova / native projects)
-    "ios", "android", "Pods",
+    # Build outputs (web)
+    "dist", "build", ".nuxt", ".output", "_nuxt", ".next", ".turbo",
+    # Mobile native dependencies
+    "Pods",
     # Infra / IaC state
     ".terraform", "terraform.tfstate.d",
     # Local backup / data snapshots
-    "backup", "backups", "snapshots", "data",
+    "backup", "backups",
     # Caches & tooling
-    "__pycache__", ".nx", ".cache", ".pytest_cache", ".storybook", ".turbo", ".next",
+    "__pycache__", ".nx", ".cache", ".pytest_cache", ".storybook",
     # IDE & editors
     ".idea", ".vscode",
     # Virtualenvs
     ".venv", "venv",
     # Test artifacts
-    "test-results", "coverage", "tmp", "temp",
-    # Generated Go module artifacts
-    "testdata",
+    "test-results", "coverage",
 }
+
+# Path substrings (case-sensitive) — used when a directory name alone is too
+# generic to ban globally (e.g. "android", "public", "data") but its full path
+# identifies generated content. Crucially, "/data/codebase/" must NOT match
+# anything here — the container mount is rooted there.
+_REINDEX_IGNORE_PATH_SUBSTRINGS: tuple[str, ...] = (
+    "/webapp/android/",            # Capacitor android build artefacts
+    "/webapp/ios/",                # Capacitor ios build artefacts
+    "/app/src/main/assets/",       # Android packaged web assets
+    "/App/App/public/",            # iOS packaged web assets
+)
 
 _REINDEX_IGNORE_EXTS = {
     ".min.js", ".map", ".lock",
@@ -380,11 +389,14 @@ _REINDEX_IGNORE_FILENAMES = {
 
 def _should_skip(fp) -> bool:
     parts = set(fp.parts)
-    return (
-        bool(parts & _REINDEX_IGNORE_DIRS)
-        or fp.suffix in _REINDEX_IGNORE_EXTS
-        or fp.name in _REINDEX_IGNORE_FILENAMES
-    )
+    if parts & _REINDEX_IGNORE_DIRS:
+        return True
+    if fp.suffix in _REINDEX_IGNORE_EXTS:
+        return True
+    if fp.name in _REINDEX_IGNORE_FILENAMES:
+        return True
+    s = str(fp)
+    return any(sub in s for sub in _REINDEX_IGNORE_PATH_SUBSTRINGS)
 
 
 def _index_one_file(indexer, collection: str, fp) -> int:
