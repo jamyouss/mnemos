@@ -18,18 +18,36 @@ Generated via `mnemos eval run --tag <tag>` against a live server.
 
 ## Headline numbers
 
-| Run                          | MRR   | NDCG@5 | Recall@5 | Hit@5 | Latency p50 |
-|------------------------------|-------|--------|----------|-------|-------------|
-| **Baseline** (dense-only)    | 0.310 | 0.351  | 0.480    | 0.480 | 35 ms       |
-| Phase 2A.1 (Hybrid BM25+RRF) | 0.285 | 0.328  | 0.440    | 0.440 | 33 ms       |
-| Phase 2A.2 (Contextual on skills only) | 0.248 | 0.302  | 0.440    | 0.440 | 52 ms       |
-| **Phase 2B** (+ reranker + router + cache) | **0.457** | **0.481** | **0.560** | **0.560** | 14 466 ms |
+Two campaigns: a **legacy** golden set (25 q, contained junk paths) and a
+**clean** golden set (31 q, after blocklist + tighter generator prompt).
+Phase numbers across the two golden sets are not strictly comparable —
+deltas within a campaign are.
 
-**Phase 2B vs baseline** : MRR **+47 %**, NDCG@5 **+37 %**, Recall@5 **+17 %**.
-**Phase 2B vs Phase 2A.1** : MRR **+61 %**, NDCG@5 **+47 %**, Recall@5 **+27 %**.
+### Clean golden set (31 q, current reference)
 
-→ The reranker is the single biggest quality lever in the whole plan, exactly as
-the literature predicted. The latency penalty on CPU is brutal though (see below).
+| Run | MRR | NDCG@5 | R@5 | P@5 | p50 | What's enabled |
+|-----|------|--------|-----|-----|-----|----------------|
+| Hybrid only | 0.270 | 0.284 | 0.387 | 0.077 | **72 ms** | BM25 + dense + RRF |
+| + Reranker MiniLM + Router + Cache | **0.404** | **0.441** | **0.516** | 0.103 | 4 474 ms | (current default-on prod) |
+| + **CRAG grader (no rewriter)** | 0.404 | 0.441 | 0.516 | **0.133** | 3 211 ms | grader drops "low" chunks |
+| On cache hit (any of the above) | — | — | — | — | **100 ms** | |
+
+**Reranker over plain hybrid:** MRR +50 %, NDCG@5 +55 %, R@5 +33 %.
+**Grader over reranker:** P@5 +29 % (and +117 % on `doc_lookup` alone) — same
+top-K but cleaner; the grader rejects irrelevant chunks before ranking.
+
+### Legacy golden set (25 q, historical)
+
+| Run | MRR | NDCG@5 | R@5 |
+|-----|------|--------|-----|
+| Baseline (dense-only, unnamed vector) | 0.310 | 0.351 | 0.480 |
+| Phase 2A.1 (Hybrid BM25+RRF) | 0.285 | 0.328 | 0.440 |
+| Phase 2A.2 (Contextual on skills only) | 0.248 | 0.302 | 0.440 |
+| Phase 2B with `bge-reranker-base` | 0.457 | 0.481 | 0.560 |
+| Phase 2B with `ms-marco-MiniLM-L-6-v2` | 0.420 | 0.445 | 0.520 |
+
+The big-reranker run was the quality champion (+47 % MRR vs baseline) but
+at 14 s p50. MiniLM gives up ~3.7 MRR points for 3.8× speed-up.
 
 ## Run details
 
@@ -130,9 +148,15 @@ mnemos eval compare baseline-2026-05-14 <new-tag>
 
 ## Runs index
 
-| Tag                                  | Date       | Notes                                       |
-|--------------------------------------|------------|---------------------------------------------|
-| `baseline-2026-05-14`                | 2026-05-14 | Dense-only, legacy unnamed-vector schema    |
-| `phase2a1-hybrid-2026-05-15`         | 2026-05-15 | Hybrid BM25 + dense + RRF                   |
-| `phase2a2-partial-skills-2026-05-15` | 2026-05-15 | Skills contextualised (partial)             |
-| `phase2b-reranker-2026-05-15`        | 2026-05-15 | + reranker + router + cache (this run)      |
+| Tag                                  | Date       | Golden | Notes                                       |
+|--------------------------------------|------------|--------|---------------------------------------------|
+| `baseline-2026-05-14`                | 2026-05-14 | legacy 25 | Dense-only, unnamed vector              |
+| `phase2a1-hybrid-2026-05-15`         | 2026-05-15 | legacy 25 | Hybrid BM25 + dense + RRF               |
+| `phase2a2-partial-skills-2026-05-15` | 2026-05-15 | legacy 25 | Contextual on skills only (no gain)     |
+| `phase2b-reranker-2026-05-15`        | 2026-05-15 | legacy 25 | bge-reranker-base + router + cache      |
+| `phase2b-minilm-2026-05-15`          | 2026-05-15 | legacy 25 | Smaller reranker (3.8× faster)          |
+| `cache-warmup-2026-05-15`            | 2026-05-15 | legacy 25 | Run 1 (cache empty)                     |
+| `cache-hit-2026-05-15`               | 2026-05-15 | legacy 25 | Run 2 — p50 dropped to 122 ms           |
+| `phase2a1-clean-2026-05-15`          | 2026-05-15 | clean 31  | Hybrid only on clean golden             |
+| `phase2b-clean-2026-05-15`           | 2026-05-15 | clean 31  | + MiniLM reranker + router + cache      |
+| `phase3-grader-2026-05-15`           | 2026-05-15 | clean 31  | + CRAG document grader (no rewriter)    |

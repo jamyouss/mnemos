@@ -248,16 +248,50 @@ class EvalSampleRequest(BaseModel):
     seed: Optional[int] = None
 
 
+# File paths that should never be sampled into a golden set even if they
+# slipped past the indexing skip rules. Patterns are matched as substrings on
+# the full file_path.
+_GOLDEN_PATH_BLOCKLIST: tuple[str, ...] = (
+    ".bak",
+    "/_nuxt/",
+    "/.terraform/",
+    "/webapp/android/",
+    "/webapp/ios/",
+    "/app/src/main/assets/",
+    "/App/App/public/",
+    "/backup/",
+    "/dist/",
+    "/build/",
+    "/.next/",
+    "/.output/",
+    "/node_modules/",
+    "/vendor/",
+    "/Pods/",
+    "/coverage/",
+    "/test-results/",
+)
+
+
+def _is_blocklisted_for_golden(file_path: str) -> bool:
+    return any(pat in file_path for pat in _GOLDEN_PATH_BLOCKLIST)
+
+
 @api_router.post("/api/eval/sample")
 async def eval_sample(body: EvalSampleRequest, request: Request):
-    """Return up to `count` random chunks from a collection (for golden-set generation)."""
+    """Return up to `count` random chunks from a collection (for golden-set generation).
+
+    Filters out chunks whose file_path looks like generated / build / backup
+    content — those make for unfair eval ground truth because no retrieval
+    upgrade can rescue a question that points to a junk file.
+    """
     if body.collection not in _VALID_COLLECTIONS:
         raise HTTPException(status_code=400, detail=f"Unknown collection: {body.collection}")
 
     import random
 
     qdrant = request.app.state.qdrant
-    scroll_limit = max(body.count * 8, 200)
+    # Scroll wider than `count` so we still have enough after filtering junk paths.
+    scroll_limit = max(body.count * 30, 500)
     points, _ = qdrant.scroll(
         collection_name=body.collection,
         limit=scroll_limit,
@@ -267,8 +301,14 @@ async def eval_sample(body: EvalSampleRequest, request: Request):
     if not points:
         return {"chunks": []}
 
+    clean = [p for p in points if not _is_blocklisted_for_golden(
+        (p.payload or {}).get("file_path", "")
+    )]
+    if not clean:
+        return {"chunks": [], "filtered_out": len(points)}
+
     rng = random.Random(body.seed)
-    sampled = rng.sample(points, min(body.count, len(points)))
+    sampled = rng.sample(clean, min(body.count, len(clean)))
     chunks = []
     for p in sampled:
         payload = p.payload or {}
@@ -282,7 +322,7 @@ async def eval_sample(body: EvalSampleRequest, request: Request):
                 "collection": body.collection,
             }
         )
-    return {"chunks": chunks}
+    return {"chunks": chunks, "filtered_out": len(points) - len(clean)}
 
 
 # ---------------------------------------------------------------------------

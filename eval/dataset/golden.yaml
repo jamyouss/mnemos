@@ -1,16 +1,16 @@
-- id: q-f4d2e7d2
-  query: What are common mistakes to avoid when implementing a bounded infra worker?
-  intent: doc_lookup
+- id: q-65334a1b
+  query: What frameworks and libraries are supported for frontend development?
+  intent: skill_discovery
   expected_collections:
   - mnemos_skills
   expected_files:
-  - /data/claude-config/skills/bounded-infra-worker/instructions.md
+  - /data/claude-config/skills/typescript-pro/instructions.md
   expected_chunks: []
   relevance_grades: {}
   k_relevant: 1
   notes: ''
-- id: q-645792fa
-  query: How to get the estimated monthly cost of a Terraform task?
+- id: q-d5e9e597
+  query: How to avoid common mistakes when using Terraform?
   intent: doc_lookup
   expected_collections:
   - mnemos_skills
@@ -20,75 +20,97 @@
   relevance_grades: {}
   k_relevant: 1
   notes: ''
-- id: q-44894ca0
-  query: How to identify and address performance bottlenecks in a Go application?
+- id: q-18c4a8aa
+  query: What JavaScript framework is used as the base for this project?
   intent: code_search
   expected_collections:
   - mnemos_skills
   expected_files:
-  - /data/claude-config/skills/dgf-orchestrator/resources/workflows.md
+  - /data/claude-config/skills/trevio-ui-module-expert/SKILL.md
   expected_chunks: []
   relevance_grades: {}
   k_relevant: 1
   notes: ''
-- id: q-19139f1e
-  query: How to print memory statistics in Go?
+- id: q-75552665
+  query: How do I specify the scope of a performance analysis task in the input format?
   intent: code_search
   expected_collections:
   - mnemos_skills
   expected_files:
-  - /data/claude-config/skills/performance-engineer/resources/templates.md
+  - /data/claude-config/skills/performance-engineer/instructions.md
   expected_chunks: []
   relevance_grades: {}
   k_relevant: 1
   notes: ''
-- id: q-3b324bc2
-  query: What are the available skills for context management in this system?
-  intent: skill_discovery
+- id: q-3c897ad8
+  query: What commands should I run to verify the current state and continue working?
+  intent: code_search
   expected_collections:
   - mnemos_skills
   expected_files:
-  - /data/claude-config/skills/dgf-orchestrator/SKILL.md.bak
+  - /data/claude-config/skills/context-checkpoint/SKILL.md
   expected_chunks: []
   relevance_grades: {}
   k_relevant: 1
   notes: ''
-- id: q-f07d4a30
-  query: How to handle ambiguous project requirements?
-  intent: skill_discovery
+- id: q-fbb28ddb
+  query: How should a UX reviewer approach reviewing frontend code?
+  intent: doc_lookup
   expected_collections:
   - mnemos_skills
   expected_files:
-  - /data/claude-config/skills/senior-developer/resources/examples.md
+  - /data/claude-config/skills/ux-reviewer/instructions.md
   expected_chunks: []
   relevance_grades: {}
   k_relevant: 1
   notes: ''
-- id: q-b6fd107d
-  query: What are the steps to migrate a skill from the old SKILL.md format?
+- id: q-f705e2e6
+  query: How do I implement complex orchestration patterns in my workflow?
+  intent: code_search
+  expected_collections:
+  - mnemos_skills
+  expected_files:
+  - /data/claude-config/skills/dgf-orchestrator/instructions.md
+  expected_chunks: []
+  relevance_grades: {}
+  k_relevant: 1
+  notes: ''
+- id: q-a4b7692e
+  query: How do I determine which skill to use for a Go code problem?
+  intent: code_search
+  expected_collections:
+  - mnemos_skills
+  expected_files:
+  - /data/claude-config/skills/dgf-orchestrator/instructions.md
+  expected_chunks: []
+  relevance_grades: {}
+  k_relevant: 1
+  notes: ''
+- id: q-e1359d0a
+  query: How do I configure routes for the API Gateway?
   intent: doc_lookup
   expected_collections:
   - mnemos_docs
   expected_files:
-  - /data/claude-config/docs/SKILL_DEVELOPMENT.md
+  - /data/claude-config/docs/TREVIO_DEVOPS_PATTERNS.md
   expected_chunks: []
   relevance_grades: {}
   k_relevant: 1
   notes: ''
-- id: q-849bbe14
-  query: What are the key principles for skill development?
+- id: q-fa7837e8
+  query: How are modules in the TREVIO UI architecture related to each other?
   intent: doc_lookup
   expected_collections:
   - mnemos_docs
   expected_files:
-  - /data/claude-config/docs/SKILL_DEVELOPMENT.md
+  - /data/claude-config/docs/TREVIO_UI_MODULES_ARCHITECTURE.md
   expected_chunks: []
   relevance_grades: {}
   k_relevant: 1
   notes: ''
-- id: q-0a062941
-  query: What is the standard file structure for a service in our project?
-  intent: doc_lookup
+- id: q-fc865f30
+  query: How to configure GitHub Actions for a Go project in the CI/CD pattern?
+  intent: code_search
   expected_collections:
   - mnemos_docs
   expected_files:
@@ -97,179 +119,223 @@
   relevance_grades: {}
   k_relevant: 1
   notes: ''
-- id: q-227c90ab
-  query: How do I make my skill discoverable by the orchestrator?
-  intent: skill_discovery
+- id: q-3be6f596
+  query: What authentication secrets are required for the Nexus registry?
+  intent: doc_lookup
   expected_collections:
   - mnemos_docs
   expected_files:
-  - /data/claude-config/docs/SKILL_DEVELOPMENT.md
+  - /data/claude-config/docs/TREVIO_DEVOPS_PATTERNS.md
   expected_chunks: []
   relevance_grades: {}
   k_relevant: 1
   notes: ''
-- id: q-a403bf5e
-  query: What is the recommended approach for structuring hooks in Claude?
-  intent: skill_discovery
+- id: q-a6c37d7c
+  query: How do I load the configuration for a specific module in Go?
+  intent: code_search
   expected_collections:
   - mnemos_docs
   expected_files:
-  - /data/claude-config/docs/superpowers/plans/2026-04-02-ecc-workflow-optimizations.md
+  - /data/claude-config/docs/TREVIO_GO_MODULES_ARCHITECTURE.md
   expected_chunks: []
   relevance_grades: {}
   k_relevant: 1
   notes: ''
-- id: q-8d642df9
-  query: What SVG icons are available in this codebase?
+- id: q-b512fc8c
+  query: How do I configure and run the core engine in my Go application?
+  intent: code_search
+  expected_collections:
+  - mnemos_docs
+  expected_files:
+  - /data/claude-config/docs/TREVIO_GO_MODULES_ARCHITECTURE.md
+  expected_chunks: []
+  relevance_grades: {}
+  k_relevant: 1
+  notes: ''
+- id: q-05939d19
+  query: How do I dynamically add a link tag to the document head for preloading resources?
+  intent: code_search
+  expected_collections:
+  - mnemos_code_moby
+  expected_files:
+  - /data/codebase/digital-gigafactory/moby/webapp/playwright-report/index.html
+  expected_chunks: []
+  relevance_grades: {}
+  k_relevant: 1
+  notes: ''
+- id: q-240eec15
+  query: How do I handle errors in a JSON response with Gin?
   intent: skill_discovery
   expected_collections:
   - mnemos_code_moby
   expected_files:
-  - /data/codebase/digital-gigafactory/moby/webapp/android/app/src/main/assets/public/_nuxt/BA_PPEKB.js
+  - /data/codebase/digital-gigafactory/moby/services/moby/infrastructure/framework/gin/controller/me/main.go
   expected_chunks: []
   relevance_grades: {}
   k_relevant: 1
   notes: ''
-- id: q-5c76d656
-  query: What SVG elements are used to represent different emotions in a React application?
+- id: q-738a5bca
+  query: How do I define a request object for an intent in the payment service?
   intent: code_search
   expected_collections:
   - mnemos_code_moby
   expected_files:
-  - /data/codebase/digital-gigafactory/moby/webapp/ios/App/App/public/_nuxt/BA_PPEKB.js
+  - /data/codebase/digital-gigafactory/moby/services/moby/pkg/payment/application/dto/request/payment.go
   expected_chunks: []
   relevance_grades: {}
   k_relevant: 1
   notes: ''
-- id: q-31ffffb7
-  query: What is the structure of a ZoneFare object in Go?
+- id: q-653903f6
+  query: How do I scroll to a specific element on the page?
   intent: code_search
   expected_collections:
   - mnemos_code_moby
   expected_files:
-  - /data/codebase/digital-gigafactory/moby/services/moby/pkg/pricing/domain/model/zone_fare.go
+  - /data/codebase/digital-gigafactory/moby/site/app/composables/useSmoothScroll.ts
   expected_chunks: []
   relevance_grades: {}
   k_relevant: 1
   notes: ''
-- id: q-419696af
-  query: How to implement debouncing with a specified delay in a Vue.js component?
+- id: q-17f70449
+  query: How do I determine if a document can transition to a specific status?
   intent: code_search
   expected_collections:
   - mnemos_code_moby
   expected_files:
-  - /data/codebase/digital-gigafactory/moby/webapp/android/app/src/main/assets/public/_nuxt/CCW5A8mk.js
+  - /data/codebase/digital-gigafactory/moby/services/moby/pkg/document/domain/model/document.go
   expected_chunks: []
   relevance_grades: {}
   k_relevant: 1
   notes: ''
-- id: q-b1844d67
-  query: How is the AKS module structured within this Terraform project?
-  intent: doc_lookup
-  expected_collections:
-  - mnemos_code_moby
-  expected_files:
-  - /data/codebase/digital-gigafactory/moby/infra/prod/terraform/.terraform/modules/aks/README.md
-  expected_chunks: []
-  relevance_grades: {}
-  k_relevant: 1
-  notes: ''
-- id: q-0da652b6
-  query: How do I handle the case where there are no eligible drivers available for
-    dispatch in my Go program?
-  intent: doc_lookup
-  expected_collections:
-  - mnemos_code_moby
-  expected_files:
-  - /data/codebase/digital-gigafactory/moby/services/moby/pkg/dispatch/domain/error/no_eligible_drivers.go
-  expected_chunks: []
-  relevance_grades: {}
-  k_relevant: 1
-  notes: ''
-- id: q-eadc5181
-  query: How to reset a ride to draft status in Go?
+- id: q-17937910
+  query: How do I add a new route to the subscription admin API?
   intent: code_search
   expected_collections:
   - mnemos_code_moby
   expected_files:
-  - /data/codebase/digital-gigafactory/moby/services/moby/pkg/ride/domain/model/ride.go
+  - /data/codebase/digital-gigafactory/moby/services/moby/pkg/subscription/infrastructure/framework/gin/controller/subscription_admin.go
   expected_chunks: []
   relevance_grades: {}
   k_relevant: 1
   notes: ''
-- id: q-1619d062
-  query: How to trigger a release workflow on push to the main branch?
+- id: q-5b457272
+  query: How do I change a document's status to approved?
+  intent: code_search
+  expected_collections:
+  - mnemos_code_moby
+  expected_files:
+  - /data/codebase/digital-gigafactory/moby/services/moby/pkg/document/domain/model/document.go
+  expected_chunks: []
+  relevance_grades: {}
+  k_relevant: 1
+  notes: ''
+- id: q-21e7a8ab
+  query: How do I unassign a driver from a company-owned vehicle?
+  intent: code_search
+  expected_collections:
+  - mnemos_code_moby
+  expected_files:
+  - /data/codebase/digital-gigafactory/moby/services/moby/pkg/vehicle/application/action/vehicle.go
+  expected_chunks: []
+  relevance_grades: {}
+  k_relevant: 1
+  notes: ''
+- id: q-2af1941b
+  query: How do I configure Prometheus to scrape metrics from multiple services?
+  intent: code_search
+  expected_collections:
+  - mnemos_code_moby
+  expected_files:
+  - /data/codebase/digital-gigafactory/moby/infra/scripts/alloy/config/config.alloy.tpl
+  expected_chunks: []
+  relevance_grades: {}
+  k_relevant: 1
+  notes: ''
+- id: q-3291f5d2
+  query: How do I mark a Stripe account as onboarded?
+  intent: code_search
+  expected_collections:
+  - mnemos_code_moby
+  expected_files:
+  - /data/codebase/digital-gigafactory/moby/services/moby/pkg/payment/domain/model/stripe_account_test.go
+  expected_chunks: []
+  relevance_grades: {}
+  k_relevant: 1
+  notes: ''
+- id: q-555842c2
+  query: How do I define a MongoDB index for a specific field in the user repository?
   intent: code_search
   expected_collections:
   - mnemos_code_trevio
   expected_files:
-  - /data/codebase/digital-gigafactory/trevio/ui-modules/.github/workflows/ci.yml
+  - /data/codebase/digital-gigafactory/trevio/go-modules/user/infrastructure/repository/mongodb/userRepository.go
   expected_chunks: []
   relevance_grades: {}
   k_relevant: 1
   notes: ''
-- id: q-0d4d9085
-  query: How to display an icon in a Vue component when a specific condition is met?
+- id: q-ba1920c8
+  query: How do I register notification routes in Gin?
   intent: code_search
   expected_collections:
   - mnemos_code_trevio
   expected_files:
-  - /data/codebase/digital-gigafactory/trevio/ui-modules/packages/core/src/runtime/components/core/MoreBtn.vue
+  - /data/codebase/digital-gigafactory/trevio/go-modules/notification/infrastructure/framework/gin/controller/main.go
   expected_chunks: []
   relevance_grades: {}
   k_relevant: 1
   notes: ''
-- id: q-3413a1f9
-  query: How to display a trigger type in an Orchestration job page?
+- id: q-18d9f9a4
+  query: How do I load custom configuration from a file in the audit-trail module?
   intent: code_search
   expected_collections:
   - mnemos_code_trevio
   expected_files:
-  - /data/codebase/digital-gigafactory/trevio/ui-modules/packages/orchestrator/src/runtime/pages/orchestrator/jobs/[id].vue
+  - /data/codebase/digital-gigafactory/trevio/go-modules/audit-trail/domain/config/main.go
   expected_chunks: []
   relevance_grades: {}
   k_relevant: 1
   notes: ''
-- id: q-56a460dd
-  query: How to add debug messages with fields in a zerolog logger?
+- id: q-aca5560e
+  query: How do I handle sending notifications via NATS in my service?
   intent: code_search
   expected_collections:
   - mnemos_code_trevio
   expected_files:
-  - /data/codebase/digital-gigafactory/trevio/go-modules/logger/logger.go
+  - /data/codebase/digital-gigafactory/trevio/go-modules/security/domain/service/mailer.go
   expected_chunks: []
   relevance_grades: {}
   k_relevant: 1
   notes: ''
-- id: q-4c76911b
-  query: What are the properties of a Notification struct in Go?
-  intent: code_search
-  expected_collections:
-  - mnemos_code_trevio
-  expected_files:
-  - /data/codebase/digital-gigafactory/trevio/go-modules/notification/domain/model/notification.go
-  expected_chunks: []
-  relevance_grades: {}
-  k_relevant: 1
-  notes: ''
-- id: q-ba293788
-  query: How does the GeoIP service handle missing configuration?
-  intent: doc_lookup
-  expected_collections:
-  - mnemos_code_trevio
-  expected_files:
-  - /data/codebase/digital-gigafactory/trevio/go-modules/geoip/main.go
-  expected_chunks: []
-  relevance_grades: {}
-  k_relevant: 1
-  notes: ''
-- id: q-f9423934
-  query: How to customize the appearance of icons in a React application?
+- id: q-108a4ad7
+  query: How does the event bus handle panics during dispatch?
   intent: skill_discovery
   expected_collections:
   - mnemos_code_trevio
   expected_files:
-  - /data/codebase/digital-gigafactory/trevio/ui-modules/packages/core/src/runtime/assets/iconify/icons-bundle.js
+  - /data/codebase/digital-gigafactory/trevio/go-modules/eventbus/bus_test.go
+  expected_chunks: []
+  relevance_grades: {}
+  k_relevant: 1
+  notes: ''
+- id: q-024b9735
+  query: How do I determine the correct image variant to use based on the current
+    theme and skin?
+  intent: code_search
+  expected_collections:
+  - mnemos_code_trevio
+  expected_files:
+  - /data/codebase/digital-gigafactory/trevio/ui-modules/packages/core/src/runtime/composables/useGenerateImageVariant.ts
+  expected_chunks: []
+  relevance_grades: {}
+  k_relevant: 1
+  notes: ''
+- id: q-d4a98fa9
+  query: How to create a TicketNotFound error in the ticket domain?
+  intent: code_search
+  expected_collections:
+  - mnemos_code_trevio
+  expected_files:
+  - /data/codebase/digital-gigafactory/trevio/go-modules/ticket/domain/error/errors.go
   expected_chunks: []
   relevance_grades: {}
   k_relevant: 1

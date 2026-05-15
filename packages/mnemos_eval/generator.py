@@ -13,14 +13,21 @@ from mnemos_eval.schema import GoldenCandidate, Intent
 _DEFAULT_PROMPT = """You generate evaluation questions for a code/docs RAG system.
 
 Given the file path, language, and a content excerpt below, write ONE concise
-natural-language question that a developer might ask such that this chunk is
-the BEST answer. The question must:
-- be self-contained (no "this", "the above")
-- not quote the answer
-- focus on intent/behaviour, not surface syntax
+natural-language question that a developer might realistically ask such that this
+chunk is the BEST answer in the codebase.
 
-Output strictly JSON with keys: "question" (string), "intent" (one of:
-code_search, skill_discovery, doc_lookup, memory_recall).
+Hard rules — break any and you fail:
+- Be self-contained: a reader who hasn't seen the chunk must understand the question.
+- Avoid demonstratives ("this", "the above", "the following", "here").
+- Do NOT quote or paraphrase the answer verbatim. Don't name the exact function /
+  type / file you're pointing to.
+- Focus on intent / behaviour / "how do I do X?" or "where is X handled?".
+  Avoid trivia ("what variable is on line 3").
+- If the chunk is too short, generic, or auto-generated (boilerplate, getters,
+  data dumps), respond with {{"question": "", "intent": "code_search"}} to skip it.
+
+Output strictly JSON with keys: "question" (string, empty to skip), "intent"
+(one of: code_search, skill_discovery, doc_lookup, memory_recall).
 
 File: {file_path}
 Language: {language}
@@ -63,8 +70,15 @@ class GoldenGenerator:
                 candidates.append(cand)
         return candidates
 
+    _MIN_USEFUL_CONTENT_CHARS = 80
+
     def _gen_one(self, chunk: dict) -> GoldenCandidate | None:
-        content = chunk.get("content", "")[:1500]
+        content = (chunk.get("content", "") or "").strip()
+        # Skip chunks too short to generate a meaningful question against.
+        if len(content) < self._MIN_USEFUL_CONTENT_CHARS:
+            return None
+        content = content[:1500]
+
         prompt = _DEFAULT_PROMPT.format(
             file_path=chunk.get("file_path", "<unknown>"),
             language=chunk.get("language", "text"),
