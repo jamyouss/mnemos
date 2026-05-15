@@ -11,7 +11,7 @@ from mnemos_eval.schema import GoldenItem, QueryResult
 class EvalRunner:
     """Runs a golden set against a live Mnemos server via the REST API."""
 
-    def __init__(self, mnemos_url: str, limit: int = 10, timeout: float = 30.0) -> None:
+    def __init__(self, mnemos_url: str, limit: int = 10, timeout: float = 120.0) -> None:
         self._url = mnemos_url.rstrip("/")
         self._limit = limit
         self._timeout = timeout
