@@ -72,8 +72,8 @@ at 14 s p50. MiniLM gives up ~3.7 MRR points for 3.8× speed-up.
 p50: 33 ms · p95: 74 ms
 
 > Slight regression on absolute numbers because of a **golden-set path bug** that
-> was fixed between baseline and Phase 2A.1 (`/data/codebase/moby/` →
-> `/data/codebase/digital-gigafactory/moby/`). The baseline retrieved old paths
+> was fixed between baseline and Phase 2A.1 (`/data/codebase/myproject/` →
+> `/data/codebase/myproject/`). The baseline retrieved old paths
 > that happened to align with the (then-old) golden set; once the paths were
 > corrected, some questions stopped matching because they reference files we
 > shouldn't be indexing in the first place. Phase 2B confirms the hybrid schema
@@ -88,7 +88,7 @@ p50: 33 ms · p95: 74 ms
 
 **No measurable lift on skills**, small global regression (-0.037 MRR / +19 ms p50)
 because the query stays uncontextualised while the chunks now carry preambles.
-**Decision:** stopped the full contextual reindex (~2 h 30 m remaining on moby/trevio).
+**Decision:** stopped the full contextual reindex (~2 h 30 m remaining on myproject/otherproject).
 The technique is still in code, env-gated by `MNEMOS_CONTEXTUAL_ENABLED`; revisit
 after the golden set is cleaned.
 

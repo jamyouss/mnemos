@@ -20,7 +20,7 @@ Optional:
 ## 1. Clone and configure
 
 ```bash
-git clone https://github.com/digital-gigafactory/mnemos.git
+git clone https://github.com/your-org/mnemos.git
 cd mnemos
 cp .env.example .env
 ```
@@ -32,7 +32,7 @@ except the hybrid retrieval, which is always on).
 > the bind mounts for `rag-server` + `watcher`:
 > ```yaml
 > volumes:
->   - ~/Developments/Projects:/data/codebase:ro
+>   - ~/code:/data/codebase:ro
 >   - ~/.claude:/data/claude-config:ro
 > ```
 > Map whatever host directories you want to be available as `/data/codebase`
@@ -91,8 +91,8 @@ mnemos reindex --recreate --full \
 
 # A specific project's code
 mnemos reindex --recreate --full \
-       --collection mnemos_code_moby \
-       --path /data/codebase/digital-gigafactory/moby
+       --collection mnemos_code_myproject \
+       --path /data/codebase/myproject
 ```
 
 The `--recreate` flag drops the collection before reindexing. **You need it
@@ -107,14 +107,14 @@ mnemos status
 # ─────────────────────────────────────────────────────
 # mnemos_skills        737 points    status=green
 # mnemos_docs           79 points    status=green
-# mnemos_code_moby    6755 points    status=green
+# mnemos_code_myproject    6755 points    status=green
 ```
 
 ## 5. Search it from the CLI
 
 ```bash
 mnemos search "JWT validation middleware"
-mnemos search-code "ride cancel" --project moby --language go
+mnemos search-code "ride cancel" --project myproject --language go
 mnemos search-skills "performance bottleneck"
 mnemos search-memory "API routing decision"
 ```
@@ -152,7 +152,7 @@ Fall back to filesystem search only when Mnemos returns scores < 0.5.
 ## 7. Turn on memories from git (optional but recommended)
 
 ```bash
-./scripts/install-hooks.sh --global --watch ~/Developments/Projects/your-org
+./scripts/install-hooks.sh --global --watch ~/code/your-org
 ```
 
 Now every `git push` from a repo under that path triggers an async LLM

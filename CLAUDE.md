@@ -66,8 +66,8 @@ mnemos/
 | `mnemos_skills` | `~/.claude/skills/` | `skills/` |
 | `mnemos_docs` | `~/.claude/docs/` | `docs/` |
 | `mnemos_memory` | API / git hooks | _(aucun, scoped par projet)_ |
-| `mnemos_code_moby` | codebase | `moby/` |
-| `mnemos_code_trevio` | codebase | `trevio/` |
+| `mnemos_code_myproject` | codebase | `myproject/` |
+| `mnemos_code_otherproject` | codebase | `otherproject/` |
 | `mnemos_code_infra` | codebase | `infra/`, `github-cicd/` |
 
 ### MCP Tools exposés (9)
@@ -106,7 +106,7 @@ mnemos status
 ```bash
 mnemos reindex --collection mnemos_skills --path /data/claude-config/skills --full
 mnemos reindex --collection mnemos_docs --path /data/claude-config/docs --full
-mnemos reindex --collection mnemos_code_moby --path /data/codebase/moby --full
+mnemos reindex --collection mnemos_code_myproject --path /data/codebase/myproject --full
 ```
 
 Note : paths sont les **chemins container** (mount via `docker-compose.yml`).

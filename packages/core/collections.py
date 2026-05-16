@@ -16,11 +16,14 @@ class CollectionConfig:
     description: str = ""
 
 
+# Default collection layout. Add a `mnemos_code_<project>` entry per repo you
+# want to index — both the filesystem watcher and the semantic QueryRouter
+# pick up additions automatically.
 COLLECTIONS = [
     CollectionConfig(
         name="mnemos_skills",
         path_prefixes=["skills/"],
-        description="Claude Code skills (metadata + instructions)",
+        description="Agent skills (metadata + instructions)",
     ),
     CollectionConfig(
         name="mnemos_docs",
@@ -30,21 +33,24 @@ COLLECTIONS = [
     CollectionConfig(
         name="mnemos_memory",
         path_prefixes=None,
-        description="Conversation memory entries",
+        description="Memories extracted from commits and conversations",
+    ),
+    # Example collections — duplicate / rename per project you want to index.
+    # The path_prefixes match the path relative to /data/codebase inside the
+    # container. Add as many as you need.
+    CollectionConfig(
+        name="mnemos_code_myproject",
+        path_prefixes=["myproject/"],
+        description="Example application codebase — rename to your repo",
     ),
     CollectionConfig(
-        name="mnemos_code_moby",
-        path_prefixes=["moby/"],
-        description="Moby application codebase",
-    ),
-    CollectionConfig(
-        name="mnemos_code_trevio",
-        path_prefixes=["trevio/"],
-        description="Trevio platform codebase",
+        name="mnemos_code_otherproject",
+        path_prefixes=["otherproject/"],
+        description="Second example codebase",
     ),
     CollectionConfig(
         name="mnemos_code_infra",
-        path_prefixes=["infra/", "github-cicd/"],
+        path_prefixes=["infra/", "ci/"],
         description="Infrastructure and CI/CD",
     ),
 ]

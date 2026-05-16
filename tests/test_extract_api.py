@@ -51,7 +51,7 @@ def app():
 async def test_extract_memories_from_commit(app):
     application, mock_extractor, mock_deduplicator = app
     mock_extractor.extract.return_value = [
-        ExtractedMemory(content="Decided to use flat routes", memory_type="decision", project="moby", tags=["routing"])
+        ExtractedMemory(content="Decided to use flat routes", memory_type="decision", project="myproject", tags=["routing"])
     ]
     mock_deduplicator.deduplicate_and_store.return_value = DeduplicationResult(action="inserted", memory_id="test-id-123")
 

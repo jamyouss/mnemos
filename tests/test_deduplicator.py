@@ -47,7 +47,7 @@ def _mock_query_points(mock_qdrant, hits):
 
 def test_insert_new_memory(deduplicator, mock_qdrant):
     _mock_query_points(mock_qdrant, [])
-    memory = ExtractedMemory(content="Use flat API routes", memory_type="decision", project="moby", tags=["routing"])
+    memory = ExtractedMemory(content="Use flat API routes", memory_type="decision", project="myproject", tags=["routing"])
     result = deduplicator.deduplicate_and_store(memory)
     assert result.action == "inserted"
     assert result.merged_with is None
@@ -62,7 +62,7 @@ def test_merge_similar_memory(deduplicator, mock_qdrant, mock_extractor):
         "id": "existing-mem-id",
         "content": "API routes should be flat",
         "memory_type": "decision",
-        "project": "moby",
+        "project": "myproject",
         "tags": ["routing"],
         "status": "approved",
         "created_at": "2026-04-01T00:00:00Z",
@@ -70,7 +70,7 @@ def test_merge_similar_memory(deduplicator, mock_qdrant, mock_extractor):
     _mock_query_points(mock_qdrant, [existing_point])
     mock_extractor.merge_memories.return_value = "API routes must always be flat."
 
-    memory = ExtractedMemory(content="Confirmed: flat routes", memory_type="decision", project="moby", tags=["routing"])
+    memory = ExtractedMemory(content="Confirmed: flat routes", memory_type="decision", project="myproject", tags=["routing"])
     result = deduplicator.deduplicate_and_store(memory)
     assert result.action == "merged"
     assert result.merged_with == "existing-mem-id"

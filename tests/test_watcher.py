@@ -1,25 +1,25 @@
 from watcher.main import PathRouter, should_ignore
 
 
-def test_path_router_moby():
+def test_path_router_myproject():
     router = PathRouter(codebase_root="/data/codebase", config_root="/data/claude-config")
-    collection, rel_path = router.route("/data/codebase/moby/services/core/main.go")
-    assert collection == "mnemos_code_moby"
-    assert rel_path == "moby/services/core/main.go"
+    collection, rel_path = router.route("/data/codebase/myproject/services/core/main.go")
+    assert collection == "mnemos_code_myproject"
+    assert rel_path == "myproject/services/core/main.go"
 
 
-def test_path_router_trevio():
+def test_path_router_otherproject():
     router = PathRouter(codebase_root="/data/codebase", config_root="/data/claude-config")
-    collection, rel_path = router.route("/data/codebase/trevio/go-modules/ddd/entity.go")
-    assert collection == "mnemos_code_trevio"
-    assert rel_path == "trevio/go-modules/ddd/entity.go"
+    collection, rel_path = router.route("/data/codebase/otherproject/go-modules/ddd/entity.go")
+    assert collection == "mnemos_code_otherproject"
+    assert rel_path == "otherproject/go-modules/ddd/entity.go"
 
 
 def test_path_router_skills():
     router = PathRouter(codebase_root="/data/codebase", config_root="/data/claude-config")
-    collection, rel_path = router.route("/data/claude-config/skills/moby-expert/instructions.md")
+    collection, rel_path = router.route("/data/claude-config/skills/project-expert/instructions.md")
     assert collection == "mnemos_skills"
-    assert rel_path == "skills/moby-expert/instructions.md"
+    assert rel_path == "skills/project-expert/instructions.md"
 
 
 def test_path_router_unknown():
@@ -29,8 +29,8 @@ def test_path_router_unknown():
 
 
 def test_should_ignore():
-    assert should_ignore("/data/codebase/moby/node_modules/pkg/index.js") is True
-    assert should_ignore("/data/codebase/moby/.git/HEAD") is True
-    assert should_ignore("/data/codebase/moby/services/core/main.go") is False
-    assert should_ignore("/data/codebase/moby/dist/bundle.js") is True
-    assert should_ignore("/data/codebase/moby/app.min.js") is True
+    assert should_ignore("/data/codebase/myproject/node_modules/pkg/index.js") is True
+    assert should_ignore("/data/codebase/myproject/.git/HEAD") is True
+    assert should_ignore("/data/codebase/myproject/services/core/main.go") is False
+    assert should_ignore("/data/codebase/myproject/dist/bundle.js") is True
+    assert should_ignore("/data/codebase/myproject/app.min.js") is True

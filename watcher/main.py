@@ -6,6 +6,7 @@ import threading
 import logging
 
 import httpx
+from core.collections import COLLECTIONS
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler, FileSystemEvent
 
@@ -82,22 +83,29 @@ class PathRouter:
         self._config_root = config_root.rstrip("/")
 
     def route(self, abs_path: str) -> tuple[str, str] | None:
+        # Config-side routing (skills / docs)
         if abs_path.startswith(self._config_root + "/"):
             rel = abs_path[len(self._config_root) + 1:]
-            if rel.startswith("skills/"):
-                return "mnemos_skills", rel
-            if rel.startswith("docs/"):
-                return "mnemos_docs", rel
+            for coll in COLLECTIONS:
+                if not coll.path_prefixes:
+                    continue
+                for prefix in coll.path_prefixes:
+                    if rel.startswith(prefix) and coll.name in ("mnemos_skills", "mnemos_docs"):
+                        return coll.name, rel
             return None
 
+        # Code-side routing — pull the project prefix → collection mapping straight
+        # from core.collections so adding a new project is one entry, no code change.
         if abs_path.startswith(self._codebase_root + "/"):
             rel = abs_path[len(self._codebase_root) + 1:]
-            if rel.startswith("moby/"):
-                return "mnemos_code_moby", rel
-            if rel.startswith("trevio/"):
-                return "mnemos_code_trevio", rel
-            if rel.startswith("infra/") or rel.startswith("github-cicd/"):
-                return "mnemos_code_infra", rel
+            for coll in COLLECTIONS:
+                if not coll.path_prefixes:
+                    continue
+                if not coll.name.startswith("mnemos_code_"):
+                    continue
+                for prefix in coll.path_prefixes:
+                    if rel.startswith(prefix):
+                        return coll.name, rel
             return None
 
         return None

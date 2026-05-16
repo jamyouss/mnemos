@@ -29,9 +29,9 @@ def test_extracts_file_header(sample_go_code):
 
 def test_chunk_metadata(sample_go_code):
     chunker = GoChunker()
-    chunks = chunker.chunk(sample_go_code, file_path="moby/services/core/app.go")
+    chunks = chunker.chunk(sample_go_code, file_path="myproject/services/core/app.go")
     for chunk in chunks:
-        assert chunk["file_path"] == "moby/services/core/app.go"
+        assert chunk["file_path"] == "myproject/services/core/app.go"
         assert chunk["language"] == "go"
 
 

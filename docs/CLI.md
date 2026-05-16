@@ -46,7 +46,7 @@ Cross-collection semantic search.
 ```bash
 mnemos search "JWT validation"
 mnemos search "JWT validation" --limit 10
-mnemos search "JWT validation" --collection mnemos_code_moby
+mnemos search "JWT validation" --collection mnemos_code_myproject
 mnemos search "logger init" --file-type go
 mnemos search "config" --path-filter /data/codebase/myproject/
 ```
@@ -63,7 +63,7 @@ mnemos search "config" --path-filter /data/codebase/myproject/
 Code-only search with structured filters.
 
 ```bash
-mnemos search-code "ride cancel" --project moby --language go --symbol-type func
+mnemos search-code "ride cancel" --project myproject --language go --symbol-type func
 ```
 
 | Flag | Description |
@@ -94,12 +94,12 @@ Trigger a server-side reindex.
 ```bash
 # Initial: drop + recreate with the hybrid schema, full directory scan, 4 workers
 mnemos reindex --recreate --full --workers 4 \
-       --collection mnemos_code_moby \
-       --path /data/codebase/digital-gigafactory/moby
+       --collection mnemos_code_myproject \
+       --path /data/codebase/myproject
 
 # Subsequent incremental: just re-index a single file
-mnemos reindex --collection mnemos_code_moby \
-       --path /data/codebase/digital-gigafactory/moby/services/handler.go
+mnemos reindex --collection mnemos_code_myproject \
+       --path /data/codebase/myproject/services/handler.go
 ```
 
 | Flag | Description |
@@ -131,7 +131,7 @@ Insert a new memory directly (skips extraction, status defaults to `approved`).
 
 ```bash
 mnemos memory add "Always use flat resource paths in REST routes" \
-       --project moby \
+       --project myproject \
        --type convention \
        --tags routing,api
 ```
@@ -152,7 +152,7 @@ generation, run, compare.
 Generate candidate Q/A pairs from indexed chunks via your LLM.
 
 ```bash
-mnemos eval generate --collection mnemos_code_moby --count 10
+mnemos eval generate --collection mnemos_code_myproject --count 10
 mnemos eval generate --collection mnemos_skills --count 5 \
        --provider anthropic --model claude-haiku-4-5 \
        --api-key "$ANTHROPIC_API_KEY"

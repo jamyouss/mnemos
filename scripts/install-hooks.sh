@@ -2,7 +2,7 @@
 # Install Mnemos global git hooks.
 #
 # Usage:
-#   ./install-hooks.sh --global --watch ~/Developments/Projects/digital-gigafactory
+#   ./install-hooks.sh --global --watch ~/code/your-org
 #   ./install-hooks.sh --global --watch /path/to/repo --trigger both
 #
 # Options:

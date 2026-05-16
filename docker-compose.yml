@@ -62,8 +62,11 @@ services:
       MNEMOS_QUERY_LOG_ENABLED: "${MNEMOS_QUERY_LOG_ENABLED:-false}"
       MNEMOS_QUERY_LOG_PATH: "${MNEMOS_QUERY_LOG_PATH:-/data/state/query-log.jsonl}"
     volumes:
-      - ~/Developments/Projects:/data/codebase:ro
-      - ~/.claude:/data/claude-config:ro
+      # Mount your source code so Mnemos can index it. Set MNEMOS_CODEBASE_HOST_PATH
+      # to a project root on your host, e.g. "~/code" or "/srv/projects".
+      - ${MNEMOS_CODEBASE_HOST_PATH:-./data/codebase}:/data/codebase:ro
+      # Optional: mount your Claude config (skills, docs) for agent indexing.
+      - ${MNEMOS_CLAUDE_CONFIG_HOST_PATH:-./data/claude-config}:/data/claude-config:ro
       - rag_state:/data/state
     depends_on:
       qdrant:
@@ -85,8 +88,8 @@ services:
       CLAUDE_CONFIG_PATH: /data/claude-config
       WATCHER_DEBOUNCE_MS: 2000
     volumes:
-      - ~/Developments/Projects:/data/codebase:ro
-      - ~/.claude:/data/claude-config:ro
+      - ${MNEMOS_CODEBASE_HOST_PATH:-./data/codebase}:/data/codebase:ro
+      - ${MNEMOS_CLAUDE_CONFIG_HOST_PATH:-./data/claude-config}:/data/claude-config:ro
     depends_on:
       rag-server:
         condition: service_healthy

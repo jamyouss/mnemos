@@ -1,5 +1,9 @@
+# Per-tenant configuration for deployed mode (MNEMOS_AUTH_ENABLED=true).
+# Each tenant's collections are prefixed so they cannot read each other.
+# Rotate api_key values out of band and never commit real keys.
+
 tenants:
-  tenant_jamal:
+  tenant_acme:
     api_key: "CHANGE_ME"
-    collections_prefix: "jamal_"
+    collections_prefix: "acme_"
     max_documents: 0  # 0 = unlimited (no quota enforcement)

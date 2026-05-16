@@ -52,19 +52,19 @@ def test_select_chunker_fallback(indexer):
 def test_index_file(indexer, mock_qdrant, sample_go_code):
     indexer.index_file(
         content=sample_go_code,
-        file_path="moby/services/core/app.go",
-        collection="mnemos_code_moby",
+        file_path="myproject/services/core/app.go",
+        collection="mnemos_code_myproject",
     )
     mock_qdrant.upsert.assert_called_once()
     call_args = mock_qdrant.upsert.call_args
-    assert call_args.kwargs["collection_name"] == "mnemos_code_moby"
+    assert call_args.kwargs["collection_name"] == "mnemos_code_myproject"
     points = call_args.kwargs["points"]
     assert len(points) > 0
 
 
 def test_delete_file(indexer, mock_qdrant):
     indexer.delete_file(
-        file_path="moby/services/core/old.go",
-        collection="mnemos_code_moby",
+        file_path="myproject/services/core/old.go",
+        collection="mnemos_code_myproject",
     )
     mock_qdrant.delete.assert_called_once()

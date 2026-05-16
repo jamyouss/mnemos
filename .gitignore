@@ -15,3 +15,12 @@ uv.lock
 # Eval runs (generated artifacts)
 evals/runs/*.json
 evals/dataset/_candidates.yaml
+# Your own golden set is local data, not source code. Keep only the example committed.
+evals/dataset/golden.yaml
+evals/dataset/golden.legacy-*.yaml
+
+# User-mounted dirs — keep .gitkeep placeholders but ignore the rest
+data/codebase/*
+!data/codebase/.gitkeep
+data/claude-config/*
+!data/claude-config/.gitkeep

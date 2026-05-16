@@ -52,7 +52,7 @@ chunk, what natural-language question would a developer ask such that this
 chunk is the best answer?"
 
 ```bash
-mnemos eval generate --collection mnemos_code_moby --count 10
+mnemos eval generate --collection mnemos_code_myproject --count 10
 mnemos eval generate --collection mnemos_skills    --count 6
 mnemos eval generate --collection mnemos_docs      --count 5
 ```
@@ -65,7 +65,7 @@ The candidates land in `evals/dataset/_candidates.yaml`:
   intent: code_search
   suggested_files:
     - /data/codebase/.../ride/application/cancel.go
-  source_collection: mnemos_code_moby
+  source_collection: mnemos_code_myproject
   source_chunk_preview: |
     func (s *Service) Cancel(ctx context.Context, id RideID) error { ... }
   reviewed: false
@@ -98,7 +98,7 @@ Your final `golden.yaml` looks like:
 - id: q-f4d2e7d2
   query: How do I cancel an in-progress ride?
   intent: code_search
-  expected_collections: [mnemos_code_moby]
+  expected_collections: [mnemos_code_myproject]
   expected_files:
     - /data/codebase/.../ride/application/cancel.go
   expected_chunks: []         # optional, finer-grained

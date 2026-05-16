@@ -7,8 +7,8 @@ def test_all_collections_defined():
         "mnemos_skills",
         "mnemos_docs",
         "mnemos_memory",
-        "mnemos_code_moby",
-        "mnemos_code_trevio",
+        "mnemos_code_myproject",
+        "mnemos_code_otherproject",
         "mnemos_code_infra",
     }
 
@@ -19,14 +19,14 @@ def test_collection_config_has_vector_size():
 
 
 def test_path_to_collection_mapping():
-    assert get_collection_for_path("moby/services/core/main.go") == "mnemos_code_moby"
-    assert get_collection_for_path("trevio/go-modules/ddd/entity.go") == "mnemos_code_trevio"
+    assert get_collection_for_path("myproject/services/core/main.go") == "mnemos_code_myproject"
+    assert get_collection_for_path("otherproject/go-modules/ddd/entity.go") == "mnemos_code_otherproject"
     assert get_collection_for_path("infra/docker/compose.yml") == "mnemos_code_infra"
-    assert get_collection_for_path("github-cicd/workflow.yml") == "mnemos_code_infra"
+    assert get_collection_for_path("ci/workflow.yml") == "mnemos_code_infra"
 
 
 def test_path_to_collection_skills():
-    assert get_collection_for_path("skills/moby-expert/instructions.md") == "mnemos_skills"
+    assert get_collection_for_path("skills/project-expert/instructions.md") == "mnemos_skills"
     assert get_collection_for_path("docs/DDD_PATTERNS.md") == "mnemos_docs"
 
 

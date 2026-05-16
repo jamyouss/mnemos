@@ -1,0 +1,38 @@
+# Mnemos golden set — example.
+#
+# Copy this file to `golden.yaml` (gitignored by default) and either:
+#   1. Hand-write your own questions, or
+#   2. Generate candidates with `mnemos eval generate --collection X --count N`,
+#      review eval/dataset/_candidates.yaml, then `mnemos eval promote`.
+#
+# Each entry is a (query, expected_files) pair the eval runner will measure
+# the live Mnemos server against. See docs/EVALUATION.md for the full guide.
+
+- id: q001
+  query: "How is a new user created?"
+  intent: code_search                       # code_search | skill_discovery | doc_lookup | memory_recall
+  expected_collections:
+    - mnemos_code_myproject
+  expected_files:
+    - /data/codebase/myproject/services/user/application/create.go
+  expected_chunks: []                       # optional: chunk_ids for finer matching
+  relevance_grades: {}                      # optional: {file: 1|2|3} for graded NDCG
+  k_relevant: 1
+
+- id: q002
+  query: "What's the convention for logging in this project?"
+  intent: doc_lookup
+  expected_collections:
+    - mnemos_docs
+  expected_files:
+    - /data/claude-config/docs/LOGGING_CONVENTIONS.md
+  k_relevant: 1
+
+- id: q003
+  query: "Find the database backup workflow."
+  intent: skill_discovery
+  expected_collections:
+    - mnemos_skills
+  expected_files:
+    - /data/claude-config/skills/database-administrator/SKILL.md
+  k_relevant: 1

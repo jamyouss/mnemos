@@ -46,7 +46,7 @@ git commit + push
 ## Hook installation
 
 ```bash
-./scripts/install-hooks.sh --global --watch ~/Developments/Projects/your-org
+./scripts/install-hooks.sh --global --watch ~/code/your-org
 ```
 
 This:
@@ -161,7 +161,7 @@ You don't have to wait for a commit:
 
 ```bash
 mnemos memory add "Always use flat resource paths in REST routes" \
-  --project moby \
+  --project myproject \
   --type convention \
   --tags routing,api
 ```
@@ -172,14 +172,14 @@ Manually-added memories go straight to `approved` (since you wrote them).
 
 Via CLI:
 ```bash
-mnemos search-memory "API routing decisions" --project moby
+mnemos search-memory "API routing decisions" --project myproject
 ```
 
 Via MCP (agent):
 ```python
 mnemos_search_memory(
   query="API routing decisions",
-  project="moby",
+  project="myproject",
   memory_type="decision",
   limit=5,
 )

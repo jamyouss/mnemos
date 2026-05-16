@@ -36,7 +36,7 @@ def extractor():
 
 
 def test_extract_returns_list():
-    llm = FakeLLM(responses=['[{"content": "Decided to use flat routes for API", "memory_type": "decision", "project": "moby", "tags": ["routing"]}]'])
+    llm = FakeLLM(responses=['[{"content": "Decided to use flat routes for API", "memory_type": "decision", "project": "myproject", "tags": ["routing"]}]'])
     extractor = MemoryExtractor(llm=llm)
     results = extractor.extract(
         commit_message="feat: flatten API routes",
@@ -45,7 +45,7 @@ def test_extract_returns_list():
     assert len(results) == 1
     assert results[0].content == "Decided to use flat routes for API"
     assert results[0].memory_type == "decision"
-    assert results[0].project == "moby"
+    assert results[0].project == "myproject"
     # Verify the LLM was called with json_mode and a system message
     assert llm.calls[0]["json_mode"] is True
     assert llm.calls[0]["messages"][0]["role"] == "system"

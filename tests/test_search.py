@@ -37,7 +37,7 @@ def test_search_returns_search_results(search_service, mock_qdrant):
             score=0.87,
             payload={
                 "content": "func Create()",
-                "file_path": "moby/services/core/app.go",
+                "file_path": "myproject/services/core/app.go",
                 "chunk_type": "function",
                 "language": "go",
             },
@@ -45,7 +45,7 @@ def test_search_returns_search_results(search_service, mock_qdrant):
     ])
     results = search_service.search(
         query="company creation",
-        collections=["mnemos_code_moby"],
+        collections=["mnemos_code_myproject"],
         limit=5,
     )
     assert len(results) == 1
@@ -59,7 +59,7 @@ def test_search_code_returns_code_results(search_service, mock_qdrant):
             score=0.9,
             payload={
                 "content": "func Create()",
-                "file_path": "moby/services/core/app.go",
+                "file_path": "myproject/services/core/app.go",
                 "chunk_type": "function",
                 "language": "go",
                 "symbol_name": "Create",
@@ -70,7 +70,7 @@ def test_search_code_returns_code_results(search_service, mock_qdrant):
     results = search_service.search_code(
         query="company creation",
         language="go",
-        project="moby",
+        project="myproject",
         limit=5,
     )
     assert len(results) == 1
@@ -84,16 +84,16 @@ def test_search_skills(search_service, mock_qdrant):
             score=0.92,
             payload={
                 "content": "Expert on Moby project...",
-                "skill_name": "moby-expert",
+                "skill_name": "project-expert",
                 "description": "Expert on Moby project",
                 "chunk_type": "skill",
             },
         )
     ])
-    results = search_service.search_skills(query="moby service", limit=3)
+    results = search_service.search_skills(query="myproject service", limit=3)
     assert len(results) == 1
     assert isinstance(results[0], SkillResult)
-    assert results[0].skill_name == "moby-expert"
+    assert results[0].skill_name == "project-expert"
 
 
 def test_search_memory(search_service, mock_qdrant):
@@ -103,7 +103,7 @@ def test_search_memory(search_service, mock_qdrant):
             payload={
                 "content": "Fixed NATS reconnection",
                 "id": "mem_123",
-                "project": "moby",
+                "project": "myproject",
                 "topic": "nats",
                 "memory_type": "bug-fix",
                 "tags": ["nats"],
@@ -113,7 +113,7 @@ def test_search_memory(search_service, mock_qdrant):
         )
     ])
     results = search_service.search_memory(
-        query="NATS issue", project="moby", limit=5
+        query="NATS issue", project="myproject", limit=5
     )
     assert len(results) == 1
     assert isinstance(results[0], MemoryResult)

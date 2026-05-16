@@ -62,7 +62,7 @@ TOOL_DEFINITIONS: list[types.Tool] = [
                 },
                 "project": {
                     "type": "string",
-                    "description": "Optional project name (moby, trevio, infra)",
+                    "description": "Optional project name — mapped to the `mnemos_code_<project>` collection",
                 },
                 "path_filter": {
                     "type": "string",

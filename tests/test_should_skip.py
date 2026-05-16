@@ -7,7 +7,7 @@ from server.api import _should_skip
 
 def test_legitimate_code_path_kept():
     """The container mount root is /data/codebase/ — nothing there must be skipped by accident."""
-    assert _should_skip(Path("/data/codebase/digital-gigafactory/moby/services/handler.go")) is False
+    assert _should_skip(Path("/data/codebase/myproject/services/handler.go")) is False
     assert _should_skip(Path("/data/codebase/myorg/api/handler.py")) is False
     assert _should_skip(Path("/data/claude-config/skills/foo/SKILL.md")) is False
 

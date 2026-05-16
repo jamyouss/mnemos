@@ -13,25 +13,25 @@ from core.models import (
 def test_search_result_to_dict():
     result = SearchResult(
         content="func Create()",
-        file_path="moby/services/core/app.go",
+        file_path="myproject/services/core/app.go",
         score=0.87,
         chunk_type="function",
-        collection="mnemos_code_moby",
+        collection="mnemos_code_myproject",
         metadata={"package": "application"},
     )
     d = result.model_dump()
     assert d["content"] == "func Create()"
     assert d["score"] == 0.87
-    assert d["collection"] == "mnemos_code_moby"
+    assert d["collection"] == "mnemos_code_myproject"
 
 
 def test_code_search_result_extends_search_result():
     result = CodeSearchResult(
         content="func Create()",
-        file_path="moby/services/core/app.go",
+        file_path="myproject/services/core/app.go",
         score=0.87,
         chunk_type="function",
-        collection="mnemos_code_moby",
+        collection="mnemos_code_myproject",
         metadata={"package": "application"},
         language="go",
         symbol_name="Create",
@@ -46,7 +46,7 @@ def test_memory_entry_defaults():
     entry = MemoryEntry(
         id="mem_123",
         content="Always use flat routes",
-        project="moby",
+        project="myproject",
         topic="routing",
         memory_type="preference",
         tags=["api", "routing"],
@@ -59,17 +59,17 @@ def test_memory_entry_defaults():
 
 def test_skill_result():
     result = SkillResult(
-        skill_name="moby-expert",
+        skill_name="project-expert",
         description="Expert on Moby project",
         score=0.92,
-        instructions_preview="Expert on Moby project (mobytime.fr)...",
+        instructions_preview="Expert on the example project...",
     )
-    assert result.skill_name == "moby-expert"
+    assert result.skill_name == "project-expert"
 
 
 def test_reindex_status():
     status = ReindexStatus(
-        collection="mnemos_code_moby",
+        collection="mnemos_code_myproject",
         mode="incremental",
         files_processed=42,
         files_added=5,
@@ -84,8 +84,8 @@ def test_reindex_status():
 def test_status_report():
     report = StatusReport(
         collections={
-            "mnemos_code_moby": CollectionStatus(
-                name="mnemos_code_moby",
+            "mnemos_code_myproject": CollectionStatus(
+                name="mnemos_code_myproject",
                 document_count=1500,
                 last_indexed_at="2026-03-12T10:00:00Z",
                 stale_files=3,
@@ -95,14 +95,14 @@ def test_status_report():
         watcher_active=True,
     )
     assert report.qdrant_healthy is True
-    assert report.collections["mnemos_code_moby"].document_count == 1500
+    assert report.collections["mnemos_code_myproject"].document_count == 1500
 
 
 def test_memory_result():
     result = MemoryResult(
         id="mem_123",
         content="Fixed NATS reconnection",
-        project="moby",
+        project="myproject",
         topic="nats",
         memory_type="bug-fix",
         tags=["nats"],

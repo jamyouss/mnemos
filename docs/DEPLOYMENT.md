@@ -90,7 +90,7 @@ Deployed mode:
 tenants:
   tenant_acme:
     api_key: "sk-acme-…"
-    collections_prefix: "acme_"          # → acme_code_moby, acme_docs, …
+    collections_prefix: "acme_"          # → acme_code_myproject, acme_docs, …
     max_documents: 0                     # 0 = unlimited
   tenant_brand:
     api_key: "sk-brand-…"
@@ -110,13 +110,13 @@ curl -X POST https://mnemos.example.com/api/index \
   -H "Content-Type: application/json" \
   -d '{
     "file_path": "services/core/handler.go",
-    "collection": "acme_code_moby",
+    "collection": "acme_code_myproject",
     "content": "package core\nfunc Handle() { ... }"
   }'
 
 # Delete a file from the index when it's removed from the repo
 curl -X DELETE \
-  https://mnemos.example.com/api/index/acme_code_moby/services/core/handler.go \
+  https://mnemos.example.com/api/index/acme_code_myproject/services/core/handler.go \
   -H "Authorization: Bearer sk-acme-…"
 ```
 
@@ -145,11 +145,11 @@ jobs:
           git diff --name-status HEAD~1 HEAD | while read status path; do
             if [ "$status" = "D" ]; then
               curl -X DELETE \
-                "$MNEMOS_URL/api/index/acme_code_moby/$path" \
+                "$MNEMOS_URL/api/index/acme_code_myproject/$path" \
                 -H "Authorization: Bearer $MNEMOS_API_KEY"
             else
               jq -n --arg fp "$path" \
-                     --arg coll "acme_code_moby" \
+                     --arg coll "acme_code_myproject" \
                      --rawfile content "$path" \
                      '{file_path:$fp, collection:$coll, content:$content}' \
               | curl -X POST "$MNEMOS_URL/api/index" \
