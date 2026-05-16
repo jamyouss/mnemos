@@ -7,10 +7,10 @@ from pathlib import Path
 
 from qdrant_client import QdrantClient
 
-# Add packages directory to path so rag_core is importable
+# Add packages directory to path so core is importable
 sys.path.insert(0, str(Path(__file__).parent.parent / "packages"))
 
-from rag_core.collections import COLLECTIONS
+from core.collections import COLLECTIONS
 
 
 def init_collections(client: QdrantClient) -> None:

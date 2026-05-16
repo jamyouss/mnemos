@@ -1,4 +1,4 @@
-from rag_core.chunkers.go_chunker import GoChunker
+from core.chunkers.go_chunker import GoChunker
 
 
 def test_extracts_functions(sample_go_code):

@@ -15,7 +15,7 @@ import json
 import logging
 from typing import Literal
 
-from rag_core.llm import LLMError, LLMProvider
+from core.llm import LLMError, LLMProvider
 
 logger = logging.getLogger("mnemos.rewriter")
 

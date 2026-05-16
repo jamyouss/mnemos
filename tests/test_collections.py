@@ -1,4 +1,4 @@
-from rag_core.collections import COLLECTIONS, CollectionConfig, get_collection_for_path
+from core.collections import COLLECTIONS, CollectionConfig, get_collection_for_path
 
 
 def test_all_collections_defined():

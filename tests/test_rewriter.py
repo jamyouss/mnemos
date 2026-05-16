@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from rag_core.llm import LLMError
-from rag_core.rewriter import QueryRewriter
+from core.llm import LLMError
+from core.rewriter import QueryRewriter
 
 
 class FakeLLM:

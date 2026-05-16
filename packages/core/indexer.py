@@ -17,14 +17,14 @@ from qdrant_client.models import (
     VectorParams,
 )
 
-from rag_core.chunkers.fallback_chunker import FallbackChunker
-from rag_core.chunkers.go_chunker import GoChunker
-from rag_core.chunkers.markdown_chunker import MarkdownChunker
-from rag_core.chunkers.vue_chunker import VueChunker
-from rag_core.collections import DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME
-from rag_core.contextual import ContextualEnricher
-from rag_core.embeddings import EmbeddingService
-from rag_core.sparse import bm25_sparse
+from core.chunkers.fallback_chunker import FallbackChunker
+from core.chunkers.go_chunker import GoChunker
+from core.chunkers.markdown_chunker import MarkdownChunker
+from core.chunkers.vue_chunker import VueChunker
+from core.collections import DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME
+from core.contextual import ContextualEnricher
+from core.embeddings import EmbeddingService
+from core.sparse import bm25_sparse
 
 
 class Indexer:

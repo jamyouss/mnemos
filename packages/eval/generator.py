@@ -5,9 +5,9 @@ import random
 import uuid
 from typing import Iterable
 
-from rag_core.llm import LLMError, LLMProvider
+from core.llm import LLMError, LLMProvider
 
-from mnemos_eval.schema import GoldenCandidate, Intent
+from eval.schema import GoldenCandidate, Intent
 
 
 _DEFAULT_PROMPT = """You generate evaluation questions for a code/docs RAG system.

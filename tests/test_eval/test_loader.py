@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from mnemos_eval.loader import (
+from eval.loader import (
     load_candidates,
     load_golden,
     promote_candidates,
     save_candidates,
     save_golden,
 )
-from mnemos_eval.schema import GoldenCandidate, GoldenItem
+from eval.schema import GoldenCandidate, GoldenItem
 
 
 def test_save_and_load_golden(tmp_path: Path):

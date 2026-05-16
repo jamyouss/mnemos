@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from rag_core.llm.base import LLMError, Message
+from core.llm.base import LLMError, Message
 
 logger = logging.getLogger("mnemos.llm.anthropic")
 

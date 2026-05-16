@@ -1,4 +1,4 @@
-from rag_core.chunkers.vue_chunker import VueChunker
+from core.chunkers.vue_chunker import VueChunker
 
 
 def test_splits_sfc_blocks(sample_vue_code):

@@ -7,8 +7,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy and install rag_core dependencies
-COPY packages/rag_core /app/packages/rag_core
+# Copy and install core dependencies
+COPY packages/core /app/packages/core
 RUN pip install --no-cache-dir \
     "qdrant-client>=1.9.0" \
     "sentence-transformers>=2.6.0" \
@@ -16,7 +16,7 @@ RUN pip install --no-cache-dir \
     "tree-sitter-go>=0.21.0" \
     "pydantic>=2.6.0"
 
-# Make rag_core importable
+# Make `core` importable
 ENV PYTHONPATH="/app/packages:${PYTHONPATH}"
 
 # Install server dependencies

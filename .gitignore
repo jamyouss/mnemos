@@ -13,5 +13,5 @@ venv/
 uv.lock
 
 # Eval runs (generated artifacts)
-eval/runs/*.json
-eval/dataset/_candidates.yaml
+evals/runs/*.json
+evals/dataset/_candidates.yaml

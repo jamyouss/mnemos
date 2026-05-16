@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import pytest
 
-from rag_core.llm import LLMError
-from rag_core.memory_extractor import MemoryExtractor
+from core.llm import LLMError
+from core.memory_extractor import MemoryExtractor
 
 
 class FakeLLM:

@@ -4,7 +4,7 @@ import logging
 
 import httpx
 
-from rag_core.llm.base import LLMError, Message
+from core.llm.base import LLMError, Message
 
 logger = logging.getLogger("mnemos.llm.ollama")
 

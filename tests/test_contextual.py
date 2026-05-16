@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from rag_core.contextual import ContextualEnricher
-from rag_core.llm import LLMError
+from core.contextual import ContextualEnricher
+from core.llm import LLMError
 
 
 class FakeLLM:

@@ -46,7 +46,7 @@ MEMORY (git hook / API):
 
 ```
 mnemos/
-  packages/rag_core/      # Lib partagée (chunkers, embeddings, indexer, dedup, memory_extractor)
+  packages/core/      # Lib partagée (chunkers, embeddings, indexer, dedup, memory_extractor)
   server/                 # FastAPI + MCP server (port 8100)
   watcher/                # File watcher (watchdog)
   cli/                    # Click CLI client
@@ -115,7 +115,7 @@ Note : paths sont les **chemins container** (mount via `docker-compose.yml`).
 
 ```bash
 pip install pytest pytest-asyncio
-pip install -e packages/rag_core/
+pip install -e packages/core/
 pip install -r server/requirements.txt
 pytest tests/
 ```
@@ -127,7 +127,7 @@ Conventions tests :
 
 ## Conventions code
 
-### Python (server, rag_core, watcher, cli)
+### Python (server, core, watcher, cli)
 - Python 3.12+, type hints partout (`from __future__ import annotations`)
 - Dataclasses ou Pydantic pour les modèles
 - Pas d'effets de bord dans les imports
@@ -135,10 +135,10 @@ Conventions tests :
 - Async pour les handlers FastAPI, sync ailleurs sauf justification
 
 ### Architecture
-- `rag_core/` est **pure logique** — pas d'I/O server ni HTTP
-- `server/` est **transport-only** — wrappe `rag_core` derrière FastAPI/MCP
-- `watcher/` et `cli/` consomment `server/` via HTTP, jamais directement `rag_core`
-- Collections sont déclarées dans `rag_core/collections.py` — single source of truth
+- `core/` est **pure logique** — pas d'I/O server ni HTTP
+- `server/` est **transport-only** — wrappe `core` derrière FastAPI/MCP
+- `watcher/` et `cli/` consomment `server/` via HTTP, jamais directement `core`
+- Collections sont déclarées dans `core/collections.py` — single source of truth
 
 ### Memory entries
 - `id` toujours UUID
@@ -164,7 +164,7 @@ Conventions tests :
 2. Toute écriture passe par `Deduplicator` (jamais d'upsert direct sur `mnemos_memory`)
 3. Préserver le workflow `pending → approved`
 
-### LLM provider — abstraction (`rag_core.llm`)
+### LLM provider — abstraction (`core.llm`)
 Toute composante qui appelle un LLM (extractor, dedup merge, futur contextual chunker, grader, rewriter, eval generator) **doit** :
 1. Recevoir un `LLMProvider` par constructeur (jamais instancier en interne)
 2. Utiliser uniquement `complete()` ou `complete_prompt()` de l'interface
@@ -178,7 +178,7 @@ Providers supportés :
 Switch via `MNEMOS_LLM_PROVIDER` env var (voir `.env.example`).
 
 ### Ajout d'une collection
-1. Déclarer dans `rag_core/collections.py` (avec `path_prefixes` et `description`)
+1. Déclarer dans `core/collections.py` (avec `path_prefixes` et `description`)
 2. Le startup `server/main.py:lifespan` crée la collection automatiquement
 3. Ajouter au tableau dans `README.md` et `CLAUDE.md`
 

@@ -1,4 +1,4 @@
-from rag_core.models import (
+from core.models import (
     SearchResult,
     CodeSearchResult,
     SkillResult,

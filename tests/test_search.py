@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from server.search import SearchService
-from rag_core.models import SearchResult, CodeSearchResult, SkillResult, MemoryResult
+from core.models import SearchResult, CodeSearchResult, SkillResult, MemoryResult
 
 
 @pytest.fixture

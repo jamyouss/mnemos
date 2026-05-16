@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from rag_core.llm.base import LLMError, LLMProvider
+from core.llm.base import LLMError, LLMProvider
 
 
 @dataclass(frozen=True)
@@ -24,13 +24,13 @@ def make_llm_provider(config: LLMConfig) -> LLMProvider:
     provider = (config.provider or "").strip().lower()
 
     if provider == "ollama":
-        from rag_core.llm.ollama import OllamaProvider
+        from core.llm.ollama import OllamaProvider
 
         base_url = config.base_url or "http://localhost:11434"
         return OllamaProvider(base_url=base_url, model=config.model)
 
     if provider == "anthropic":
-        from rag_core.llm.anthropic import AnthropicProvider
+        from core.llm.anthropic import AnthropicProvider
 
         return AnthropicProvider(
             api_key=config.api_key,
@@ -39,7 +39,7 @@ def make_llm_provider(config: LLMConfig) -> LLMProvider:
         )
 
     if provider == "openai":
-        from rag_core.llm.openai import OpenAIProvider
+        from core.llm.openai import OpenAIProvider
 
         return OpenAIProvider(
             api_key=config.api_key,

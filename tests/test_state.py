@@ -2,7 +2,7 @@ import json
 import tempfile
 from pathlib import Path
 
-from rag_core.state import IndexState
+from core.state import IndexState
 
 
 def test_load_empty_state():

@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from rag_core.observability import QueryLogger
+from core.observability import QueryLogger
 
 
 def _read(path: Path) -> list[dict]:

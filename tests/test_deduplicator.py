@@ -5,8 +5,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from rag_core.deduplicator import Deduplicator
-from rag_core.models import ExtractedMemory
+from core.deduplicator import Deduplicator
+from core.models import ExtractedMemory
 
 
 @pytest.fixture

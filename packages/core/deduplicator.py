@@ -9,10 +9,10 @@ from datetime import datetime, timezone
 from qdrant_client import QdrantClient
 from qdrant_client.models import PointStruct
 
-from rag_core.collections import DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME
-from rag_core.embeddings import EmbeddingService
-from rag_core.models import DeduplicationResult, ExtractedMemory
-from rag_core.sparse import bm25_sparse
+from core.collections import DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME
+from core.embeddings import EmbeddingService
+from core.models import DeduplicationResult, ExtractedMemory
+from core.sparse import bm25_sparse
 
 logger = logging.getLogger("mnemos.deduplicator")
 

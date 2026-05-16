@@ -2,7 +2,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from rag_core.indexer import Indexer
+from core.indexer import Indexer
 
 
 @pytest.fixture
@@ -26,25 +26,25 @@ def indexer(mock_qdrant, mock_embeddings):
 
 
 def test_select_chunker_for_go(indexer):
-    from rag_core.chunkers.go_chunker import GoChunker
+    from core.chunkers.go_chunker import GoChunker
     chunker = indexer._select_chunker("service.go")
     assert isinstance(chunker, GoChunker)
 
 
 def test_select_chunker_for_vue(indexer):
-    from rag_core.chunkers.vue_chunker import VueChunker
+    from core.chunkers.vue_chunker import VueChunker
     chunker = indexer._select_chunker("Component.vue")
     assert isinstance(chunker, VueChunker)
 
 
 def test_select_chunker_for_markdown(indexer):
-    from rag_core.chunkers.markdown_chunker import MarkdownChunker
+    from core.chunkers.markdown_chunker import MarkdownChunker
     chunker = indexer._select_chunker("README.md")
     assert isinstance(chunker, MarkdownChunker)
 
 
 def test_select_chunker_fallback(indexer):
-    from rag_core.chunkers.fallback_chunker import FallbackChunker
+    from core.chunkers.fallback_chunker import FallbackChunker
     chunker = indexer._select_chunker("config.yaml")
     assert isinstance(chunker, FallbackChunker)
 

@@ -5,7 +5,7 @@ from typing import Iterable
 
 import httpx
 
-from mnemos_eval.schema import GoldenItem, QueryResult
+from eval.schema import GoldenItem, QueryResult
 
 
 class EvalRunner:

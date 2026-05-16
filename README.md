@@ -236,13 +236,13 @@ via MCP, and refuses to bind you to any particular LLM provider.
 ## 🤝 Contributing
 
 PRs welcome. The codebase is small and well-tested (143 unit tests). Start
-with the architecture doc, then poke around `packages/rag_core/` — every
+with the architecture doc, then poke around `packages/core/` — every
 retrieval feature is a single file with its own tests.
 
 For local dev:
 
 ```bash
-pip install -e packages/rag_core packages/mnemos_eval cli/
+pip install -e packages/core packages/eval cli/
 pytest tests/
 ```
 

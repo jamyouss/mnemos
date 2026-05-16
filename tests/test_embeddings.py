@@ -1,4 +1,4 @@
-from rag_core.embeddings import EmbeddingService
+from core.embeddings import EmbeddingService
 
 
 def test_embed_single_text():

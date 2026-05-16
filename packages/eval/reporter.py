@@ -6,7 +6,7 @@ from pathlib import Path
 from rich.console import Console
 from rich.table import Table
 
-from mnemos_eval.schema import EvalRun, IntentMetrics, MetricsReport
+from eval.schema import EvalRun, IntentMetrics, MetricsReport
 
 
 def render_console(report: MetricsReport, console: Console | None = None) -> None:

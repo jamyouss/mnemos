@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from rag_core.models import ExtractedMemory, DeduplicationResult
+from core.models import ExtractedMemory, DeduplicationResult
 
 
 @pytest.fixture
@@ -24,7 +24,7 @@ def app():
         mock_embed_cls.return_value = mock_embeddings
 
         from server.main import create_app
-        from rag_core.indexer import Indexer
+        from core.indexer import Indexer
         from server.search import SearchService
 
         application = create_app()

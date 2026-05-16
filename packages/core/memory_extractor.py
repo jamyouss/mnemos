@@ -4,8 +4,8 @@ from __future__ import annotations
 import json
 import logging
 
-from rag_core.llm import LLMError, LLMProvider
-from rag_core.models import ExtractedMemory
+from core.llm import LLMError, LLMProvider
+from core.models import ExtractedMemory
 
 logger = logging.getLogger("mnemos.extractor")
 

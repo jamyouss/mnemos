@@ -13,8 +13,8 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from rag_core.collections import COLLECTIONS, CollectionConfig
-from rag_core.embeddings import EmbeddingService
+from core.collections import COLLECTIONS, CollectionConfig
+from core.embeddings import EmbeddingService
 
 logger = logging.getLogger("mnemos.router")
 

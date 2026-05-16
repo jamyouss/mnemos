@@ -14,21 +14,21 @@ from qdrant_client.models import (
 
 import time
 
-from rag_core.cache import SemanticCache
-from rag_core.collections import COLLECTIONS, DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME
-from rag_core.embeddings import EmbeddingService
-from rag_core.grader import DocumentGrader
-from rag_core.models import (
+from core.cache import SemanticCache
+from core.collections import COLLECTIONS, DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME
+from core.embeddings import EmbeddingService
+from core.grader import DocumentGrader
+from core.models import (
     CodeSearchResult,
     MemoryResult,
     SearchResult,
     SkillResult,
 )
-from rag_core.observability import QueryLogger
-from rag_core.reranker import CrossEncoderReranker, mmr_select
-from rag_core.rewriter import QueryRewriter
-from rag_core.router import QueryRouter
-from rag_core.sparse import bm25_sparse
+from core.observability import QueryLogger
+from core.reranker import CrossEncoderReranker, mmr_select
+from core.rewriter import QueryRewriter
+from core.router import QueryRouter
+from core.sparse import bm25_sparse
 
 
 # How many candidates each leg of the fusion pulls before RRF merges them.
@@ -133,7 +133,7 @@ class SearchService:
             try:
                 texts = [r.content for r in ordered]
                 vectors = self._embeddings.embed_batch(texts)
-                from rag_core.reranker import ScoredDoc
+                from core.reranker import ScoredDoc
 
                 scored = [ScoredDoc(doc_id=i, score=r.score, payload=r) for i, r in enumerate(ordered)]
                 picked = mmr_select(scored, vectors, top_k=limit, lambda_=self._mmr_lambda)

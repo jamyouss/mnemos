@@ -14,5 +14,5 @@ dependencies = [
 ]
 
 [tool.setuptools]
-packages = ["mnemos_eval"]
-package-dir = {"mnemos_eval" = "."}
+packages = ["eval"]
+package-dir = {"eval" = "."}

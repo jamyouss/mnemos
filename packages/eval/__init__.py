@@ -1,6 +1,6 @@
-from mnemos_eval.schema import GoldenItem, EvalRun, QueryResult, MetricsReport
-from mnemos_eval.loader import load_golden, save_candidates, promote_candidates
-from mnemos_eval.metrics import (
+from eval.schema import GoldenItem, EvalRun, QueryResult, MetricsReport
+from eval.loader import load_golden, save_candidates, promote_candidates
+from eval.metrics import (
     recall_at_k,
     precision_at_k,
     mrr,
@@ -8,9 +8,9 @@ from mnemos_eval.metrics import (
     hit_rate_at_k,
     aggregate_metrics,
 )
-from mnemos_eval.runner import EvalRunner
-from mnemos_eval.reporter import render_console, write_json
-from mnemos_eval.generator import GoldenGenerator
+from eval.runner import EvalRunner
+from eval.reporter import render_console, write_json
+from eval.generator import GoldenGenerator
 
 __all__ = [
     "GoldenItem",

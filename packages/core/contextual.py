@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from concurrent.futures import ThreadPoolExecutor
 
-from rag_core.llm import LLMError, LLMProvider
+from core.llm import LLMError, LLMProvider
 
 logger = logging.getLogger("mnemos.contextual")
 

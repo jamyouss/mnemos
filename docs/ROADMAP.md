@@ -46,7 +46,7 @@ Schéma `GoldenItem` :
   intent: code_search              # code_search | skill_discovery | doc_lookup | memory_recall
   expected_collections: [mnemos_code_mnemos]
   expected_files:
-    - packages/rag_core/memory_extractor.py
+    - packages/core/memory_extractor.py
   expected_chunks: []              # optionnel : chunk_id précis
   relevance_grades: {}             # optionnel : {file: 1|2|3} pour NDCG gradué
   k_relevant: 2

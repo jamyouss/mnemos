@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from unittest.mock import MagicMock
 
-# Add packages directory to path so rag_core is importable
+# Add packages directory to path so core is importable
 sys.path.insert(0, str(Path(__file__).parent.parent / "packages"))
 # Add project root to path so server module is importable
 sys.path.insert(0, str(Path(__file__).parent.parent))

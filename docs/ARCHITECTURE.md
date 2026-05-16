@@ -77,7 +77,7 @@ For the active improvement plan, see [ROADMAP.md](ROADMAP.md).
 
 ## Modules
 
-### Indexing (`packages/rag_core/`)
+### Indexing (`packages/core/`)
 
 | File | Role |
 |------|------|
@@ -91,17 +91,17 @@ For the active improvement plan, see [ROADMAP.md](ROADMAP.md).
 | `indexer.py` | Orchestrator: chunk → contextualise → embed → upsert |
 | `collections.py` | Collection registry; named-vector schema constants |
 
-### Retrieval (`server/search.py` + `packages/rag_core/`)
+### Retrieval (`server/search.py` + `packages/core/`)
 
 | File | Role |
 |------|------|
 | `server/search.py` | `SearchService` — entry point used by REST + MCP |
-| `rag_core/cache.py` | Cosine-similarity cache (`mnemos_cache` Qdrant collection) |
-| `rag_core/router.py` | Cosine route over per-collection description embeddings |
-| `rag_core/reranker.py` | Cross-encoder rerank + MMR helper |
-| `rag_core/grader.py` | LLM-based CRAG document grader |
-| `rag_core/rewriter.py` | Query expansion / decomposition / HyDE |
-| `rag_core/observability.py` | JSONL query log |
+| `core/cache.py` | Cosine-similarity cache (`mnemos_cache` Qdrant collection) |
+| `core/router.py` | Cosine route over per-collection description embeddings |
+| `core/reranker.py` | Cross-encoder rerank + MMR helper |
+| `core/grader.py` | LLM-based CRAG document grader |
+| `core/rewriter.py` | Query expansion / decomposition / HyDE |
+| `core/observability.py` | JSONL query log |
 
 The retrieval order is **fixed and feature-flag-driven**. Disabling a feature
 removes it from the chain without affecting the others:
@@ -114,7 +114,7 @@ removes it from the chain without affecting the others:
 6. CRAG grader; on all-low + rewriter enabled → re-issue with variants
 7. cache store + query log
 
-### Memory (`packages/rag_core/memory_extractor.py` + `deduplicator.py`)
+### Memory (`packages/core/memory_extractor.py` + `deduplicator.py`)
 
 ```
 git commit (pre-push hook)
@@ -146,7 +146,7 @@ git commit (pre-push hook)
                   status=approved → visible to search
 ```
 
-### LLM abstraction (`packages/rag_core/llm/`)
+### LLM abstraction (`packages/core/llm/`)
 
 ```
 LLMConfig(provider, model, api_key, base_url)

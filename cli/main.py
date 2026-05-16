@@ -440,7 +440,7 @@ def eval() -> None:
 def _eval_paths() -> dict:
     from pathlib import Path
 
-    root = Path(os.environ.get("MNEMOS_EVAL_ROOT", "eval"))
+    root = Path(os.environ.get("MNEMOS_EVAL_ROOT", "evals"))
     return {
         "root": root,
         "golden": root / "dataset" / "golden.yaml",
@@ -484,9 +484,9 @@ def eval_generate(
     seed: int | None,
 ) -> None:
     """Generate candidate Q/A pairs from a collection via the configured LLM."""
-    from mnemos_eval import GoldenGenerator
-    from mnemos_eval.loader import load_candidates, save_candidates
-    from rag_core.llm import LLMConfig, make_llm_provider
+    from eval import GoldenGenerator
+    from eval.loader import load_candidates, save_candidates
+    from core.llm import LLMConfig, make_llm_provider
 
     sample_url = f"{_base_url()}/api/eval/sample"
     try:
@@ -529,7 +529,7 @@ def eval_generate(
 @eval.command("promote")
 def eval_promote() -> None:
     """Move reviewed+accepted candidates into the golden set."""
-    from mnemos_eval.loader import promote_candidates
+    from eval.loader import promote_candidates
 
     paths = _eval_paths()
     promoted, remaining = promote_candidates(paths["candidates"], paths["golden"])
@@ -544,7 +544,7 @@ def eval_promote() -> None:
 @click.option("--limit", default=10, show_default=True, help="Top-K to request per query.")
 def eval_run(tag: str, limit: int) -> None:
     """Execute the eval harness against the running Mnemos server."""
-    from mnemos_eval import (
+    from eval import (
         EvalRun,
         EvalRunner,
         aggregate_metrics,
@@ -586,8 +586,8 @@ def eval_run(tag: str, limit: int) -> None:
 def eval_compare(tag_a: str, tag_b: str) -> None:
     """Compare two eval runs by tag."""
     import json
-    from mnemos_eval.reporter import compare_reports
-    from mnemos_eval.schema import MetricsReport
+    from eval.reporter import compare_reports
+    from eval.schema import MetricsReport
 
     paths = _eval_paths()
 

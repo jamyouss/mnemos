@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from rag_core.llm import LLMConfig, LLMError, make_llm_provider
+from core.llm import LLMConfig, LLMError, make_llm_provider
 
 
 def test_factory_ollama_default_base_url():

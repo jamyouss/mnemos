@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from rag_core.sparse import bm25_sparse, tokenize
+from core.sparse import bm25_sparse, tokenize
 
 
 def test_tokenize_basic_words():

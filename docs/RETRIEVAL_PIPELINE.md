@@ -77,7 +77,7 @@ Cache hits also get logged (`cache_hit: true, cache_score: 0.97`) for analysis.
 
 When `MNEMOS_ROUTER_ENABLED=true`, Mnemos uses cosine similarity between the
 query and each collection's `description` (declared in
-`rag_core/collections.py`) to pick which collections to actually query.
+`core/collections.py`) to pick which collections to actually query.
 
 - **Pre-computation**: at server startup, `QueryRouter` embeds every
   collection description once and keeps the vectors in memory.
@@ -118,7 +118,7 @@ BM25 is also computed server-side via `Modifier.IDF` — the client only
 ships term frequencies. This means the client stays simple even if the
 corpus grows.
 
-**Sparse encoding details** (`rag_core/sparse.py`):
+**Sparse encoding details** (`core/sparse.py`):
 - Tokenisation: `[A-Za-z_][A-Za-z0-9_]*` and pure digits.
 - camelCase + snake_case are split, **original token kept too** — searching
   for `handleHTTPRequest` matches both `handleHTTPRequest` and `request`.

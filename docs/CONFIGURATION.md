@@ -36,7 +36,7 @@ fast, predictable. Every "advanced" feature is opt-in.
 
 ## LLM provider
 
-Mnemos talks to LLMs through a single abstraction: `rag_core.llm.LLMProvider`.
+Mnemos talks to LLMs through a single abstraction: `core.llm.LLMProvider`.
 You pick one at startup; every component that needs an LLM uses the same one.
 
 | Var | Default | Description |

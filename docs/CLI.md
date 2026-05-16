@@ -23,7 +23,7 @@ mnemos --help
 | `MNEMOS_LLM_API_KEY` | _empty_ | `eval generate` (anthropic / openai) |
 | `MNEMOS_LLM_BASE_URL` | _empty_ | `eval generate` |
 | `MNEMOS_OLLAMA_URL` | `http://localhost:11434` | `eval generate` (fallback for ollama) |
-| `MNEMOS_EVAL_ROOT` | `eval` | Where `mnemos eval *` reads/writes |
+| `MNEMOS_EVAL_ROOT` | `evals` | Where `mnemos eval *` reads/writes |
 
 ---
 
@@ -168,7 +168,7 @@ mnemos eval generate --collection mnemos_skills --count 5 \
 | `--base-url` | Override base URL (vLLM, LM Studio, …) |
 | `--seed` | Reproducible sampling |
 
-Candidates land in `eval/dataset/_candidates.yaml`. Edit the file, set
+Candidates land in `evals/dataset/_candidates.yaml`. Edit the file, set
 `reviewed: true` and `accepted: true` on the ones you want to keep, then:
 
 ### `mnemos eval promote`
@@ -177,7 +177,7 @@ Candidates land in `eval/dataset/_candidates.yaml`. Edit the file, set
 mnemos eval promote
 ```
 
-Moves accepted candidates into `eval/dataset/golden.yaml`. Reviewed but
+Moves accepted candidates into `evals/dataset/golden.yaml`. Reviewed but
 rejected candidates are discarded; un-reviewed ones stay for next time.
 
 ### `mnemos eval run`
@@ -189,7 +189,7 @@ mnemos eval run --tag with-reranker --limit 10
 
 Runs the golden set against the live Mnemos server. Computes recall@k,
 precision@k, MRR, NDCG@k, hit_rate@k and per-intent breakdown. Saves to
-`eval/runs/<tag>.json` and prints a Rich table.
+`evals/runs/<tag>.json` and prints a Rich table.
 
 ### `mnemos eval compare TAG_A TAG_B`
 
@@ -205,7 +205,7 @@ Side-by-side diff of overall metrics with Δ colourised.
 mnemos eval list
 ```
 
-Lists every run currently in `eval/runs/`.
+Lists every run currently in `evals/runs/`.
 
 ---
 

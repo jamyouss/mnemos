@@ -3,7 +3,7 @@ from __future__ import annotations
 import tree_sitter_go as tsgo
 from tree_sitter import Language, Parser
 
-from rag_core.chunkers.fallback_chunker import FallbackChunker
+from core.chunkers.fallback_chunker import FallbackChunker
 
 GO_LANGUAGE = Language(tsgo.language())
 

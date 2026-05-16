@@ -3,8 +3,8 @@ from __future__ import annotations
 import math
 from unittest.mock import MagicMock
 
-from rag_core.collections import CollectionConfig
-from rag_core.router import QueryRouter, _cosine
+from core.collections import CollectionConfig
+from core.router import QueryRouter, _cosine
 
 
 def _unit(v):

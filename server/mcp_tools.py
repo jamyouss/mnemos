@@ -8,9 +8,9 @@ import mcp.types as types
 from mcp.server import Server
 from qdrant_client import QdrantClient
 
-from rag_core.collections import COLLECTIONS
-from rag_core.embeddings import EmbeddingService
-from rag_core.indexer import Indexer
+from core.collections import COLLECTIONS
+from core.embeddings import EmbeddingService
+from core.indexer import Indexer
 from server.search import SearchService
 
 # Registry of all tool definitions, used in list_tools and for testing
@@ -296,7 +296,7 @@ async def _dispatch_tool(
     if name == "mnemos_memory":
         if deduplicator is None:
             raise RuntimeError("deduplicator required for mnemos_memory")
-        from rag_core.models import ExtractedMemory
+        from core.models import ExtractedMemory
         memory = ExtractedMemory(
             content=args["content"],
             memory_type=args.get("memory_type", "note"),
@@ -356,8 +356,8 @@ def _store_memory(
     from datetime import datetime, timezone
     from qdrant_client.models import PointStruct
 
-    from rag_core.collections import DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME
-    from rag_core.sparse import bm25_sparse
+    from core.collections import DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME
+    from core.sparse import bm25_sparse
 
     entry_id = str(uuid.uuid4())
     point_id = str(uuid.uuid5(uuid.NAMESPACE_URL, entry_id))

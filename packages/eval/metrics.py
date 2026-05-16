@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 
-from mnemos_eval.schema import (
+from eval.schema import (
     GoldenItem,
     IntentMetrics,
     MetricsReport,

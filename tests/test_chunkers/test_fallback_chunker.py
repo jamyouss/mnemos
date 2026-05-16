@@ -1,4 +1,4 @@
-from rag_core.chunkers.fallback_chunker import FallbackChunker
+from core.chunkers.fallback_chunker import FallbackChunker
 
 
 def test_small_file_returns_single_chunk():

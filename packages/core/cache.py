@@ -21,7 +21,7 @@ from qdrant_client.models import (
     VectorParams,
 )
 
-from rag_core.embeddings import EmbeddingService
+from core.embeddings import EmbeddingService
 
 logger = logging.getLogger("mnemos.cache")
 

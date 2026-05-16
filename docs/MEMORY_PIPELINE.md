@@ -16,7 +16,7 @@ git commit + push
            │   { commit_message, diff, author }
            ▼
 ┌──────────────────────────┐
-│ MemoryExtractor          │  packages/rag_core/memory_extractor.py
+│ MemoryExtractor          │  packages/core/memory_extractor.py
 │ – LLM JSON extraction    │
 │ – classifies into:       │
 │     decision             │
@@ -27,7 +27,7 @@ git commit + push
            │ list[ExtractedMemory]
            ▼
 ┌──────────────────────────┐
-│ Deduplicator             │  packages/rag_core/deduplicator.py
+│ Deduplicator             │  packages/core/deduplicator.py
 │ – cosine ≥ 0.85?         │
 │   ├─ merge (LLM)         │
 │   └─ replace             │

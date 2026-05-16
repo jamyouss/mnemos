@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from rag_core.grader import DocumentGrader, GradedResult
-from rag_core.llm import LLMError
+from core.grader import DocumentGrader, GradedResult
+from core.llm import LLMError
 
 
 class FakeLLM:

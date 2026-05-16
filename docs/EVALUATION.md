@@ -33,7 +33,7 @@ eval/
   runs/
     <tag>.json           # one file per `mnemos eval run --tag X`
   …
-packages/mnemos_eval/    # the Python library backing the CLI
+packages/eval/    # the Python library backing the CLI
   schema.py              # Pydantic models
   generator.py           # LLM-backed candidate generation
   loader.py              # YAML I/O
@@ -57,7 +57,7 @@ mnemos eval generate --collection mnemos_skills    --count 6
 mnemos eval generate --collection mnemos_docs      --count 5
 ```
 
-The candidates land in `eval/dataset/_candidates.yaml`:
+The candidates land in `evals/dataset/_candidates.yaml`:
 
 ```yaml
 - id: q-f4d2e7d2
@@ -121,7 +121,7 @@ That single command:
    `/api/search-memory`) based on `intent`.
 3. Records the top-K results, scores, and latency.
 4. Computes the metrics below.
-5. Writes `eval/runs/baseline.json` and prints a Rich table.
+5. Writes `evals/runs/baseline.json` and prints a Rich table.
 
 ### Metrics
 
@@ -207,11 +207,11 @@ A few useful patterns for hard questions:
 ## Running the eval in CI
 
 `mnemos eval run` exits 0 even if metrics regress. To enforce thresholds in CI,
-post-process `eval/runs/<tag>.json`:
+post-process `evals/runs/<tag>.json`:
 
 ```python
 import json, sys
-report = json.load(open(f"eval/runs/{sys.argv[1]}.json"))["report"]
+report = json.load(open(f"evals/runs/{sys.argv[1]}.json"))["report"]
 if report["overall"]["mrr"] < 0.40:
     print(f"MRR dropped below threshold: {report['overall']['mrr']}")
     sys.exit(1)
@@ -221,8 +221,8 @@ Compare two runs programmatically:
 
 ```python
 import json
-a = json.load(open("eval/runs/baseline.json"))["report"]["overall"]
-b = json.load(open("eval/runs/new.json"))["report"]["overall"]
+a = json.load(open("evals/runs/baseline.json"))["report"]["overall"]
+b = json.load(open("evals/runs/new.json"))["report"]["overall"]
 delta_mrr = b["mrr"] - a["mrr"]
 assert delta_mrr >= -0.01, f"MRR regression: {delta_mrr}"
 ```

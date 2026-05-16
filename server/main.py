@@ -10,8 +10,8 @@ from starlette.responses import Response
 
 from server.config import settings
 from server.api import api_router
-from rag_core.embeddings import EmbeddingService
-from rag_core.indexer import Indexer
+from core.embeddings import EmbeddingService
+from core.indexer import Indexer
 
 
 def create_app() -> FastAPI:
@@ -26,7 +26,7 @@ def create_app() -> FastAPI:
 
         # Reranker is constructed up-front with `enabled` flag wired through;
         # the heavyweight model load happens lazily on the first rerank call.
-        from rag_core.reranker import CrossEncoderReranker
+        from core.reranker import CrossEncoderReranker
         app.state.reranker = CrossEncoderReranker(
             model_name=settings.mnemos_reranker_model,
             model_type=settings.mnemos_reranker_type,
@@ -37,10 +37,10 @@ def create_app() -> FastAPI:
         # so we defer construction until after the LLM is built (a few lines below).
         app.state.search_service = None  # placeholder; will be set below
 
-        from rag_core.memory_extractor import MemoryExtractor
-        from rag_core.deduplicator import Deduplicator
-        from rag_core.llm import LLMConfig, make_llm_provider
-        from rag_core.contextual import ContextualEnricher
+        from core.memory_extractor import MemoryExtractor
+        from core.deduplicator import Deduplicator
+        from core.llm import LLMConfig, make_llm_provider
+        from core.contextual import ContextualEnricher
 
         llm_base_url = settings.mnemos_llm_base_url or (
             settings.mnemos_ollama_url if settings.mnemos_llm_provider == "ollama" else ""
@@ -66,8 +66,8 @@ def create_app() -> FastAPI:
         )
 
         # CRAG components (Phase 3): grader + rewriter
-        from rag_core.grader import DocumentGrader
-        from rag_core.rewriter import QueryRewriter
+        from core.grader import DocumentGrader
+        from core.rewriter import QueryRewriter
         app.state.grader = DocumentGrader(
             llm=app.state.llm,
             enabled=settings.mnemos_grader_enabled,
@@ -81,7 +81,7 @@ def create_app() -> FastAPI:
         )
 
         # Semantic router (Phase 4D): pre-computes collection-description embeddings.
-        from rag_core.router import QueryRouter
+        from core.router import QueryRouter
         app.state.router = QueryRouter(
             embedding_service=app.state.embeddings,
             enabled=settings.mnemos_router_enabled,
@@ -90,7 +90,7 @@ def create_app() -> FastAPI:
         )
 
         # Semantic cache (Phase 4E): cosine-similarity cache backed by Qdrant.
-        from rag_core.cache import SemanticCache
+        from core.cache import SemanticCache
         app.state.cache = SemanticCache(
             qdrant_client=app.state.qdrant,
             embedding_service=app.state.embeddings,
@@ -100,7 +100,7 @@ def create_app() -> FastAPI:
         )
 
         # Observability (Phase 9): per-query JSONL log.
-        from rag_core.observability import QueryLogger
+        from core.observability import QueryLogger
         app.state.query_logger = QueryLogger(
             path=settings.mnemos_query_log_path,
             enabled=settings.mnemos_query_log_enabled,
@@ -130,7 +130,7 @@ def create_app() -> FastAPI:
 
         # Ensure all collections exist on startup (creates new ones as hybrid;
         # legacy unnamed-dense collections stay untouched until `reindex --recreate`).
-        from rag_core.collections import COLLECTIONS
+        from core.collections import COLLECTIONS
         for coll in COLLECTIONS:
             app.state.indexer.ensure_collection(coll.name, coll.vector_size)
 

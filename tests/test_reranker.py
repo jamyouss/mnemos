@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 
-from rag_core.reranker import CrossEncoderReranker, ScoredDoc, mmr_select
+from core.reranker import CrossEncoderReranker, ScoredDoc, mmr_select
 
 
 def test_reranker_disabled_preserves_order():

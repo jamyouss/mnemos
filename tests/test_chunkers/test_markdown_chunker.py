@@ -1,4 +1,4 @@
-from rag_core.chunkers.markdown_chunker import MarkdownChunker
+from core.chunkers.markdown_chunker import MarkdownChunker
 
 
 def test_splits_on_h2_headers(sample_markdown):

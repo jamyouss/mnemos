@@ -7,7 +7,7 @@ Generated via `mnemos eval run --tag <tag>` against a live server.
 
 - **Size**: 25 questions
 - **Source**: semi-automated via Ollama (`llama3.1:latest`), auto-accepted for the initial baseline (review pending)
-- **Format**: `eval/dataset/golden.yaml`
+- **Format**: `evals/dataset/golden.yaml`
 - **Intent distribution**: code_search (11), doc_lookup (8), skill_discovery (6)
 
 > ⚠️ The golden set was auto-accepted to establish a baseline. Several questions reference

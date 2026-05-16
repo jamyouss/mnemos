@@ -43,7 +43,7 @@ def app():
 
         # Manually populate app.state so endpoints can use it
         # (lifespan doesn't run in ASGITransport tests)
-        from rag_core.indexer import Indexer
+        from core.indexer import Indexer
         from server.search import SearchService
 
         application.state.qdrant = mock_qdrant
@@ -58,7 +58,7 @@ def app():
         )
 
         mock_deduplicator = MagicMock()
-        from rag_core.models import DeduplicationResult
+        from core.models import DeduplicationResult
         mock_deduplicator.deduplicate_and_store.return_value = DeduplicationResult(
             action="inserted", memory_id="mock-dedup-id"
         )

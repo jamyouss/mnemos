@@ -17,7 +17,7 @@ from qdrant_client.models import (
     VectorParams,
 )
 
-from rag_core.collections import COLLECTIONS
+from core.collections import COLLECTIONS
 from server.config import settings
 
 api_router = APIRouter()
@@ -526,7 +526,7 @@ async def list_memory(request: Request, status: Optional[str] = None):
 async def create_memory(body: MemoryCreateRequest, request: Request):
     deduplicator = request.app.state.deduplicator
 
-    from rag_core.models import ExtractedMemory
+    from core.models import ExtractedMemory
     memory = ExtractedMemory(
         content=body.content,
         memory_type=body.memory_type,

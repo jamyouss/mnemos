@@ -3,8 +3,8 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from rag_core.llm import LLMError
-from rag_core.llm.ollama import OllamaProvider
+from core.llm import LLMError
+from core.llm.ollama import OllamaProvider
 
 
 def _make_transport(handler):

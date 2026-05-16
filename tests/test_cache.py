@@ -5,7 +5,7 @@ import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from rag_core.cache import SemanticCache
+from core.cache import SemanticCache
 
 
 def _mock_embed_service(vec=None):
