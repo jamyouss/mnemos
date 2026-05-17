@@ -168,10 +168,10 @@ jobs:
       matrix:
         include:
           - repo: jamyouss/mnemos-server
-            short: "Self-hosted memory layer for AI coding agents — MCP-native RAG with code-aware chunking, hybrid retrieval, and memories extracted from git history."
+            short: "Self-hosted memory layer for AI coding agents — MCP-native RAG over your code + docs."
             readme: docs/DOCKERHUB.md
           - repo: jamyouss/mnemos-watcher
-            short: "Filesystem watcher companion for mnemos-server — pushes incremental indexing requests as your code changes."
+            short: "Filesystem watcher for mnemos-server — pushes incremental indexing as your code changes."
             readme: docs/DOCKERHUB-watcher.md
 
     steps:
