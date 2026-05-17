@@ -70,6 +70,10 @@ services:
       # Optional: mount your Claude config (skills, docs) for agent indexing.
       - ${MNEMOS_CLAUDE_CONFIG_HOST_PATH:-./data/claude-config}:/data/claude-config:ro
       - rag_state:/data/state
+      # HuggingFace model cache. The embedding model is baked into the image
+      # so this volume is only meaningful when MNEMOS_RERANKER_ENABLED=true:
+      # it persists the reranker weights (~280 MB) across container restarts.
+      - hf_cache:/opt/hf_cache
     depends_on:
       qdrant:
         condition: service_healthy
@@ -108,3 +112,4 @@ volumes:
   qdrant_data:
   rag_state:
   ollama_data:
+  hf_cache:

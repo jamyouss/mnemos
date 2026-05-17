@@ -24,10 +24,13 @@ RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
 
 # Install dependencies first — separate layer so a source-only change does
-# NOT bust the heavyweight pip cache (torch ~1 GB).
+# NOT bust the heavyweight pip cache. We force the CPU-only torch wheel
+# because Mnemos has no GPU code path; the default `pip install torch` on
+# Linux pulls the full CUDA stack (~4 GB of nvidia/* + triton wheels).
 COPY server/requirements.txt /build/server/requirements.txt
 COPY packages/core/pyproject.toml /build/packages/core/pyproject.toml
 RUN pip install --upgrade pip && \
+    pip install --index-url https://download.pytorch.org/whl/cpu torch && \
     pip install -r /build/server/requirements.txt && \
     pip install qdrant-client \
                 sentence-transformers \
@@ -37,6 +40,12 @@ RUN pip install --upgrade pip && \
                 pydantic \
                 pyyaml \
                 httpx
+
+# Pre-download the fixed embedding model so the first MCP query is instant
+# instead of stalling 5-15s while sentence-transformers downloads weights.
+# The reranker is configurable (MNEMOS_RERANKER_MODEL) and stays runtime-fetched.
+ENV HF_HOME=/opt/hf_cache
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
 
 # Now copy actual sources + install in editable mode.
 COPY packages/core /build/packages/core
@@ -51,7 +60,8 @@ FROM python:3.12-slim AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:${PATH}" \
-    PYTHONPATH="/app/packages"
+    PYTHONPATH="/app/packages" \
+    HF_HOME=/opt/hf_cache
 
 # Only the runtime curl is needed (healthcheck + manual debug).
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -63,6 +73,9 @@ WORKDIR /app
 # Bring in the venv from the builder. Note: we re-copy the core package
 # source into /app so the editable-install paths still resolve at runtime.
 COPY --from=builder /opt/venv /opt/venv
+# Bring the pre-downloaded embedding weights into the runtime image so the
+# first query never blocks on a network fetch.
+COPY --from=builder /opt/hf_cache /opt/hf_cache
 COPY packages/core /app/packages/core
 COPY server/ /app/server/
 COPY scripts/ /app/scripts/
