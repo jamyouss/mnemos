@@ -200,6 +200,6 @@ For changes that affect indexing (embedding model, contextual flag), you must
 reindex with `--recreate`:
 
 ```bash
-mnemos reindex --recreate --full --collection mnemos_code_myproject \
+mnemos reindex --recreate --full --collection mnemos_code --project myproject \
        --path /data/codebase/myproject
 ```

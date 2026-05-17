@@ -46,7 +46,7 @@ Cross-collection semantic search.
 ```bash
 mnemos search "JWT validation"
 mnemos search "JWT validation" --limit 10
-mnemos search "JWT validation" --collection mnemos_code_myproject
+mnemos search "JWT validation" --collection mnemos_code --project myproject
 mnemos search "logger init" --file-type go
 mnemos search "config" --path-filter /data/codebase/myproject/
 ```
@@ -94,18 +94,21 @@ Trigger a server-side reindex.
 ```bash
 # Initial: drop + recreate with the hybrid schema, full directory scan, 4 workers
 mnemos reindex --recreate --full --workers 4 \
-       --collection mnemos_code_myproject \
-       --path /data/codebase/myproject
+       --collection mnemos_code \
+       --path /data/codebase/myproject \
+       --project myproject
 
 # Subsequent incremental: just re-index a single file
-mnemos reindex --collection mnemos_code_myproject \
-       --path /data/codebase/myproject/services/handler.go
+mnemos reindex --collection mnemos_code \
+       --path /data/codebase/myproject/services/handler.go \
+       --project myproject
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--collection` (required) | Collection name |
+| `--collection` (required) | Collection name (e.g. `mnemos_code`, `mnemos_docs`) |
 | `--path` | Container path of a file or directory |
+| `--project` | Project label written into each chunk's payload (for `mnemos_code` and `mnemos_memory`) |
 | `--full` | Recursively walk `--path`. Without `--full`, only the path itself is indexed. |
 | `--recreate` | Drop + recreate the collection before indexing. Required to migrate to hybrid. |
 | `--workers` | Parallel worker threads (use 4 with contextual chunking on) |
@@ -152,7 +155,7 @@ generation, run, compare.
 Generate candidate Q/A pairs from indexed chunks via your LLM.
 
 ```bash
-mnemos eval generate --collection mnemos_code_myproject --count 10
+mnemos eval generate --collection mnemos_code --count 10
 mnemos eval generate --collection mnemos_skills --count 5 \
        --provider anthropic --model claude-haiku-4-5 \
        --api-key "$ANTHROPIC_API_KEY"

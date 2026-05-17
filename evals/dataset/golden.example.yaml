@@ -12,7 +12,7 @@
   query: "How is a new user created?"
   intent: code_search                       # code_search | skill_discovery | doc_lookup | memory_recall
   expected_collections:
-    - mnemos_code_myproject
+    - mnemos_code
   expected_files:
     - /data/codebase/myproject/services/user/application/create.go
   expected_chunks: []                       # optional: chunk_ids for finer matching

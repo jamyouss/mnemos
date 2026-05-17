@@ -61,14 +61,17 @@ mnemos/
 
 ### Collections Qdrant
 
-| Collection | Source | Path prefixes |
-|---|---|---|
-| `mnemos_skills` | `~/.claude/skills/` | `skills/` |
-| `mnemos_docs` | `~/.claude/docs/` | `docs/` |
-| `mnemos_memory` | API / git hooks | _(aucun, scoped par projet)_ |
-| `mnemos_code_myproject` | codebase | `myproject/` |
-| `mnemos_code_otherproject` | codebase | `otherproject/` |
-| `mnemos_code_infra` | codebase | `infra/`, `github-cicd/` |
+| Collection | Source | Path prefixes | Project scoping |
+|---|---|---|---|
+| `mnemos_skills` | `~/.claude/skills/` | `skills/` | — |
+| `mnemos_docs` | `~/.claude/docs/` | `docs/` | — |
+| `mnemos_memory` | API / git hooks | _(aucun)_ | via `project` payload |
+| `mnemos_code` | codebase | _(tout le reste)_ | via `project` payload (filtre `--project`) |
+
+Une seule collection `mnemos_code` héberge **tous** les projets, chaque chunk
+portant un champ `project` dans son payload. La détection automatique
+(premier segment du path) peut être surchargée par `config/projects.yaml`
+(template : `config/projects.example.yaml`).
 
 ### MCP Tools exposés (9)
 
@@ -106,7 +109,8 @@ mnemos status
 ```bash
 mnemos reindex --collection mnemos_skills --path /data/claude-config/skills --full
 mnemos reindex --collection mnemos_docs --path /data/claude-config/docs --full
-mnemos reindex --collection mnemos_code_myproject --path /data/codebase/myproject --full
+mnemos reindex --collection mnemos_code --path /data/codebase/myproject --project myproject --full
+mnemos reindex --collection mnemos_code --path /data/codebase/otherproject --project otherproject --full
 ```
 
 Note : paths sont les **chemins container** (mount via `docker-compose.yml`).

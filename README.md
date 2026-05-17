@@ -170,21 +170,22 @@ make install
 source venv/bin/activate
 export MNEMOS_URL=http://localhost:8100
 
-# 3. Index your code
-mnemos reindex --recreate --full --collection mnemos_code_myproject \
-                --path /data/codebase/myproject
+# 3. Index your code into the single mnemos_code collection, tagged with a project
+mnemos reindex --recreate --full --collection mnemos_code \
+                --path /data/codebase/myproject --project myproject
 
-# 4. Search it
+# 4. Search it (optionally scope to one project)
 mnemos search "JWT validation middleware"
+mnemos search "JWT validation middleware" --project myproject
 
 # 5. Plug it into Claude Code
 # → add { "type": "url", "url": "http://localhost:8100/mcp" }
 #   to your ~/.claude/settings.json mcpServers
 ```
 
-🪤 **First run takes longer** — sentence-transformers downloads the embedding
-model (~90 MB), and the optional reranker pulls another ~280 MB the first
-time it's used.
+🪤 **First reranker query takes longer** — the embedding model is baked into
+the image, but if you enable the optional cross-encoder reranker
+(`MNEMOS_RERANKER_ENABLED=true`) it pulls ~280 MB the first time it's used.
 
 → Full setup guide: **[docs/QUICKSTART.md](docs/QUICKSTART.md)**
 
@@ -220,7 +221,7 @@ time it's used.
 | Reranker | `BAAI/bge-reranker-base` (default) | Open-weight, SOTA on MS-MARCO |
 | LLM | Pluggable (Ollama / Anthropic / OpenAI-compatible) | Use local for dev, cloud for prod |
 | CLI | Click + Rich | Polished terminal UX |
-| Tests | pytest, 143 unit + integration | High-confidence refactors |
+| Tests | pytest, 179 unit + 46 integration | High-confidence refactors |
 
 ---
 
@@ -244,7 +245,7 @@ via MCP, and refuses to bind you to any particular LLM provider.
 
 ## 🤝 Contributing
 
-PRs welcome. The codebase is small and well-tested (143 unit tests). Start
+PRs welcome. The codebase is small and well-tested (179 unit tests). Start
 with the architecture doc, then poke around `packages/core/` — every
 retrieval feature is a single file with its own tests.
 
@@ -266,10 +267,10 @@ iteration tightens the corners:
 | Item | Why it matters | Status |
 |------|---------------|--------|
 | **GPU host for the reranker** | `bge-reranker-base` on CPU takes ~14 s p50; on GPU it's ~250 ms. Unlocks the reranker as a default-on feature, not an opt-in. | 🔜 |
-| **CRAG rewriter with a fast LLM** (Anthropic Haiku, Groq) | Currently the rewriter is wired but disabled because grader+rewriter on local Ollama pushes per-query latency past 100 s. With a cloud LLM it should land at +5–10 % recall on vague queries. | 🔜 |
-| **`project_hint` from git hook → memory extractor** | Stops the LLM from inferring (and occasionally hallucinating) the `project` field. The hook already knows the repo it's running in; pass it through. | 🔜 |
-| **Full re-index after the `_should_skip` fix** | All 4 source collections (`mnemos_skills`, `mnemos_docs`, `mnemos_code_myproject`, `mnemos_code_otherproject`) were indexed before the latest skip rules. A full re-index purges accidentally-included junk paths. | 🔜 |
-| **`contextual chunking` retry** with cleaner golden | First attempt showed no gain because the golden was noisy. Now that the golden is clean, contextual via Anthropic API (prompt caching) deserves a second measurement. | 🔜 |
+| **CRAG rewriter with a fast LLM** (Anthropic Haiku, Groq) | The rewriter ships wired but stays off by default — on local Ollama grader+rewriter pushes per-query latency past 100 s. With a cloud LLM it should land at +5–10 % recall on vague queries. | 🔜 |
+| **`contextual chunking` retry** with the cleaned golden set | First attempt showed no gain because the golden was noisy. The clean golden ships in v0.1.0; contextual via Anthropic API (prompt caching) deserves a second measurement. | 🔜 |
+| **MMR diversification** | Wired in the roadmap but never landed. ~20 lines to add after the reranker, should help when several near-duplicate files dominate the top-K. | 🔜 |
+| **A/B-testing infra** | Feature flags per tenant + 10 % sampling on variants, so future retrieval changes can ship with data, not vibes. | 🔜 |
 
 Track this list and the rolling design notes in
 [`docs/ROADMAP.md`](docs/ROADMAP.md).
