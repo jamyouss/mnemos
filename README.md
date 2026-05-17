@@ -13,6 +13,15 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/jamyouss/mnemos/actions/workflows/test.yml"><img src="https://github.com/jamyouss/mnemos/actions/workflows/test.yml/badge.svg" alt="Tests"></a>
+  <a href="https://github.com/jamyouss/mnemos/actions/workflows/docker.yml"><img src="https://github.com/jamyouss/mnemos/actions/workflows/docker.yml/badge.svg" alt="Docker"></a>
+  <a href="https://hub.docker.com/r/jamyouss/mnemos-server"><img src="https://img.shields.io/docker/v/jamyouss/mnemos-server?label=docker&sort=semver" alt="Docker image"></a>
+  <a href="https://hub.docker.com/r/jamyouss/mnemos-server"><img src="https://img.shields.io/docker/pulls/jamyouss/mnemos-server" alt="Docker pulls"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <img src="https://img.shields.io/badge/python-3.12%2B-blue.svg" alt="Python 3.12+">
+</p>
+
+<p align="center">
   <a href="#-quick-start">Quick start</a> •
   <a href="#-what-makes-mnemos-different">Why Mnemos</a> •
   <a href="#-features-at-a-glance">Features</a> •

@@ -1,11 +1,11 @@
 <p align="center">
-  <img alt="Mnemos" src="https://raw.githubusercontent.com/digital-gigafactory/mnemos/main/docs/logo-light.svg" width="360">
+  <img alt="Mnemos" src="https://raw.githubusercontent.com/jamyouss/mnemos/main/docs/logo-light.svg" width="360">
 </p>
 
 <h3 align="center">Filesystem watcher for Mnemos.</h3>
 
 <p align="center">
-  <a href="https://github.com/digital-gigafactory/mnemos">GitHub</a> ·
+  <a href="https://github.com/jamyouss/mnemos">GitHub</a> ·
   <a href="https://hub.docker.com/r/jamyouss/mnemos-server">mnemos-server image</a>
 </p>
 
@@ -19,7 +19,7 @@ events, and pushes incremental indexing requests to the Mnemos server so
 your AI coding agent always queries fresh embeddings.
 
 You almost never pull this image directly — it ships as part of the
-[Mnemos compose stack](https://github.com/digital-gigafactory/mnemos/blob/main/docker-compose.yml).
+[Mnemos compose stack](https://github.com/jamyouss/mnemos/blob/main/docker-compose.yml).
 
 ## Tags
 
@@ -48,6 +48,6 @@ All tags are multi-arch (`linux/amd64` + `linux/arm64`).
 
 ## Links
 
-- **Source & issues:** https://github.com/digital-gigafactory/mnemos
-- **Quickstart:** [`docs/QUICKSTART.md`](https://github.com/digital-gigafactory/mnemos/blob/main/docs/QUICKSTART.md)
-- **Architecture:** [`docs/ARCHITECTURE.md`](https://github.com/digital-gigafactory/mnemos/blob/main/docs/ARCHITECTURE.md)
+- **Source & issues:** https://github.com/jamyouss/mnemos
+- **Quickstart:** [`docs/QUICKSTART.md`](https://github.com/jamyouss/mnemos/blob/main/docs/QUICKSTART.md)
+- **Architecture:** [`docs/ARCHITECTURE.md`](https://github.com/jamyouss/mnemos/blob/main/docs/ARCHITECTURE.md)

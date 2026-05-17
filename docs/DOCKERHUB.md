@@ -1,5 +1,5 @@
 <p align="center">
-  <img alt="Mnemos" src="https://raw.githubusercontent.com/digital-gigafactory/mnemos/main/docs/logo-light.svg" width="360">
+  <img alt="Mnemos" src="https://raw.githubusercontent.com/jamyouss/mnemos/main/docs/logo-light.svg" width="360">
 </p>
 
 <h3 align="center">The self-hosted memory layer for AI coding agents.</h3>
@@ -9,10 +9,10 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/digital-gigafactory/mnemos">GitHub</a> ·
-  <a href="https://github.com/digital-gigafactory/mnemos/blob/main/docs/QUICKSTART.md">Quickstart</a> ·
-  <a href="https://github.com/digital-gigafactory/mnemos/blob/main/docs/ARCHITECTURE.md">Architecture</a> ·
-  <a href="https://github.com/digital-gigafactory/mnemos/blob/main/docs/EVAL.md">Benchmarks</a>
+  <a href="https://github.com/jamyouss/mnemos">GitHub</a> ·
+  <a href="https://github.com/jamyouss/mnemos/blob/main/docs/QUICKSTART.md">Quickstart</a> ·
+  <a href="https://github.com/jamyouss/mnemos/blob/main/docs/ARCHITECTURE.md">Architecture</a> ·
+  <a href="https://github.com/jamyouss/mnemos/blob/main/docs/EVAL.md">Benchmarks</a>
 </p>
 
 ---
@@ -53,7 +53,7 @@ Mnemos needs Qdrant beside it. Pull the project's compose file rather than
 running this image standalone:
 
 ```bash
-git clone https://github.com/digital-gigafactory/mnemos.git
+git clone https://github.com/jamyouss/mnemos.git
 cd mnemos
 cp .env.minimal.example .env
 docker compose up -d
@@ -86,7 +86,7 @@ docker run --rm -p 8100:8100 \
 | `MNEMOS_CONTEXTUAL_ENABLED` | `false` | Anthropic-style contextual chunking |
 | `MNEMOS_AUTH_ENABLED` | `true` | Disable for local dev, enable in multi-tenant prod |
 
-Full reference: [.env.example](https://github.com/digital-gigafactory/mnemos/blob/main/.env.example).
+Full reference: [.env.example](https://github.com/jamyouss/mnemos/blob/main/.env.example).
 
 ## Image facts
 
@@ -102,9 +102,9 @@ Full reference: [.env.example](https://github.com/digital-gigafactory/mnemos/blo
 
 ## Links
 
-- **Source & issues:** https://github.com/digital-gigafactory/mnemos
-- **Architecture:** [`docs/ARCHITECTURE.md`](https://github.com/digital-gigafactory/mnemos/blob/main/docs/ARCHITECTURE.md)
-- **Retrieval pipeline:** [`docs/RETRIEVAL_PIPELINE.md`](https://github.com/digital-gigafactory/mnemos/blob/main/docs/RETRIEVAL_PIPELINE.md)
-- **Memory pipeline:** [`docs/MEMORY_PIPELINE.md`](https://github.com/digital-gigafactory/mnemos/blob/main/docs/MEMORY_PIPELINE.md)
-- **MCP integration:** [`docs/MCP_INTEGRATION.md`](https://github.com/digital-gigafactory/mnemos/blob/main/docs/MCP_INTEGRATION.md)
-- **Benchmarks:** [`docs/EVAL.md`](https://github.com/digital-gigafactory/mnemos/blob/main/docs/EVAL.md)
+- **Source & issues:** https://github.com/jamyouss/mnemos
+- **Architecture:** [`docs/ARCHITECTURE.md`](https://github.com/jamyouss/mnemos/blob/main/docs/ARCHITECTURE.md)
+- **Retrieval pipeline:** [`docs/RETRIEVAL_PIPELINE.md`](https://github.com/jamyouss/mnemos/blob/main/docs/RETRIEVAL_PIPELINE.md)
+- **Memory pipeline:** [`docs/MEMORY_PIPELINE.md`](https://github.com/jamyouss/mnemos/blob/main/docs/MEMORY_PIPELINE.md)
+- **MCP integration:** [`docs/MCP_INTEGRATION.md`](https://github.com/jamyouss/mnemos/blob/main/docs/MCP_INTEGRATION.md)
+- **Benchmarks:** [`docs/EVAL.md`](https://github.com/jamyouss/mnemos/blob/main/docs/EVAL.md)
