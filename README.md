@@ -151,7 +151,7 @@ design + SOTA retrieval, all self-hosted**. Nobody else ships that bundle.
 ## 🚀 Quick start
 
 ```bash
-# 1. Boot the stack
+# 1. Boot the stack — pulls jamyouss/mnemos-server + mnemos-watcher from Docker Hub
 docker compose up -d
 docker compose --profile llm up -d        # adds bundled Ollama
 ollama pull llama3.1:8b

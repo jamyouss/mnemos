@@ -13,9 +13,11 @@ services:
       retries: 5
 
   rag-server:
-    build:
-      context: .
-      dockerfile: server/Dockerfile
+    # Pre-built image from Docker Hub. Override with docker-compose.dev.yml
+    # to build locally during development (`docker compose -f docker-compose.yml
+    # -f docker-compose.dev.yml up -d --build rag-server`).
+    image: ${MNEMOS_SERVER_IMAGE:-jamyouss/mnemos-server:latest}
+    pull_policy: ${MNEMOS_PULL_POLICY:-missing}
     ports:
       - "8100:8100"
     environment:
@@ -79,9 +81,8 @@ services:
       retries: 3
 
   watcher:
-    build:
-      context: .
-      dockerfile: watcher/Dockerfile
+    image: ${MNEMOS_WATCHER_IMAGE:-jamyouss/mnemos-watcher:latest}
+    pull_policy: ${MNEMOS_PULL_POLICY:-missing}
     environment:
       MNEMOS_SERVER_URL: http://rag-server:8100
       CODEBASE_PATH: /data/codebase

@@ -41,7 +41,7 @@ except the hybrid retrieval, which is always on).
 ## 2. Start the stack
 
 ```bash
-# Core services
+# Core services — pulls jamyouss/mnemos-server + jamyouss/mnemos-watcher from Docker Hub.
 docker compose up -d
 
 # + local Ollama (recommended for first run)
@@ -50,6 +50,22 @@ docker compose --profile llm up -d
 # Pull the default model
 ollama pull llama3.1:8b
 ```
+
+> **Building from source instead?** Layer in the dev override:
+> ```bash
+> docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+> ```
+> Useful when you've modified the server/watcher Python code.
+
+> **One-shot `docker run` (no compose)?**
+> ```bash
+> docker run -d --name mnemos-qdrant -p 6333:6333 qdrant/qdrant:latest
+> docker run -d --name mnemos-server -p 8100:8100 \
+>   --link mnemos-qdrant:qdrant \
+>   -v ~/code:/data/codebase:ro \
+>   -e QDRANT_HOST=qdrant \
+>   jamyouss/mnemos-server:latest
+> ```
 
 Three containers come up:
 - `mnemos-qdrant-1` — vector DB on `localhost:6333`

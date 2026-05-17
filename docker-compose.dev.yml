@@ -1,0 +1,20 @@
+# Development override — build images locally instead of pulling from Docker Hub.
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+#
+# Useful when you've edited the server/watcher code and want to run YOUR
+# version rather than the published one. Production deployments should leave
+# this file out and rely on the published `:latest` (or a pinned `:v0.1.0`).
+
+services:
+  rag-server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    image: mnemos-server:dev
+
+  watcher:
+    build:
+      context: .
+      dockerfile: watcher/Dockerfile
+    image: mnemos-watcher:dev

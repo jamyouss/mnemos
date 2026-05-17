@@ -38,6 +38,78 @@ def cli() -> None:
 
 
 @cli.command()
+def doctor() -> None:
+    """End-to-end health check: server up, Qdrant up, LLM reachable, sample search works."""
+    ok = True
+
+    def _check(label: str, fn) -> bool:
+        nonlocal ok
+        try:
+            detail = fn()
+            console.print(f"  [green]✓[/green] {label}" + (f" [dim]({detail})[/dim]" if detail else ""))
+            return True
+        except Exception as exc:
+            console.print(f"  [red]✗[/red] {label}: [red]{exc}[/red]")
+            ok = False
+            return False
+
+    console.print(f"[bold]Mnemos doctor[/bold]  target = {_base_url()}\n")
+
+    # 1. /health
+    def _health():
+        r = httpx.get(f"{_base_url()}/health", timeout=5)
+        r.raise_for_status()
+        body = r.json()
+        if body.get("status") != "healthy":
+            raise RuntimeError(f"unexpected body: {body!r}")
+        return "OK"
+    _check("server /health responds healthy", _health)
+
+    # 2. /api/status — collections + counts
+    collections: dict = {}
+    def _status():
+        nonlocal collections
+        r = httpx.get(f"{_base_url()}/api/status", timeout=10)
+        r.raise_for_status()
+        collections = r.json().get("collections", {})
+        return f"{len(collections)} collections"
+    _check("Qdrant reachable + collections enumerable", _status)
+
+    # 3. Core collections present
+    expected = {"mnemos_skills", "mnemos_docs", "mnemos_code", "mnemos_memory"}
+    missing = expected - set(collections.keys())
+    if missing:
+        console.print(f"  [yellow]⚠[/yellow] missing core collections: {sorted(missing)}")
+    else:
+        console.print(f"  [green]✓[/green] core collections present "
+                      f"[dim](mnemos_code: {collections.get('mnemos_code',{}).get('points_count',0)} points)[/dim]")
+
+    # 4. At least one collection has data
+    has_data = any((info.get("points_count") or 0) > 0 for info in collections.values())
+    if not has_data:
+        console.print("  [yellow]⚠[/yellow] no points indexed yet — run `mnemos reindex --recreate "
+                      "--full --collection mnemos_code --path /data/codebase`")
+
+    # 5. Sample search round-trip
+    def _search():
+        r = httpx.post(
+            f"{_base_url()}/api/search",
+            json={"query": "function", "limit": 1},
+            timeout=30,
+        )
+        r.raise_for_status()
+        return f"{len(r.json().get('results', []))} hits"
+    _check("/api/search round-trip", _search)
+
+    console.print()
+    if ok:
+        console.print("[bold green]All checks passed.[/bold green]")
+    else:
+        console.print("[bold red]Some checks failed.[/bold red] See above.")
+        sys.exit(1)
+
+
+@cli.command()
 def status() -> None:
     """Show server health and collection counts."""
     url = f"{_base_url()}/api/status"

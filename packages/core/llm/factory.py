@@ -26,7 +26,7 @@ def make_llm_provider(config: LLMConfig) -> LLMProvider:
     if provider == "ollama":
         from core.llm.ollama import OllamaProvider
 
-        base_url = config.base_url or "http://localhost:11434"
+        base_url = config.base_url or _autodetect_ollama_url()
         return OllamaProvider(base_url=base_url, model=config.model)
 
     if provider == "anthropic":
@@ -51,3 +51,41 @@ def make_llm_provider(config: LLMConfig) -> LLMProvider:
         f"Unknown MNEMOS_LLM_PROVIDER: {config.provider!r}. "
         "Supported: 'ollama', 'anthropic', 'openai'."
     )
+
+
+# In-container Ollama is reachable via three common URLs depending on how
+# the user set up Ollama: bundled service, host-installed (Mac/Win), or
+# host-installed (Linux). We probe them in order and pick the first one
+# that responds. Nothing is fatal: if all three fail we fall back to the
+# bundled service URL and let the actual LLM call surface the error.
+_OLLAMA_URL_CANDIDATES = (
+    "http://ollama:11434",                  # docker compose --profile llm
+    "http://host.docker.internal:11434",    # host-installed Ollama on Mac/Win
+    "http://localhost:11434",               # running CLI on the host directly
+)
+
+
+def _autodetect_ollama_url() -> str:
+    """Probe the common Ollama URLs and return the first reachable one.
+
+    Falls back to the bundled-service URL when nothing responds — that way
+    the caller still gets a deterministic, documented base_url to debug.
+    """
+    import logging
+    import httpx
+
+    logger = logging.getLogger("mnemos.llm")
+    for url in _OLLAMA_URL_CANDIDATES:
+        try:
+            r = httpx.get(f"{url}/api/tags", timeout=1.5)
+            if r.status_code == 200:
+                logger.info("Auto-detected Ollama at %s", url)
+                return url
+        except httpx.HTTPError:
+            continue
+    logger.warning(
+        "No reachable Ollama at any of %s — defaulting to %s",
+        ", ".join(_OLLAMA_URL_CANDIDATES),
+        _OLLAMA_URL_CANDIDATES[0],
+    )
+    return _OLLAMA_URL_CANDIDATES[0]
