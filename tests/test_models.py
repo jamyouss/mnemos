@@ -16,13 +16,13 @@ def test_search_result_to_dict():
         file_path="myproject/services/core/app.go",
         score=0.87,
         chunk_type="function",
-        collection="mnemos_code_myproject",
+        collection="mnemos_code",
         metadata={"package": "application"},
     )
     d = result.model_dump()
     assert d["content"] == "func Create()"
     assert d["score"] == 0.87
-    assert d["collection"] == "mnemos_code_myproject"
+    assert d["collection"] == "mnemos_code"
 
 
 def test_code_search_result_extends_search_result():
@@ -31,7 +31,7 @@ def test_code_search_result_extends_search_result():
         file_path="myproject/services/core/app.go",
         score=0.87,
         chunk_type="function",
-        collection="mnemos_code_myproject",
+        collection="mnemos_code",
         metadata={"package": "application"},
         language="go",
         symbol_name="Create",
@@ -69,7 +69,7 @@ def test_skill_result():
 
 def test_reindex_status():
     status = ReindexStatus(
-        collection="mnemos_code_myproject",
+        collection="mnemos_code",
         mode="incremental",
         files_processed=42,
         files_added=5,
@@ -84,8 +84,8 @@ def test_reindex_status():
 def test_status_report():
     report = StatusReport(
         collections={
-            "mnemos_code_myproject": CollectionStatus(
-                name="mnemos_code_myproject",
+            "mnemos_code": CollectionStatus(
+                name="mnemos_code",
                 document_count=1500,
                 last_indexed_at="2026-03-12T10:00:00Z",
                 stale_files=3,
@@ -95,7 +95,7 @@ def test_status_report():
         watcher_active=True,
     )
     assert report.qdrant_healthy is True
-    assert report.collections["mnemos_code_myproject"].document_count == 1500
+    assert report.collections["mnemos_code"].document_count == 1500
 
 
 def test_memory_result():

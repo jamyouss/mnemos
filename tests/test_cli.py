@@ -32,7 +32,7 @@ def test_status_healthy():
         {
             "status": "healthy",
             "collections": {
-                "mnemos_code_myproject": {"vectors_count": 42, "points_count": 42, "status": "green"},
+                "mnemos_code": {"vectors_count": 42, "points_count": 42, "status": "green"},
             },
         }
     )
@@ -156,22 +156,22 @@ def test_search_skills_returns_results():
 def test_reindex_success():
     runner = CliRunner()
     mock_resp = _mock_response(
-        {"status": "reindexed", "collection": "mnemos_code_myproject", "chunks_indexed": 150}
+        {"status": "reindexed", "collection": "mnemos_code", "chunks_indexed": 150}
     )
     with patch("httpx.post", return_value=mock_resp):
-        result = runner.invoke(cli, ["reindex", "--collection", "mnemos_code_myproject"])
+        result = runner.invoke(cli, ["reindex", "--collection", "mnemos_code"])
     assert result.exit_code == 0
-    assert "reindex" in result.output.lower() or "mnemos_code_myproject" in result.output
+    assert "reindex" in result.output.lower() or "mnemos_code" in result.output
 
 
 def test_reindex_with_path():
     runner = CliRunner()
     mock_resp = _mock_response(
-        {"status": "reindexed", "collection": "mnemos_code_myproject", "chunks_indexed": 10}
+        {"status": "reindexed", "collection": "mnemos_code", "chunks_indexed": 10}
     )
     with patch("httpx.post", return_value=mock_resp) as mock_post:
         result = runner.invoke(
-            cli, ["reindex", "--collection", "mnemos_code_myproject", "--path", "/data/src", "--full"]
+            cli, ["reindex", "--collection", "mnemos_code", "--path", "/data/src", "--full"]
         )
     assert result.exit_code == 0
     posted_json = mock_post.call_args[1].get("json") or mock_post.call_args[0][1]

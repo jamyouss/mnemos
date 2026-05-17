@@ -7,6 +7,11 @@ from dataclasses import dataclass
 DENSE_VECTOR_NAME = "dense"
 SPARSE_VECTOR_NAME = "sparse"
 
+# Special payload field used to scope queries by project on `mnemos_code`
+# (and on `mnemos_memory`, via the same field). See core/projects.py for the
+# logic that fills it at index time.
+PROJECT_PAYLOAD_FIELD = "project"
+
 
 @dataclass
 class CollectionConfig:
@@ -16,9 +21,9 @@ class CollectionConfig:
     description: str = ""
 
 
-# Default collection layout. Add a `mnemos_code_<project>` entry per repo you
-# want to index — both the filesystem watcher and the semantic QueryRouter
-# pick up additions automatically.
+# Four collections — fixed, immutable. New projects are NOT new collections;
+# they are tagged via the `project` payload field on `mnemos_code` (or
+# `mnemos_memory`) and filtered at query time. See docs/RETRIEVAL_PIPELINE.md.
 COLLECTIONS = [
     CollectionConfig(
         name="mnemos_skills",
@@ -31,36 +36,36 @@ COLLECTIONS = [
         description="Architecture and pattern documentation",
     ),
     CollectionConfig(
+        name="mnemos_code",
+        path_prefixes=None,
+        description="Source code across all projects (scope with project=… filter)",
+    ),
+    CollectionConfig(
         name="mnemos_memory",
         path_prefixes=None,
         description="Memories extracted from commits and conversations",
-    ),
-    # Example collections — duplicate / rename per project you want to index.
-    # The path_prefixes match the path relative to /data/codebase inside the
-    # container. Add as many as you need.
-    CollectionConfig(
-        name="mnemos_code_myproject",
-        path_prefixes=["myproject/"],
-        description="Example application codebase — rename to your repo",
-    ),
-    CollectionConfig(
-        name="mnemos_code_otherproject",
-        path_prefixes=["otherproject/"],
-        description="Second example codebase",
-    ),
-    CollectionConfig(
-        name="mnemos_code_infra",
-        path_prefixes=["infra/", "ci/"],
-        description="Infrastructure and CI/CD",
     ),
 ]
 
 
 def get_collection_for_path(file_path: str) -> str | None:
+    """Decide which collection a `file_path` belongs to.
+
+    - `skills/...` → mnemos_skills
+    - `docs/...`   → mnemos_docs
+    - everything else under the codebase mount → mnemos_code
+      (project tagging happens at index time, not collection routing)
+    - returns None for empty / unmappable paths
+    """
+    if not file_path:
+        return None
     for config in COLLECTIONS:
         if config.path_prefixes is None:
             continue
         for prefix in config.path_prefixes:
             if file_path.startswith(prefix):
                 return config.name
+    # Default: anything that looks like a real path is code.
+    if "/" in file_path and not file_path.startswith("/"):
+        return "mnemos_code"
     return None

@@ -59,10 +59,20 @@ def create_app() -> FastAPI:
             enabled=settings.mnemos_contextual_enabled,
             workers=settings.mnemos_contextual_workers,
         )
+        # Optional YAML overrides for project detection. Missing file → empty dict,
+        # which means "first path segment = project name" everywhere.
+        from core.projects import load_project_overrides
+        from pathlib import Path as _Path
+        app.state.project_overrides = load_project_overrides(
+            _Path(settings.mnemos_projects_config_path)
+        )
+
         app.state.indexer = Indexer(
             qdrant_client=app.state.qdrant,
             embedding_service=app.state.embeddings,
             contextual_enricher=app.state.contextual,
+            project_overrides=app.state.project_overrides,
+            codebase_root=settings.codebase_path,
         )
 
         # CRAG components (Phase 3): grader + rewriter

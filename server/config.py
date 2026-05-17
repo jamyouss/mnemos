@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     mnemos_query_log_enabled: bool = False
     mnemos_query_log_path: str = "/data/state/query-log.jsonl"
 
+    # Project detection (auto-detect + optional YAML override)
+    mnemos_projects_config_path: str = "/app/config/projects.yaml"
+
     class Config:
         env_prefix = ""
 

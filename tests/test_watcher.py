@@ -4,14 +4,14 @@ from watcher.main import PathRouter, should_ignore
 def test_path_router_myproject():
     router = PathRouter(codebase_root="/data/codebase", config_root="/data/claude-config")
     collection, rel_path = router.route("/data/codebase/myproject/services/core/main.go")
-    assert collection == "mnemos_code_myproject"
+    assert collection == "mnemos_code"
     assert rel_path == "myproject/services/core/main.go"
 
 
 def test_path_router_otherproject():
     router = PathRouter(codebase_root="/data/codebase", config_root="/data/claude-config")
     collection, rel_path = router.route("/data/codebase/otherproject/go-modules/ddd/entity.go")
-    assert collection == "mnemos_code_otherproject"
+    assert collection == "mnemos_code"
     assert rel_path == "otherproject/go-modules/ddd/entity.go"
 
 

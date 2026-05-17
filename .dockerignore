@@ -1,0 +1,64 @@
+# Heavy / generated content that should never end up in the build context.
+# Cuts `docker build` context-send time from ~minutes to seconds.
+
+# Python build artefacts
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.egg-info/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+
+# Virtualenvs
+venv/
+.venv/
+**/venv/
+**/.venv/
+
+# Local dev data + secrets
+.env
+.env.*
+!.env.example
+!.env.minimal.example
+data/
+!data/.gitkeep
+!data/**/.gitkeep
+evals/runs/
+evals/dataset/_candidates.yaml
+evals/dataset/golden.yaml
+
+# Frontend / node noise (in case watcher mounts a JS repo for tests)
+node_modules/
+**/node_modules/
+.pnpm-store/
+dist/
+build/
+.nuxt/
+.output/
+
+# IDE + OS
+.idea/
+.vscode/
+.DS_Store
+
+# Git
+.git/
+.gitignore
+.github/
+
+# Docker meta (avoid recursion)
+docker-compose*.yml
+**/Dockerfile
+
+# Docs not needed in the runtime image
+docs/
+README.md
+CHANGELOG.md
+CONTRIBUTING.md
+CODE_OF_CONDUCT.md
+SECURITY.md
+LICENSE
+
+# Examples
+examples/

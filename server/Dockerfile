@@ -23,9 +23,10 @@ ENV PYTHONPATH="/app/packages:${PYTHONPATH}"
 COPY server/requirements.txt /app/server/requirements.txt
 RUN pip install --no-cache-dir -r /app/server/requirements.txt
 
-# Copy server source and scripts
+# Copy server source, scripts, and the optional project-overrides config.
 COPY server/ /app/server/
 COPY scripts/ /app/scripts/
+COPY config/ /app/config/
 
 EXPOSE 8100
 

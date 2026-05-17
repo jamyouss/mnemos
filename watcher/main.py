@@ -83,6 +83,13 @@ class PathRouter:
         self._config_root = config_root.rstrip("/")
 
     def route(self, abs_path: str) -> tuple[str, str] | None:
+        """Map a filesystem path to (collection, rel_path).
+
+        Skills / docs match the explicit path_prefixes from core.collections.
+        Everything else under the codebase mount goes to the single
+        `mnemos_code` collection — the project tag is added at index time
+        by the server, not by the watcher.
+        """
         # Config-side routing (skills / docs)
         if abs_path.startswith(self._config_root + "/"):
             rel = abs_path[len(self._config_root) + 1:]
@@ -94,19 +101,12 @@ class PathRouter:
                         return coll.name, rel
             return None
 
-        # Code-side routing — pull the project prefix → collection mapping straight
-        # from core.collections so adding a new project is one entry, no code change.
+        # Code-side routing: a single collection for all repos. The server's
+        # Indexer will derive the project tag from the path or from the YAML
+        # override loaded at startup.
         if abs_path.startswith(self._codebase_root + "/"):
             rel = abs_path[len(self._codebase_root) + 1:]
-            for coll in COLLECTIONS:
-                if not coll.path_prefixes:
-                    continue
-                if not coll.name.startswith("mnemos_code_"):
-                    continue
-                for prefix in coll.path_prefixes:
-                    if rel.startswith(prefix):
-                        return coll.name, rel
-            return None
+            return "mnemos_code", rel
 
         return None
 

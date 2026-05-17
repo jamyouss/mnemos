@@ -191,6 +191,7 @@ class SearchService:
         file_types: list[str] | None = None,
         path_filter: str | None = None,
         limit: int = 5,
+        project: str | None = None,
     ) -> list[SearchResult]:
         t_start = time.perf_counter()
 
@@ -234,6 +235,8 @@ class SearchService:
             must_conditions.append(FieldCondition(key="language", match=MatchAny(any=file_types)))
         if path_filter:
             must_conditions.append(FieldCondition(key="file_path", match=MatchValue(value=path_filter)))
+        if project:
+            must_conditions.append(FieldCondition(key="project", match=MatchValue(value=project)))
         query_filter = Filter(must=must_conditions) if must_conditions else None
 
         # Pull a wider candidate pool per collection when a reranker is going to
@@ -296,15 +299,14 @@ class SearchService:
         path_filter: str | None = None,
         limit: int = 5,
     ) -> list[CodeSearchResult]:
+        """Search the single `mnemos_code` collection; scope to a project via
+        the `project` payload filter rather than per-project collections."""
         dense_vec = self._embeddings.embed(query)
         sparse_vec = bm25_sparse(query)
 
-        if project:
-            collections = [f"mnemos_code_{project}"]
-        else:
-            collections = [c.name for c in COLLECTIONS if c.name.startswith("mnemos_code_")]
-
         must_conditions: list = []
+        if project:
+            must_conditions.append(FieldCondition(key="project", match=MatchValue(value=project)))
         if language:
             must_conditions.append(FieldCondition(key="language", match=MatchValue(value=language)))
         if symbol_type:
@@ -314,24 +316,22 @@ class SearchService:
         query_filter = Filter(must=must_conditions) if must_conditions else None
 
         per_collection = _HYBRID_TOP if (self._reranker and self._reranker.enabled) else limit
+        hits = self._hybrid_query("mnemos_code", dense_vec, sparse_vec, query_filter, per_collection)
 
-        all_results: list[CodeSearchResult] = []
-        for coll_name in collections:
-            hits = self._hybrid_query(coll_name, dense_vec, sparse_vec, query_filter, per_collection)
-            for hit in hits:
-                all_results.append(
-                    CodeSearchResult(
-                        content=hit.payload.get("content", ""),
-                        file_path=hit.payload.get("file_path", ""),
-                        score=hit.score,
-                        chunk_type=hit.payload.get("chunk_type", ""),
-                        collection=coll_name,
-                        metadata={},
-                        language=hit.payload.get("language", ""),
-                        symbol_name=hit.payload.get("symbol_name"),
-                        package=hit.payload.get("package"),
-                    )
-                )
+        all_results: list[CodeSearchResult] = [
+            CodeSearchResult(
+                content=hit.payload.get("content", ""),
+                file_path=hit.payload.get("file_path", ""),
+                score=hit.score,
+                chunk_type=hit.payload.get("chunk_type", ""),
+                collection="mnemos_code",
+                metadata={"project": hit.payload.get("project")},
+                language=hit.payload.get("language", ""),
+                symbol_name=hit.payload.get("symbol_name"),
+                package=hit.payload.get("package"),
+            )
+            for hit in hits
+        ]
 
         return self._rerank_and_select(query, all_results, limit)
 

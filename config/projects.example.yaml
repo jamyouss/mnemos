@@ -1,0 +1,41 @@
+# Optional project-detection override for Mnemos.
+#
+# Copy this file to `config/projects.yaml` (gitignored) and edit it ONLY if
+# the default "first directory segment = project name" rule doesn't fit your
+# layout. The default works out of the box when each top-level dir under your
+# codebase mount is a distinct project.
+#
+# Examples of when you need this file:
+#   - Org-wrapper layout where the first segment is an org name, not a project.
+#       /data/codebase/my-org/serviceA  →  project should be "serviceA"
+#   - Several physical dirs that belong to the same logical project
+#     (monorepo split):
+#       apps/billing/payments/   and   libs/shared/payments/   →   both "payments"
+#   - You want a project name that differs from the folder name.
+#
+# Resolution rules:
+#   - path_prefixes are matched against the path RELATIVE to the codebase mount
+#     root (i.e. without "/data/codebase/" in front).
+#   - Longest matching prefix wins on conflict.
+#   - If no prefix matches, the default first-segment rule kicks in.
+
+projects:
+
+  # Example 1 — org-wrapper layout
+  # serviceA:
+  #   path_prefixes:
+  #     - my-org/serviceA/
+  # serviceB:
+  #   path_prefixes:
+  #     - my-org/serviceB/
+
+  # Example 2 — monorepo split (one logical project, two physical dirs)
+  # payments:
+  #   path_prefixes:
+  #     - apps/billing/payments/
+  #     - libs/shared/payments/
+
+  # Example 3 — rename to a friendlier project label
+  # api:
+  #   path_prefixes:
+  #     - really-long-internal-dirname/

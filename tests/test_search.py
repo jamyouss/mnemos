@@ -45,7 +45,7 @@ def test_search_returns_search_results(search_service, mock_qdrant):
     ])
     results = search_service.search(
         query="company creation",
-        collections=["mnemos_code_myproject"],
+        collections=["mnemos_code"],
         limit=5,
     )
     assert len(results) == 1

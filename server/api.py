@@ -40,6 +40,7 @@ class IndexPushRequest(BaseModel):
     file_path: str
     collection: str
     content: str
+    project: Optional[str] = None  # Override auto-detection of the `project` payload field.
 
 
 class SearchRequest(BaseModel):
@@ -48,6 +49,7 @@ class SearchRequest(BaseModel):
     file_types: Optional[List[str]] = None
     path_filter: Optional[str] = None
     limit: int = 5
+    project: Optional[str] = None  # Restrict to a single project (filter on payload).
 
 
 class SearchCodeRequest(BaseModel):
@@ -70,6 +72,7 @@ class ReindexRequest(BaseModel):
     full: bool = False
     recreate: bool = False           # Drop + recreate (needed when migrating to hybrid schema)
     workers: int = 1                 # Parallel worker threads for indexing
+    project: Optional[str] = None    # Override auto-detected project tag for every file under `path`.
 
 
 class MemoryCreateRequest(BaseModel):
@@ -158,6 +161,7 @@ async def push_index(body: IndexPushRequest, request: Request):
         content=body.content,
         file_path=body.file_path,
         collection=body.collection,
+        project=body.project,
     )
     return {"status": "indexed", "file_path": body.file_path, "chunks": count}
 
@@ -184,6 +188,7 @@ async def search(body: SearchRequest, request: Request):
         file_types=body.file_types,
         path_filter=body.path_filter,
         limit=body.limit,
+        project=body.project,
     )
     return {"results": [r.model_dump() for r in results]}
 
@@ -399,7 +404,7 @@ def _should_skip(fp) -> bool:
     return any(sub in s for sub in _REINDEX_IGNORE_PATH_SUBSTRINGS)
 
 
-def _index_one_file(indexer, collection: str, fp) -> int:
+def _index_one_file(indexer, collection: str, fp, project: str | None = None) -> int:
     """Index a single file. Returns the number of chunks indexed (0 on error)."""
     try:
         content = fp.read_text(encoding="utf-8")
@@ -408,12 +413,20 @@ def _index_one_file(indexer, collection: str, fp) -> int:
             file_path=str(fp),
             collection=collection,
             file_mtime=fp.stat().st_mtime,
+            project=project,
         )
     except Exception:
         return -1  # sentinel for "skipped on error"
 
 
-def _run_reindex(indexer, collection: str, base_path, full: bool, workers: int = 1) -> None:
+def _run_reindex(
+    indexer,
+    collection: str,
+    base_path,
+    full: bool,
+    workers: int = 1,
+    project: str | None = None,
+) -> None:
     """Background task: walk files and index them, optionally in parallel."""
     import logging
     from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -433,14 +446,14 @@ def _run_reindex(indexer, collection: str, base_path, full: bool, workers: int =
 
     if workers == 1:
         for fp in files:
-            n = _index_one_file(indexer, collection, fp)
+            n = _index_one_file(indexer, collection, fp, project=project)
             if n < 0:
                 skipped += 1
             else:
                 indexed += n
     else:
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = [pool.submit(_index_one_file, indexer, collection, fp) for fp in files]
+            futures = [pool.submit(_index_one_file, indexer, collection, fp, project) for fp in files]
             for fut in as_completed(futures):
                 n = fut.result()
                 if n < 0:
@@ -472,7 +485,13 @@ async def reindex(body: ReindexRequest, request: Request, background_tasks: Back
     if body.path:
         base_path = _validate_path(body.path)
         background_tasks.add_task(
-            _run_reindex, indexer, body.collection, base_path, body.full, body.workers
+            _run_reindex,
+            indexer,
+            body.collection,
+            base_path,
+            body.full,
+            body.workers,
+            body.project,
         )
         return {
             "status": "reindex_started",
@@ -480,6 +499,7 @@ async def reindex(body: ReindexRequest, request: Request, background_tasks: Back
             "path": str(base_path),
             "workers": body.workers,
             "recreated": body.recreate,
+            "project": body.project,
         }
 
     return {"status": "no_path", "collection": body.collection}

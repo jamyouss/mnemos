@@ -62,7 +62,7 @@ TOOL_DEFINITIONS: list[types.Tool] = [
                 },
                 "project": {
                     "type": "string",
-                    "description": "Optional project name — mapped to the `mnemos_code_<project>` collection",
+                    "description": "Optional project name — applied as a payload filter on the `mnemos_code` collection",
                 },
                 "path_filter": {
                     "type": "string",

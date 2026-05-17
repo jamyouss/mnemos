@@ -6,10 +6,8 @@ def test_all_collections_defined():
     assert names == {
         "mnemos_skills",
         "mnemos_docs",
+        "mnemos_code",      # single, project-scoped via payload
         "mnemos_memory",
-        "mnemos_code_myproject",
-        "mnemos_code_otherproject",
-        "mnemos_code_infra",
     }
 
 
@@ -18,17 +16,21 @@ def test_collection_config_has_vector_size():
         assert c.vector_size == 384
 
 
-def test_path_to_collection_mapping():
-    assert get_collection_for_path("myproject/services/core/main.go") == "mnemos_code_myproject"
-    assert get_collection_for_path("otherproject/go-modules/ddd/entity.go") == "mnemos_code_otherproject"
-    assert get_collection_for_path("infra/docker/compose.yml") == "mnemos_code_infra"
-    assert get_collection_for_path("ci/workflow.yml") == "mnemos_code_infra"
+def test_path_to_collection_mapping_for_code():
+    """Anything that looks like a real relative path falls into mnemos_code."""
+    assert get_collection_for_path("myproject/services/core/main.go") == "mnemos_code"
+    assert get_collection_for_path("otherproject/go-modules/ddd/entity.go") == "mnemos_code"
+    assert get_collection_for_path("infra/docker/compose.yml") == "mnemos_code"
 
 
-def test_path_to_collection_skills():
+def test_path_to_collection_skills_and_docs():
     assert get_collection_for_path("skills/project-expert/instructions.md") == "mnemos_skills"
     assert get_collection_for_path("docs/DDD_PATTERNS.md") == "mnemos_docs"
 
 
-def test_unknown_path_returns_none():
-    assert get_collection_for_path("unknown/random/file.txt") is None
+def test_absolute_path_returns_none():
+    assert get_collection_for_path("/absolute/path/file.go") is None
+
+
+def test_empty_string_returns_none():
+    assert get_collection_for_path("") is None

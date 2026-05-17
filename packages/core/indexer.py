@@ -10,8 +10,10 @@ from qdrant_client.models import (
     FieldCondition,
     Filter,
     FilterSelector,
+    KeywordIndexParams,
     MatchValue,
     Modifier,
+    PayloadSchemaType,
     PointStruct,
     SparseVectorParams,
     VectorParams,
@@ -21,10 +23,15 @@ from core.chunkers.fallback_chunker import FallbackChunker
 from core.chunkers.go_chunker import GoChunker
 from core.chunkers.markdown_chunker import MarkdownChunker
 from core.chunkers.vue_chunker import VueChunker
-from core.collections import DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME
+from core.collections import DENSE_VECTOR_NAME, PROJECT_PAYLOAD_FIELD, SPARSE_VECTOR_NAME
 from core.contextual import ContextualEnricher
 from core.embeddings import EmbeddingService
+from core.projects import ProjectOverrides, detect_project
 from core.sparse import bm25_sparse
+
+# Collections whose payload is filtered by `project` at query time. We
+# create the payload index on those at startup so the filter scales.
+_PROJECT_INDEXED_COLLECTIONS = ("mnemos_code", "mnemos_memory")
 
 
 class Indexer:
@@ -33,10 +40,14 @@ class Indexer:
         qdrant_client: QdrantClient,
         embedding_service: EmbeddingService,
         contextual_enricher: ContextualEnricher | None = None,
+        project_overrides: ProjectOverrides | None = None,
+        codebase_root: str = "/data/codebase",
     ) -> None:
         self._qdrant = qdrant_client
         self._embeddings = embedding_service
         self._contextual = contextual_enricher
+        self._project_overrides = project_overrides or {}
+        self._codebase_root = codebase_root.rstrip("/")
         self._go_chunker = GoChunker()
         self._vue_chunker = VueChunker()
         self._md_chunker = MarkdownChunker()
@@ -45,24 +56,36 @@ class Indexer:
     def ensure_collection(self, collection_name: str, vector_size: int = 384) -> None:
         """Create the collection if missing, configured for hybrid (dense + sparse BM25).
 
-        Collections created prior to the hybrid migration use a single unnamed
-        dense vector; those need to be recreated explicitly via the migration
-        path (delete + recreate) because Qdrant does not permit altering the
-        vector schema in-place.
+        For collections that scope by project (mnemos_code, mnemos_memory) we
+        also create a keyword payload index on the `project` field so that
+        per-project filters stay O(log n).
         """
         existing = {c.name for c in self._qdrant.get_collections().collections}
-        if collection_name in existing:
-            return
+        if collection_name not in existing:
+            self._qdrant.create_collection(
+                collection_name=collection_name,
+                vectors_config={
+                    DENSE_VECTOR_NAME: VectorParams(size=vector_size, distance=Distance.COSINE),
+                },
+                sparse_vectors_config={
+                    SPARSE_VECTOR_NAME: SparseVectorParams(modifier=Modifier.IDF),
+                },
+            )
 
-        self._qdrant.create_collection(
-            collection_name=collection_name,
-            vectors_config={
-                DENSE_VECTOR_NAME: VectorParams(size=vector_size, distance=Distance.COSINE),
-            },
-            sparse_vectors_config={
-                SPARSE_VECTOR_NAME: SparseVectorParams(modifier=Modifier.IDF),
-            },
-        )
+        if collection_name in _PROJECT_INDEXED_COLLECTIONS:
+            self._ensure_project_payload_index(collection_name)
+
+    def _ensure_project_payload_index(self, collection_name: str) -> None:
+        """Idempotently create a keyword payload index on the `project` field."""
+        try:
+            self._qdrant.create_payload_index(
+                collection_name=collection_name,
+                field_name=PROJECT_PAYLOAD_FIELD,
+                field_schema=KeywordIndexParams(type=PayloadSchemaType.KEYWORD),
+            )
+        except Exception:
+            # Qdrant raises if the index already exists; that's fine.
+            pass
 
     def is_hybrid(self, collection_name: str) -> bool:
         """Return True if the collection already uses named hybrid (dense + sparse) vectors."""
@@ -82,12 +105,29 @@ class Indexer:
             pass
         self.ensure_collection(collection_name, vector_size)
 
+    def _resolve_project(self, file_path: str, override: str | None) -> str | None:
+        """Decide which `project` value to write into a chunk's payload.
+
+        Order:
+            1. explicit `override` (CLI flag, push API field, hook env var)
+            2. YAML / first-segment detection on the path relative to the codebase root
+        """
+        if override:
+            return override
+        # Strip the codebase mount root before passing to detect_project so the
+        # rules can be written in terms of paths the user actually sees.
+        rel = file_path
+        if file_path.startswith(self._codebase_root + "/"):
+            rel = file_path[len(self._codebase_root) + 1:]
+        return detect_project(rel, overrides=self._project_overrides)
+
     def index_file(
         self,
         content: str,
         file_path: str,
         collection: str,
         file_mtime: float | None = None,
+        project: str | None = None,
     ) -> int:
         self.delete_file(file_path, collection)
 
@@ -102,6 +142,11 @@ class Indexer:
         if self._contextual is not None and self._contextual.enabled:
             chunks = self._contextual.enrich(content, chunks, file_path)
 
+        # Resolve project once per file. Only relevant for the code/memory
+        # collections; skills/docs leave the field unset.
+        resolved_project = self._resolve_project(file_path, project) \
+            if collection in _PROJECT_INDEXED_COLLECTIONS else None
+
         texts = [c["content"] for c in chunks]
         dense_vectors = self._embeddings.embed_batch(texts)
         sparse_vectors = [bm25_sparse(t) for t in texts]
@@ -115,6 +160,8 @@ class Indexer:
                 "last_indexed_at": now,
                 "file_mtime": file_mtime or time.time(),
             }
+            if resolved_project is not None:
+                payload[PROJECT_PAYLOAD_FIELD] = resolved_project
             points.append(
                 PointStruct(
                     id=point_id,

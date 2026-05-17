@@ -246,7 +246,19 @@ def search_memory(query: str, limit: int, project: str | None, memory_type: str 
     type=int,
     help="Parallel worker threads (use 4 for contextual chunking).",
 )
-def reindex(collection: str, path: str | None, full: bool, recreate: bool, workers: int) -> None:
+@click.option(
+    "--project",
+    default=None,
+    help="Override the auto-detected project tag for every file under --path.",
+)
+def reindex(
+    collection: str,
+    path: str | None,
+    full: bool,
+    recreate: bool,
+    workers: int,
+    project: str | None,
+) -> None:
     """Trigger a reindex operation on the server."""
     url = f"{_base_url()}/api/reindex"
     payload: dict = {
@@ -257,6 +269,8 @@ def reindex(collection: str, path: str | None, full: bool, recreate: bool, worke
     }
     if path:
         payload["path"] = path
+    if project:
+        payload["project"] = project
 
     try:
         resp = httpx.post(url, json=payload, timeout=600)
