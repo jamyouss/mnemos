@@ -73,9 +73,14 @@ mnemos.internal {
 The bundled `docker-compose.prod.yml` flips Mnemos into deployed mode:
 
 ```bash
+cp config/tenants.example.yaml config/tenants.yaml   # then edit api_keys
 cp docker-compose.prod.yml docker-compose.override.yml
 docker compose up -d
 ```
+
+`config/tenants.yaml` is gitignored on purpose — it holds your real API
+keys. The template at `config/tenants.example.yaml` is what ships with
+the repo; you copy it once and keep your local copy out of source control.
 
 Deployed mode:
 - Requires an `Authorization: Bearer <api-key>` header on every request.

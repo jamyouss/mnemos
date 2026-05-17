@@ -147,8 +147,9 @@ full list.
 
 When `MNEMOS_AUTH_ENABLED=true`, every MCP request must carry an
 `Authorization: Bearer <api-key>` header. API keys are managed in
-`config/tenants.yaml`; each tenant sees a prefixed view of the collections.
-See [`DEPLOYMENT.md`](DEPLOYMENT.md).
+`config/tenants.yaml` (copied from `config/tenants.example.yaml`); each
+tenant sees a prefixed view of the collections. See
+[`DEPLOYMENT.md`](DEPLOYMENT.md).
 
 ## Debugging the MCP connection
 

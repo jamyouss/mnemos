@@ -184,7 +184,8 @@ Each line is a flat JSON object:
 | `MNEMOS_MODE` | `local` | `local` (single-tenant, full read access) or `deployed` (multi-tenant, auth required) |
 | `MNEMOS_AUTH_ENABLED` | `false` | Toggle API-key auth for deployed mode |
 
-Multi-tenant config lives in `config/tenants.yaml`. See
+Multi-tenant config lives in `config/tenants.yaml` (gitignored — copy
+`config/tenants.example.yaml` and edit the api_keys). See
 [`DEPLOYMENT.md`](DEPLOYMENT.md).
 
 ## How to apply a config change

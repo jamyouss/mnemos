@@ -25,3 +25,4 @@ data/codebase/*
 data/claude-config/*
 !data/claude-config/.gitkeep
 config/projects.yaml
+config/tenants.yaml
