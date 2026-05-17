@@ -16,48 +16,47 @@ permissions:
 
 jobs:
   # -----------------------------------------------------------------------
-  # One matrix entry per image. Both build in parallel.
+  # Stage 1: build each (image, platform) pair on a native runner.
+  # No QEMU emulation — arm64 builds run on ubuntu-24.04-arm, amd64 on
+  # ubuntu-latest. Each job pushes a per-platform manifest by digest.
   # -----------------------------------------------------------------------
-  build-and-push:
-    runs-on: ubuntu-latest
+  build:
     strategy:
       fail-fast: false
       matrix:
-        include:
+        image:
           - name: server
-            image: jamyouss/mnemos-server
+            repo: jamyouss/mnemos-server
             dockerfile: server/Dockerfile
           - name: watcher
-            image: jamyouss/mnemos-watcher
+            repo: jamyouss/mnemos-watcher
             dockerfile: watcher/Dockerfile
+        platform:
+          - { name: amd64, runner: ubuntu-latest,   tag: linux/amd64 }
+          - { name: arm64, runner: ubuntu-24.04-arm, tag: linux/arm64 }
+    runs-on: ${{ matrix.platform.runner }}
 
     steps:
+      - name: Prepare platform pair name
+        run: |
+          platform=${{ matrix.platform.tag }}
+          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
+
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up QEMU (for arm64 emulation on amd64 runners)
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Compute image tags
+      - name: Docker meta (labels only at this stage)
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ matrix.image }}
-          tags: |
-            # push to main → `edge` tag
-            type=ref,event=branch,enable=${{ github.ref == 'refs/heads/main' }},priority=900,prefix=,suffix=,value=edge
-            # semver tags from git tags v1.2.3 → 1.2.3, 1.2, latest
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}},enable=${{ !startsWith(github.ref, 'refs/tags/v0.') }}
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+          images: ${{ matrix.image.repo }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.licenses=MIT
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Log in to Docker Hub
         # Only authenticate when we actually intend to push (not on PRs).
@@ -67,18 +66,89 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build & push ${{ matrix.image }}
+      - name: Build and push by digest
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ${{ matrix.dockerfile }}
-          # Multi-arch covers Apple Silicon (arm64) and the typical x86 server.
-          platforms: linux/amd64,linux/arm64
-          # Only push when we're on main / a tag; PR builds stay local.
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
+          file: ${{ matrix.image.dockerfile }}
+          platforms: ${{ matrix.platform.tag }}
           labels: ${{ steps.meta.outputs.labels }}
-          # GitHub-hosted cache so successive builds reuse layers across CI runs.
-          cache-from: type=gha,scope=${{ matrix.name }}
-          cache-to: type=gha,scope=${{ matrix.name }},mode=max
-          provenance: false  # smaller manifest, fine for our use case
+          outputs: type=image,name=${{ matrix.image.repo }},push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
+          cache-from: type=gha,scope=${{ matrix.image.name }}-${{ matrix.platform.name }}
+          cache-to: type=gha,scope=${{ matrix.image.name }}-${{ matrix.platform.name }},mode=max
+          provenance: false
+
+      - name: Export digest
+        if: github.event_name != 'pull_request'
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.image.name }}-${{ env.PLATFORM_PAIR }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # -----------------------------------------------------------------------
+  # Stage 2: assemble the per-platform digests into a single multi-arch
+  # manifest list and push the human-friendly tags (edge, semver, latest).
+  # -----------------------------------------------------------------------
+  merge:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - name: server
+            repo: jamyouss/mnemos-server
+          - name: watcher
+            repo: jamyouss/mnemos-watcher
+
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-${{ matrix.image.name }}-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Compute image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ matrix.image.repo }}
+          tags: |
+            # push to main → `edge` tag
+            type=ref,event=branch,enable=${{ github.ref == 'refs/heads/main' }},priority=900,prefix=,suffix=,value=edge
+            # semver tags from git tags v1.2.3 → 1.2.3, 1.2, latest
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}},enable=${{ !startsWith(github.ref, 'refs/tags/v0.') }}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ matrix.image.repo }}@sha256:%s ' *)
+
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect ${{ matrix.image.repo }}:${{ steps.meta.outputs.version }}
