@@ -30,9 +30,14 @@ for per-phase numbers.
 ### Indexing
 - ✅ **Code-aware chunkers** — tree-sitter (Go), regex SFC (Vue),
   heading-based (Markdown), fallback windowed.
-- ✅ **Single `mnemos_code` collection** with project-scoped payload —
-  `--project` flag on the CLI, automatic detection from path, override via
-  `config/projects.yaml`.
+- ✅ **Single `mnemos_code` collection** with tag-based scoping — every chunk
+  carries `tags: list[str]`, search filters via `tags_any` (OR) and `tags_all`
+  (AND). Mapping `path → tags` declared in `config/projects.yaml`, with a
+  cumulative-segment fallback when absent. `--tags` flag on `mnemos reindex`
+  overrides per-run.
+- ✅ **Tags-based scoping (replaces single `project` filter)** — ✅ shipped 2026-05-18.
+  Chunks carry `tags: list[str]`; search filters with `tags_any` (OR) and `tags_all` (AND).
+  See [CONFIGURATION.md](CONFIGURATION.md) for the `projects.yaml` schema.
 - ✅ **Watcher** — `watchdog` with 2 s debounce, incremental push to the
   server.
 - ✅ **`_should_skip` rules** — `.bak`, `_nuxt/*.js`, `.terraform/`, etc.
@@ -45,7 +50,8 @@ for per-phase numbers.
   `replace`, configurable via `MNEMOS_DEDUP_STRATEGY`.
 - ✅ **Approval workflow** — `pending → approved`. Search only returns
   approved memories.
-- ✅ **Project scoping on memories** — same `project` payload field as code.
+- ✅ **Tag-based scoping on memories** — same `tags` payload field as code,
+  filtered via `tags_any` / `tags_all`.
 
 ### Platform
 - ✅ **Pluggable LLM** — Ollama, Anthropic, any OpenAI-compatible endpoint
