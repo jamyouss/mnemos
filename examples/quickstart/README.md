@@ -14,9 +14,9 @@ quickstart-demo/
     └── logging.go                 <- structured logger setup
 ```
 
-Once indexed (project name: `quickstart-demo`), try:
+Once indexed (tagged with `quickstart-demo`), try:
 
 ```bash
-mnemos search-code --project quickstart-demo "how is a user created?"
-mnemos search-code --project quickstart-demo "where is logging configured?"
+mnemos search-code --tags quickstart-demo "how is a user created?"
+mnemos search-code --tags quickstart-demo "where is logging configured?"
 ```

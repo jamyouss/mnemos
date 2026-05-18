@@ -105,23 +105,26 @@ mnemos reindex --recreate --full \
        --collection mnemos_docs \
        --path /data/claude-config/docs
 
-# A specific project's code — single mnemos_code collection, tagged with --project
+# A specific project's code — single mnemos_code collection, tagged for scoping
 mnemos reindex --recreate --full \
        --collection mnemos_code \
        --path /data/codebase/myproject \
-       --project myproject
+       --tags myproject,go
 
 # Index another project into the same collection (no --recreate this time)
 mnemos reindex --full \
        --collection mnemos_code \
        --path /data/codebase/otherproject \
-       --project otherproject
+       --tags otherproject,vue3
 ```
 
 The `--recreate` flag drops the collection before reindexing. **You need it
 once per collection** to migrate to the hybrid (named-vector) schema. After
-that, drop the flag for incremental re-runs. The `--project` value is stored
-in each chunk's payload so searches can scope to one project.
+that, drop the flag for incremental re-runs. The `--tags` list is stored in
+each chunk's `tags` payload — searches scope with `--tags` (OR) and
+`--tags-all` (AND). Without `--tags`, Mnemos derives tags from
+`config/projects.yaml` (or cumulative path segments by default). See
+[`CONFIGURATION.md`](CONFIGURATION.md#tags--scoping-chunks-across-projects).
 
 Monitor progress:
 
@@ -131,14 +134,15 @@ mnemos status
 # ─────────────────────────────────────────────────────
 # mnemos_skills    737 points     status=green
 # mnemos_docs       79 points     status=green
-# mnemos_code    6755 points      status=green   (projects: myproject, otherproject)
+# mnemos_code    6755 points      status=green
 ```
 
 ## 5. Search it from the CLI
 
 ```bash
 mnemos search "JWT validation middleware"
-mnemos search-code "ride cancel" --project myproject --language go
+mnemos search-code "ride cancel" --tags myproject --language go
+mnemos search-code "auth"        --tags-all myproject,vue3
 mnemos search-skills "performance bottleneck"
 mnemos search-memory "API routing decision"
 ```

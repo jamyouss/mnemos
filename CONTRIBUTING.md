@@ -82,9 +82,12 @@ Tests that need a live server/Qdrant (`test_api.py`, `test_cli.py`, …) are
 Don't edit `packages/core/collections.py` — the four collections (`mnemos_skills`,
 `mnemos_docs`, `mnemos_code`, `mnemos_memory`) are fixed by design.
 
-If your layout doesn't fit the default "first directory segment = project name"
-rule, copy `config/projects.example.yaml` → `config/projects.yaml` and add
-your overrides there. Restart the server. Done.
+Projects are not first-class entities: each chunk in `mnemos_code` carries a
+`tags: list[str]` payload, and search filters with `tags_any` (OR) and
+`tags_all` (AND). The default mapping `path → tags` is the cumulative path
+segments (`foo/bar/baz/file.go` → `["foo", "foo/bar", "foo/bar/baz"]`). To
+override that, copy `config/projects.example.yaml` → `config/projects.yaml`,
+declare your `path-prefix → [tags]` rules, and restart the server.
 
 ## Adding a new LLM provider
 

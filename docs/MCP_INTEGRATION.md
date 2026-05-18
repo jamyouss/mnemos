@@ -9,10 +9,10 @@ Once an MCP client is connected, the agent sees these 9 tools:
 
 | Tool | Use it for | Returns |
 |------|------------|---------|
-| `mnemos_search` | Semantic search across all collections | List of `{file_path, score, content, collection}` |
-| `mnemos_search_code` | Code-only search with `language` / `symbol_type` / `project` filters | List of code chunks with `symbol_name`, `package` |
+| `mnemos_search` | Semantic search across all collections (supports `tags_any` / `tags_all`) | List of `{file_path, score, content, collection}` |
+| `mnemos_search_code` | Code-only search with `language` / `symbol_type` / `tags_any` / `tags_all` filters | List of code chunks with `symbol_name`, `package` |
 | `mnemos_search_skills` | Find the most relevant skill by description | List of `{skill_name, description, instructions_preview}` |
-| `mnemos_search_memory` | Recall past decisions and patterns | List of `{id, content, project, memory_type, tags}` |
+| `mnemos_search_memory` | Recall past decisions and patterns (supports `tags_any` / `tags_all`) | List of `{id, content, memory_type, tags}` |
 | `mnemos_memory` | Store a new memory (goes to `pending`) | The new memory id |
 | `mnemos_memory_list` | List memories by project / status | Paged list |
 | `mnemos_memory_review` | Approve or reject a `pending` memory | Updated status |

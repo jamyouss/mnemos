@@ -95,7 +95,7 @@ Deployed mode:
 tenants:
   tenant_acme:
     api_key: "sk-acme-…"
-    collections_prefix: "acme_"          # → acme_code_myproject, acme_docs, …
+    collections_prefix: "acme_"          # → acme_code, acme_docs, …
     max_documents: 0                     # 0 = unlimited
   tenant_brand:
     api_key: "sk-brand-…"
@@ -115,15 +115,20 @@ curl -X POST https://mnemos.example.com/api/index \
   -H "Content-Type: application/json" \
   -d '{
     "file_path": "services/core/handler.go",
-    "collection": "acme_code_myproject",
-    "content": "package core\nfunc Handle() { ... }"
+    "collection": "acme_code",
+    "content": "package core\nfunc Handle() { ... }",
+    "tags": ["myproject", "go", "services"]
   }'
 
 # Delete a file from the index when it's removed from the repo
 curl -X DELETE \
-  https://mnemos.example.com/api/index/acme_code_myproject/services/core/handler.go \
+  https://mnemos.example.com/api/index/acme_code/services/core/handler.go \
   -H "Authorization: Bearer sk-acme-…"
 ```
+
+The optional `tags` array overrides the auto-detected list from
+`config/projects.yaml`. When omitted, the server resolves tags from the
+file path. See [`CONFIGURATION.md`](CONFIGURATION.md#tags--scoping-chunks-across-projects).
 
 ### GitHub Actions workflow
 
@@ -150,11 +155,11 @@ jobs:
           git diff --name-status HEAD~1 HEAD | while read status path; do
             if [ "$status" = "D" ]; then
               curl -X DELETE \
-                "$MNEMOS_URL/api/index/acme_code_myproject/$path" \
+                "$MNEMOS_URL/api/index/acme_code/$path" \
                 -H "Authorization: Bearer $MNEMOS_API_KEY"
             else
               jq -n --arg fp "$path" \
-                     --arg coll "acme_code_myproject" \
+                     --arg coll "acme_code" \
                      --rawfile content "$path" \
                      '{file_path:$fp, collection:$coll, content:$content}' \
               | curl -X POST "$MNEMOS_URL/api/index" \

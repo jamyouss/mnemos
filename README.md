@@ -145,7 +145,8 @@ What's distinctive about the bundle Mnemos ships:
 - **LLM-powered dedup** — Cosine ≥ 0.85 triggers merge or replace strategies
 - **Approval workflow** — `pending → approved` gate keeps the search
   surface clean
-- **Project scoping** — Tag memories per project for targeted recall
+- **Tag-based scoping** — Multi-tag payload (`tags_any` / `tags_all`) for
+  targeted recall across projects, technos, teams
 - **Temporal context** — Every memory carries its origin commit + timestamp
 
 </td>
@@ -195,13 +196,14 @@ make install
 source venv/bin/activate
 export MNEMOS_URL=http://localhost:8100
 
-# 3. Index your code into the single mnemos_code collection, tagged with a project
+# 3. Index your code into the single mnemos_code collection, tagged for scoping
 mnemos reindex --recreate --full --collection mnemos_code \
-                --path /data/codebase/myproject --project myproject
+                --path /data/codebase/myproject --tags myproject,go
 
-# 4. Search it (optionally scope to one project)
+# 4. Search it (optionally scope by tags — OR with --tags, AND with --tags-all)
 mnemos search "JWT validation middleware"
-mnemos search "JWT validation middleware" --project myproject
+mnemos search-code "JWT validation middleware" --tags myproject
+mnemos search-code "JWT validation middleware" --tags-all myproject,go
 
 # 5. Plug it into Claude Code
 # → add { "type": "url", "url": "http://localhost:8100/mcp" }
