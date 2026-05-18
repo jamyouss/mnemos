@@ -1,0 +1,60 @@
+name: GitHub Release
+
+# Promote every semver-style tag to a real GitHub Release whose body is the
+# annotated tag message (so the changelog you write in `git tag -a` becomes
+# the release notes), appended with GitHub's auto-generated commit list.
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write   # required to create releases
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (fetch tags + full history for changelog)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Extract the annotated tag message
+        id: tag
+        run: |
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          echo "name=$TAG_NAME" >> "$GITHUB_OUTPUT"
+          # Capture the multi-line message safely
+          {
+            echo 'body<<MNEMOS_EOF'
+            git tag -l --format='%(contents)' "$TAG_NAME"
+            echo 'MNEMOS_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Decide pre-release flag
+        id: prerelease
+        run: |
+          TAG_NAME="${{ steps.tag.outputs.name }}"
+          # Any tag containing a hyphen after the version (v1.2.3-rc1, v1.2.3-beta) is pre-release.
+          if [[ "$TAG_NAME" == *-* ]]; then
+            echo "value=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: ${{ steps.tag.outputs.name }}
+          body: ${{ steps.tag.outputs.body }}
+          generate_release_notes: true   # appends GitHub's "What's Changed" block
+          draft: false
+          prerelease: ${{ steps.prerelease.outputs.value }}
+          fail_on_unmatched_files: false
