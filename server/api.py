@@ -49,16 +49,18 @@ class SearchRequest(BaseModel):
     file_types: Optional[List[str]] = None
     path_filter: Optional[str] = None
     limit: int = 5
-    project: Optional[str] = None  # Restrict to a single project (filter on payload).
+    tags_any: Optional[List[str]] = None  # OR filter on payload `tags`.
+    tags_all: Optional[List[str]] = None  # AND filter on payload `tags`.
 
 
 class SearchCodeRequest(BaseModel):
     query: str
     language: Optional[str] = None
     symbol_type: Optional[str] = None
-    project: Optional[str] = None
     path_filter: Optional[str] = None
     limit: int = 5
+    tags_any: Optional[List[str]] = None
+    tags_all: Optional[List[str]] = None
 
 
 class SearchSkillsRequest(BaseModel):
@@ -188,7 +190,8 @@ async def search(body: SearchRequest, request: Request):
         file_types=body.file_types,
         path_filter=body.path_filter,
         limit=body.limit,
-        project=body.project,
+        tags_any=body.tags_any,
+        tags_all=body.tags_all,
     )
     return {"results": [r.model_dump() for r in results]}
 
@@ -199,9 +202,10 @@ async def search_code(body: SearchCodeRequest, request: Request):
         query=body.query,
         language=body.language,
         symbol_type=body.symbol_type,
-        project=body.project,
         path_filter=body.path_filter,
         limit=body.limit,
+        tags_any=body.tags_any,
+        tags_all=body.tags_all,
     )
     return {"results": [r.model_dump() for r in results]}
 
@@ -217,18 +221,20 @@ async def search_skills(body: SearchSkillsRequest, request: Request):
 
 class SearchMemoryRequest(BaseModel):
     query: str
-    project: Optional[str] = None
     memory_type: Optional[str] = None
     limit: int = 5
+    tags_any: Optional[List[str]] = None
+    tags_all: Optional[List[str]] = None
 
 
 @api_router.post("/api/search-memory")
 async def search_memory(body: SearchMemoryRequest, request: Request):
     results = request.app.state.search_service.search_memory(
         query=body.query,
-        project=body.project,
         memory_type=body.memory_type,
         limit=body.limit,
+        tags_any=body.tags_any,
+        tags_all=body.tags_all,
     )
     # Map memory results to a search-result-compatible shape so eval/harness can consume them.
     return {
@@ -239,7 +245,6 @@ async def search_memory(body: SearchMemoryRequest, request: Request):
                 "score": r.score,
                 "collection": "mnemos_memory",
                 "memory_type": r.memory_type,
-                "project": r.project,
                 "tags": r.tags,
             }
             for r in results
