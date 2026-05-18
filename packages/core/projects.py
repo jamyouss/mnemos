@@ -131,6 +131,11 @@ to every chunk whose file lives under that prefix. The first tag is the
 'primary' (mirrored into the legacy `project` payload field for display)."""
 
 
+# Tracks which config paths have already triggered the legacy-schema warning,
+# so each file logs it once per process instead of on every reload.
+_legacy_schema_warned: set[str] = set()
+
+
 def detect_tags(
     rel_path: str,
     overrides: PathTags | None = None,
@@ -234,11 +239,14 @@ def load_path_tags(config_path: Path | str) -> PathTags:
 
     # --- Path B: legacy schema, auto-converted ---
     if "projects" in raw and isinstance(raw["projects"], dict):
-        logger.warning(
-            "%s: detected legacy `projects:` schema. It still works but the "
-            "new `paths:` schema is recommended (see CONFIGURATION.md).",
-            path,
-        )
+        key = str(path)
+        if key not in _legacy_schema_warned:
+            _legacy_schema_warned.add(key)
+            logger.warning(
+                "%s: detected legacy `projects:` schema. It still works but the "
+                "new `paths:` schema is recommended (see CONFIGURATION.md).",
+                path,
+            )
         return _convert_legacy_schema(raw["projects"])
 
     return {}
@@ -262,9 +270,13 @@ def _convert_legacy_schema(projects_block: dict) -> PathTags:
     out: PathTags = {}
     for project_name, cfg in projects_block.items():
         if not isinstance(cfg, dict):
+            logger.warning("Skipping malformed legacy project entry %r", project_name)
             continue
         prefixes = cfg.get("path_prefixes") or []
         if not isinstance(prefixes, list):
+            logger.warning(
+                "Legacy project %r has non-list path_prefixes; skipping", project_name,
+            )
             continue
         for prefix in prefixes:
             if isinstance(prefix, str) and prefix.strip():
