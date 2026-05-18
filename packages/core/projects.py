@@ -183,3 +183,90 @@ def detect_tags(
         acc = f"{acc}/{segment}" if acc else segment
         cumulative.append(acc)
     return cumulative or [parts[0]]
+
+
+def load_path_tags(config_path: Path | str) -> PathTags:
+    """Load `config/projects.yaml` and return path → tags mapping.
+
+    Two supported schemas:
+
+    1. New (preferred) — keys are path-prefixes:
+
+        paths:
+          myproject/services/:
+            - my-service
+            - myproject
+
+    2. Legacy — keys are project names with `path_prefixes:` lists:
+
+        projects:
+          my-service:
+            path_prefixes: [myproject/services/]
+
+    Legacy configs are converted to the new shape with a single-element
+    tag list (`[project_name]`) and a one-time WARNING is logged. The
+    function returns an empty dict on error rather than raising — callers
+    fall back to the default first-segment behaviour in that case.
+    """
+    path = Path(config_path)
+    if not path.exists():
+        return {}
+
+    try:
+        import yaml
+    except ImportError:
+        logger.warning("PyYAML not installed; cannot load %s", path)
+        return {}
+
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            raw = yaml.safe_load(fh) or {}
+    except (OSError, yaml.YAMLError) as exc:
+        logger.warning("Failed to read %s: %s", path, exc)
+        return {}
+
+    if not isinstance(raw, dict):
+        return {}
+
+    # --- Path A: new schema ---
+    if "paths" in raw and isinstance(raw["paths"], dict):
+        return _parse_new_schema(raw["paths"], path)
+
+    # --- Path B: legacy schema, auto-converted ---
+    if "projects" in raw and isinstance(raw["projects"], dict):
+        logger.warning(
+            "%s: detected legacy `projects:` schema. It still works but the "
+            "new `paths:` schema is recommended (see CONFIGURATION.md).",
+            path,
+        )
+        return _convert_legacy_schema(raw["projects"])
+
+    return {}
+
+
+def _parse_new_schema(paths_block: dict, source: Path) -> PathTags:
+    out: PathTags = {}
+    for prefix, value in paths_block.items():
+        if not isinstance(value, list):
+            logger.warning(
+                "%s: entry for %r is not a list of tags; skipping.", source, prefix,
+            )
+            continue
+        cleaned = [t.strip() for t in value if isinstance(t, str) and t.strip()]
+        if cleaned:
+            out[str(prefix)] = cleaned
+    return out
+
+
+def _convert_legacy_schema(projects_block: dict) -> PathTags:
+    out: PathTags = {}
+    for project_name, cfg in projects_block.items():
+        if not isinstance(cfg, dict):
+            continue
+        prefixes = cfg.get("path_prefixes") or []
+        if not isinstance(prefixes, list):
+            continue
+        for prefix in prefixes:
+            if isinstance(prefix, str) and prefix.strip():
+                out[prefix] = [str(project_name)]
+    return out
