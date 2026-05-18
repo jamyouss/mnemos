@@ -115,7 +115,7 @@ test: install-dev ## Run all unit tests [test]
 test-unit: test ## Alias for `make test` [test]
 
 test-fast: install-dev ## Quick subset (no transformers / no qdrant) [test]
-	@$(BIN)/python -m pytest tests/test_projects.py tests/test_collections.py \
+	@$(BIN)/python -m pytest tests/test_projects_tags.py tests/test_collections.py \
 	  tests/test_sparse.py tests/test_should_skip.py -q
 
 lint: install-dev ## Compile-check every .py file (catches obvious syntax breakage) [test]
