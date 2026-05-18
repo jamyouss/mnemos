@@ -2,7 +2,6 @@ name: Build & push Docker images
 
 on:
   push:
-    branches: [main]
     tags: ['v*.*.*']
   workflow_dispatch:
 
@@ -129,9 +128,9 @@ jobs:
         with:
           images: ${{ matrix.image.repo }}
           tags: |
-            # push to main → `edge` tag
-            type=ref,event=branch,enable=${{ github.ref == 'refs/heads/main' }},priority=900,prefix=,suffix=,value=edge
-            # semver tags from git tags v1.2.3 → 1.2.3, 1.2, latest
+            # Manual workflow_dispatch from main → `edge` tag (no semver to derive).
+            type=ref,event=branch,enable=${{ github.event_name == 'workflow_dispatch' }},priority=900,prefix=,suffix=,value=edge
+            # Semver tags from git tags v1.2.3 → 1.2.3, 1.2, latest
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}},enable=${{ !startsWith(github.ref, 'refs/tags/v0.') }}
@@ -155,12 +154,11 @@ jobs:
 
   # -----------------------------------------------------------------------
   # Stage 3: keep Docker Hub overview + short description in sync with the
-  # README files in docs/. Runs only on main pushes (not on PRs, not on
-  # workflow_dispatch from feature branches). Failures here don't block
-  # the build outputs above.
+  # README files in docs/. Runs on each release tag (and on manual dispatch).
+  # Failures here don't block the build outputs above.
   # -----------------------------------------------------------------------
   docs-sync:
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     needs: merge
     runs-on: ubuntu-latest
     strategy:
