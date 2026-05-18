@@ -1,9 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
-import pytest
-
 from core.projects import detect_tags
 
 

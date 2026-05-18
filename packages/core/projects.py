@@ -143,7 +143,8 @@ def detect_tags(
            (``foo/bar/baz`` → ``["foo", "foo/bar", "foo/bar/baz"]``)
            so users with zero configuration still get a usable hierarchy.
 
-    Returns an empty list for empty / absolute / dot-only paths.
+    Returns an empty list for empty paths, absolute paths, or paths
+    whose first segment is ``..`` (parent traversal blocked).
     """
     if not rel_path or rel_path.startswith("/"):
         return []
@@ -164,11 +165,13 @@ def detect_tags(
 
     # 2. Default: cumulative segment hierarchy.
     parts = Path(rel_path).parts
-    if not parts or parts[0] in (".", ".."):
-        # './file.go' becomes ('file.go',); '..' is skipped.
-        if parts and parts[0] == "..":
-            return []
-        return [parts[0]] if parts else []
+    # Block parent traversal ('../foo' has parts == ('..', 'foo')).
+    # pathlib normalises away leading './' so a bare '.' is the only way
+    # the '.' guard ever fires (Path('.').parts == ('.',)).
+    if not parts or parts[0] == "..":
+        return []
+    if parts[0] == ".":
+        return [parts[0]]
 
     cumulative: list[str] = []
     acc = ""
