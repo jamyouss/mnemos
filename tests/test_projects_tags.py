@@ -31,6 +31,8 @@ def test_detect_tags_default_skips_dot_segments():
     # './file.go' normalises to 'file.go' — single bare filename, no parent.
     assert detect_tags("./file.go") == ["file.go"]
     assert detect_tags("../file.go") == []
+    # Bare '.' (os.curdir) must not pollute payloads with a meaningless tag.
+    assert detect_tags(".") == []
 
 
 # ---------------------------------------------------------------------------

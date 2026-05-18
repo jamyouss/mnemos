@@ -368,52 +368,12 @@ async def _dispatch_tool(
     raise ValueError(f"Unknown tool: {name}")
 
 
-def _store_memory(
-    qdrant_client: QdrantClient,
-    indexer: Indexer,
-    content: str,
-    project: str | None,
-    topic: str | None,
-    memory_type: str,
-    tags: list[str],
-) -> str:
-    import time
-    import uuid
-    from datetime import datetime, timezone
-    from qdrant_client.models import PointStruct
-
-    from core.collections import DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME
-    from core.sparse import bm25_sparse
-
-    entry_id = str(uuid.uuid4())
-    point_id = str(uuid.uuid5(uuid.NAMESPACE_URL, entry_id))
-    dense = indexer._embeddings.embed(content)
-    sparse = bm25_sparse(content)
-    now = datetime.now(timezone.utc).isoformat()
-    payload = {
-        "id": entry_id,
-        "content": content,
-        "project": project,
-        "topic": topic,
-        "memory_type": memory_type,
-        "tags": tags,
-        "status": "pending",
-        "created_at": now,
-        "file_path": f"memory/{entry_id}",
-        "chunk_type": "memory",
-        "last_indexed_at": now,
-        "file_mtime": time.time(),
-    }
-    point = PointStruct(
-        id=point_id,
-        vector={DENSE_VECTOR_NAME: dense, SPARSE_VECTOR_NAME: sparse},
-        payload=payload,
-    )
-    qdrant_client.upsert(collection_name="mnemos_memory", points=[point])
-    return entry_id
-
-
 def _list_memory(
+    # NOTE: memory write/list still uses the legacy `project` payload field.
+    # The memory pipeline migration to `tags` is tracked as a follow-up — see
+    # ROADMAP.md. `mnemos_memory_list` filters here, `mnemos_search_memory`
+    # filters by tags via SearchService — the inconsistency is intentional
+    # until the memory write side is migrated.
     qdrant_client: QdrantClient,
     project: str | None,
     status: str | None,

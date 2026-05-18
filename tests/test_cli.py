@@ -90,6 +90,29 @@ def test_search_with_limit():
     assert call_kwargs is not None
 
 
+def test_search_with_tags():
+    runner = CliRunner()
+    mock_resp = _mock_response({"results": []})
+    with patch("httpx.post", return_value=mock_resp) as mock_post:
+        result = runner.invoke(cli, ["search", "--tags", "acme,moby", "query"])
+    assert result.exit_code == 0
+    body = mock_post.call_args.kwargs["json"]
+    assert body["tags_any"] == ["acme", "moby"]
+    assert "tags_all" not in body
+    assert "project" not in body
+
+
+def test_search_with_tags_all():
+    runner = CliRunner()
+    mock_resp = _mock_response({"results": []})
+    with patch("httpx.post", return_value=mock_resp) as mock_post:
+        result = runner.invoke(cli, ["search", "--tags-all", "acme,vue3", "query"])
+    assert result.exit_code == 0
+    body = mock_post.call_args.kwargs["json"]
+    assert body["tags_all"] == ["acme", "vue3"]
+    assert "tags_any" not in body
+
+
 # ---------------------------------------------------------------------------
 # rag search-code
 # ---------------------------------------------------------------------------

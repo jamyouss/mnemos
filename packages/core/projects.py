@@ -62,13 +62,11 @@ def detect_tags(
 
     # 2. Default: cumulative segment hierarchy.
     parts = Path(rel_path).parts
-    # Block parent traversal ('../foo' has parts == ('..', 'foo')).
-    # pathlib normalises away leading './' so a bare '.' is the only way
-    # the '.' guard ever fires (Path('.').parts == ('.',)).
-    if not parts or parts[0] == "..":
+    # Block parent traversal ('../foo' has parts == ('..', 'foo')) and the
+    # bare-'.' case (Path('.').parts == ('.',)). pathlib normalises away
+    # leading './' so neither '.' nor '..' appears mid-path here.
+    if not parts or parts[0] in ("..", "."):
         return []
-    if parts[0] == ".":
-        return [parts[0]]
 
     cumulative: list[str] = []
     acc = ""

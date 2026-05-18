@@ -166,7 +166,26 @@ def status() -> None:
 @click.option("--collection", multiple=True, help="Restrict to specific collections.")
 @click.option("--file-type", multiple=True, help="Restrict to specific file types.")
 @click.option("--path-filter", default=None, help="Filter by file path substring.")
-def search(query: str, limit: int, collection: tuple, file_type: tuple, path_filter: str | None) -> None:
+@click.option(
+    "--tags",
+    default=None,
+    help="Comma-separated tags, OR semantics (sent as tags_any). Example: --tags acme,moby",
+)
+@click.option(
+    "--tags-all",
+    "tags_all",
+    default=None,
+    help="Comma-separated tags, AND semantics (sent as tags_all). Example: --tags-all acme,vue3",
+)
+def search(
+    query: str,
+    limit: int,
+    collection: tuple,
+    file_type: tuple,
+    path_filter: str | None,
+    tags: str | None,
+    tags_all: str | None,
+) -> None:
     """Search across all indexed documents."""
     url = f"{_base_url()}/api/search"
     payload: dict = {"query": query, "limit": limit}
@@ -176,6 +195,10 @@ def search(query: str, limit: int, collection: tuple, file_type: tuple, path_fil
         payload["file_types"] = list(file_type)
     if path_filter:
         payload["path_filter"] = path_filter
+    if tags:
+        payload["tags_any"] = _parse_tags(tags)
+    if tags_all:
+        payload["tags_all"] = _parse_tags(tags_all)
 
     try:
         resp = httpx.post(url, json=payload, timeout=30)
