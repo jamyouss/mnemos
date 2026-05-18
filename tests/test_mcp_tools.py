@@ -93,6 +93,8 @@ def test_search_tool_exposes_tags_filters():
     assert props["tags_any"]["items"]["type"] == "string"
     assert props["tags_all"]["type"] == "array"
     assert props["tags_all"]["items"]["type"] == "string"
+    # Regression guard: project must never be added to this schema.
+    assert "project" not in props
 
 
 def test_search_code_tool_exposes_tags_and_drops_project():
