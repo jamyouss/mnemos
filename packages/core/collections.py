@@ -12,6 +12,11 @@ SPARSE_VECTOR_NAME = "sparse"
 # logic that fills it at index time.
 PROJECT_PAYLOAD_FIELD = "project"
 
+# Multi-value scoping field. Each chunk carries a list of tags (project name +
+# any parent / cross-cutting labels declared in config/projects.yaml). Filtered
+# at query time with MatchAny (OR) or AND-combined conditions.
+TAGS_PAYLOAD_FIELD = "tags"
+
 
 @dataclass
 class CollectionConfig:
