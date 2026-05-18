@@ -7,14 +7,9 @@ from dataclasses import dataclass
 DENSE_VECTOR_NAME = "dense"
 SPARSE_VECTOR_NAME = "sparse"
 
-# Special payload field used to scope queries by project on `mnemos_code`
-# (and on `mnemos_memory`, via the same field). See core/projects.py for the
-# logic that fills it at index time.
-PROJECT_PAYLOAD_FIELD = "project"
-
-# Multi-value scoping field. Each chunk carries a list of tags (project name +
-# any parent / cross-cutting labels declared in config/projects.yaml). Filtered
-# at query time with MatchAny (OR) or AND-combined conditions.
+# Multi-value scoping field. Each chunk carries a list of tags (primary
+# project name + any cross-cutting labels declared in config/projects.yaml).
+# Filtered at query time with MatchAny (OR) or AND-combined conditions.
 TAGS_PAYLOAD_FIELD = "tags"
 
 
@@ -27,7 +22,7 @@ class CollectionConfig:
 
 
 # Four collections — fixed, immutable. New projects are NOT new collections;
-# they are tagged via the `project` payload field on `mnemos_code` (or
+# they are tagged via the `tags` payload field on `mnemos_code` (or
 # `mnemos_memory`) and filtered at query time. See docs/RETRIEVAL_PIPELINE.md.
 COLLECTIONS = [
     CollectionConfig(
@@ -43,7 +38,7 @@ COLLECTIONS = [
     CollectionConfig(
         name="mnemos_code",
         path_prefixes=None,
-        description="Source code across all projects (scope with project=… filter)",
+        description="Source code across all projects (scope with tags filter)",
     ),
     CollectionConfig(
         name="mnemos_memory",
@@ -59,7 +54,7 @@ def get_collection_for_path(file_path: str) -> str | None:
     - `skills/...` → mnemos_skills
     - `docs/...`   → mnemos_docs
     - everything else under the codebase mount → mnemos_code
-      (project tagging happens at index time, not collection routing)
+      (tag assignment happens at index time, not collection routing)
     - returns None for empty / unmappable paths
     """
     if not file_path:

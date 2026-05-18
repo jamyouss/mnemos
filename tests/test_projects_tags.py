@@ -109,9 +109,9 @@ paths:
     }
 
 
-def test_load_path_tags_legacy_schema_auto_converts(tmp_path: Path, caplog):
-    """The legacy `projects:` schema must keep working — we convert it
-    in-memory to the new path → [project_name] shape and emit a warning."""
+def test_load_path_tags_ignores_legacy_projects_block(tmp_path: Path):
+    """A YAML using the old `projects:` block (without `paths:`) is treated
+    as empty — the legacy schema is no longer supported."""
     p = tmp_path / "projects.yaml"
     p.write_text(
         """
@@ -119,21 +119,10 @@ projects:
   myproject:
     path_prefixes:
       - myproject/
-  monorepo-shared:
-    path_prefixes:
-      - apps/billing/shared/
-      - libs/shared/
 """,
         encoding="utf-8",
     )
-    with caplog.at_level("WARNING"):
-        out = load_path_tags(p)
-    assert out == {
-        "myproject/":            ["myproject"],
-        "apps/billing/shared/":  ["monorepo-shared"],
-        "libs/shared/":          ["monorepo-shared"],
-    }
-    assert any("legacy" in rec.message.lower() for rec in caplog.records)
+    assert load_path_tags(p) == {}
 
 
 def test_load_path_tags_empty_file_returns_empty(tmp_path: Path):
@@ -160,26 +149,6 @@ paths:
     assert out == {"good/path/": ["tag-a", "tag-b"]}
     # The bad entry must surface as a warning, not be silently dropped.
     assert any("bad-not-a-list/" in rec.message for rec in caplog.records)
-
-
-def test_load_path_tags_legacy_warning_fires_only_once_per_path(tmp_path: Path, caplog):
-    """The legacy-schema warning must dedupe per config path, so reload-heavy
-    setups (server restart, watcher polling) don't flood logs."""
-    p = tmp_path / "projects.yaml"
-    p.write_text(
-        "projects:\n  myproject:\n    path_prefixes: [myproject/]\n",
-        encoding="utf-8",
-    )
-    # Reset the dedup set for hermeticity — other tests may have populated it.
-    from core.projects import _legacy_schema_warned
-    _legacy_schema_warned.discard(str(p))
-
-    with caplog.at_level("WARNING"):
-        load_path_tags(p)
-        load_path_tags(p)
-        load_path_tags(p)
-    legacy_warnings = [r for r in caplog.records if "legacy" in r.message.lower()]
-    assert len(legacy_warnings) == 1
 
 
 def test_load_path_tags_strips_blank_tags(tmp_path: Path):

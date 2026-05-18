@@ -59,11 +59,11 @@ def create_app() -> FastAPI:
             enabled=settings.mnemos_contextual_enabled,
             workers=settings.mnemos_contextual_workers,
         )
-        # Optional YAML overrides for project detection. Missing file → empty dict,
-        # which means "first path segment = project name" everywhere.
-        from core.projects import load_project_overrides
+        # Optional YAML override for path → tags mapping. Missing file → empty dict,
+        # which means "cumulative path segments" everywhere by default.
+        from core.projects import load_path_tags
         from pathlib import Path as _Path
-        app.state.project_overrides = load_project_overrides(
+        app.state.path_tags = load_path_tags(
             _Path(settings.mnemos_projects_config_path)
         )
 
@@ -71,7 +71,7 @@ def create_app() -> FastAPI:
             qdrant_client=app.state.qdrant,
             embedding_service=app.state.embeddings,
             contextual_enricher=app.state.contextual,
-            project_overrides=app.state.project_overrides,
+            path_tags=app.state.path_tags,
             codebase_root=settings.codebase_path,
         )
 

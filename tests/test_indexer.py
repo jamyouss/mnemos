@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -49,36 +49,69 @@ def test_select_chunker_fallback(indexer):
     assert isinstance(chunker, FallbackChunker)
 
 
-def test_index_file_writes_project_payload(indexer, mock_qdrant, sample_go_code):
-    """For mnemos_code, the project tag should be auto-derived from the path."""
+def test_index_file_writes_tags_from_path(mock_qdrant, mock_embeddings, sample_go_code):
+    """For mnemos_code, the tag list is derived from the path by default."""
+    indexer = Indexer(
+        qdrant_client=mock_qdrant,
+        embedding_service=mock_embeddings,
+        codebase_root="/data/codebase",
+    )
     indexer.index_file(
         content=sample_go_code,
         file_path="/data/codebase/myproject/services/core/app.go",
         collection="mnemos_code",
     )
     mock_qdrant.upsert.assert_called_once()
-    call_args = mock_qdrant.upsert.call_args
-    assert call_args.kwargs["collection_name"] == "mnemos_code"
-    points = call_args.kwargs["points"]
+    points = mock_qdrant.upsert.call_args.kwargs["points"]
     assert len(points) > 0
-    # Every point gets the project tag
+    # Cumulative directory tags (filename excluded).
+    expected = ["myproject", "myproject/services", "myproject/services/core"]
     for p in points:
-        assert p.payload.get("project") == "myproject"
+        assert p.payload.get("tags") == expected
 
 
-def test_index_file_respects_explicit_project_override(indexer, mock_qdrant, sample_go_code):
+def test_index_file_uses_path_tags_override(mock_qdrant, mock_embeddings, sample_go_code):
+    """When config/projects.yaml supplies tags for a prefix, they win over
+    the default segment-based detection."""
+    indexer = Indexer(
+        qdrant_client=mock_qdrant,
+        embedding_service=mock_embeddings,
+        path_tags={
+            "myproject/services/": ["my-service", "myproject", "go"],
+        },
+        codebase_root="/data/codebase",
+    )
     indexer.index_file(
         content=sample_go_code,
         file_path="/data/codebase/myproject/services/core/app.go",
         collection="mnemos_code",
-        project="custom-name",
     )
     points = mock_qdrant.upsert.call_args.kwargs["points"]
     for p in points:
-        assert p.payload.get("project") == "custom-name"
+        assert p.payload.get("tags") == ["my-service", "myproject", "go"]
 
 
-def test_index_file_skips_project_for_skills_and_docs(indexer, mock_qdrant, sample_go_code):
+def test_index_file_explicit_tags_override_wins(mock_qdrant, mock_embeddings, sample_go_code):
+    """An explicit tags=... on index_file() bypasses both the YAML override
+    and the default segment-based detection."""
+    indexer = Indexer(
+        qdrant_client=mock_qdrant,
+        embedding_service=mock_embeddings,
+        path_tags={"myproject/": ["yaml-tag"]},
+        codebase_root="/data/codebase",
+    )
+    indexer.index_file(
+        content=sample_go_code,
+        file_path="/data/codebase/myproject/services/core/app.go",
+        collection="mnemos_code",
+        tags=["override-a", "override-b"],
+    )
+    points = mock_qdrant.upsert.call_args.kwargs["points"]
+    for p in points:
+        assert p.payload.get("tags") == ["override-a", "override-b"]
+
+
+def test_index_file_skips_tags_for_skills_and_docs(indexer, mock_qdrant, sample_go_code):
     indexer.index_file(
         content=sample_go_code,
         file_path="skills/some-skill/instructions.md",
@@ -86,7 +119,7 @@ def test_index_file_skips_project_for_skills_and_docs(indexer, mock_qdrant, samp
     )
     points = mock_qdrant.upsert.call_args.kwargs["points"]
     for p in points:
-        assert "project" not in p.payload
+        assert "tags" not in p.payload
 
 
 def test_delete_file(indexer, mock_qdrant):
