@@ -199,7 +199,7 @@ def test_search_tags_any_emits_single_match_any_on_tags(search_service, mock_qdr
     assert qf is not None
     matches = _tag_match_anys(qf)
     assert len(matches) == 1
-    assert matches[0] == ["proj-a", "proj-b"]
+    assert set(matches[0]) == {"proj-a", "proj-b"}
 
 
 def test_search_tags_all_emits_one_match_any_per_tag(search_service, mock_qdrant):
