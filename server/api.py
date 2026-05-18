@@ -18,6 +18,7 @@ from qdrant_client.models import (
 )
 
 from core.collections import COLLECTIONS
+from core.path_filter import should_skip_path
 from server.config import settings
 
 api_router = APIRouter()
@@ -340,73 +341,13 @@ async def eval_sample(body: EvalSampleRequest, request: Request):
 # ---------------------------------------------------------------------------
 
 
-_REINDEX_IGNORE_DIRS = {
-    # Dependencies & package managers
-    "node_modules", ".pnpm-store", "vendor",
-    # Version control
-    ".git",
-    # Build outputs (web)
-    "dist", "build", ".nuxt", ".output", "_nuxt", ".next", ".turbo",
-    # Mobile native dependencies
-    "Pods",
-    # Infra / IaC state
-    ".terraform", "terraform.tfstate.d",
-    # Local backup / data snapshots
-    "backup", "backups",
-    # Caches & tooling
-    "__pycache__", ".nx", ".cache", ".pytest_cache", ".storybook",
-    # IDE & editors
-    ".idea", ".vscode",
-    # Virtualenvs
-    ".venv", "venv",
-    # Test artifacts
-    "test-results", "coverage",
-}
-
-# Path substrings (case-sensitive) — used when a directory name alone is too
-# generic to ban globally (e.g. "android", "public", "data") but its full path
-# identifies generated content. Crucially, "/data/codebase/" must NOT match
-# anything here — the container mount is rooted there.
-_REINDEX_IGNORE_PATH_SUBSTRINGS: tuple[str, ...] = (
-    "/webapp/android/",            # Capacitor android build artefacts
-    "/webapp/ios/",                # Capacitor ios build artefacts
-    "/app/src/main/assets/",       # Android packaged web assets
-    "/App/App/public/",            # iOS packaged web assets
-)
-
-_REINDEX_IGNORE_EXTS = {
-    ".min.js", ".map", ".lock",
-    # Logs & generated data
-    ".log",
-    # Binary & compiled
-    ".pyc", ".o", ".a",
-    # Images & fonts
-    ".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg",
-    ".woff", ".woff2", ".ttf", ".eot",
-    # Archives & binaries
-    ".pdf", ".zip", ".tar", ".gz", ".exe", ".bin", ".so", ".dylib",
-}
-
-_REINDEX_IGNORE_FILENAMES = {
-    "CHANGELOG.md",
-    "pnpm-lock.yaml",
-    "package-lock.json",
-    "yarn.lock",
-    "poetry.lock",
-    ".last-run.json",
-}
-
-
 def _should_skip(fp) -> bool:
-    parts = set(fp.parts)
-    if parts & _REINDEX_IGNORE_DIRS:
-        return True
-    if fp.suffix in _REINDEX_IGNORE_EXTS:
-        return True
-    if fp.name in _REINDEX_IGNORE_FILENAMES:
-        return True
-    s = str(fp)
-    return any(sub in s for sub in _REINDEX_IGNORE_PATH_SUBSTRINGS)
+    """Delegate to the unified policy in :mod:`core.path_filter`.
+
+    Kept as a thin wrapper so the existing call sites (``_run_reindex`` walker
+    and ``test_should_skip.py``) need no further change.
+    """
+    return should_skip_path(fp)
 
 
 def _index_one_file(indexer, collection: str, fp, tags: list[str] | None = None) -> int:

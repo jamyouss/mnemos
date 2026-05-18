@@ -122,6 +122,29 @@ def test_index_file_skips_tags_for_skills_and_docs(indexer, mock_qdrant, sample_
         assert "tags" not in p.payload
 
 
+def test_index_file_skips_filtered_path(indexer, mock_qdrant, mock_embeddings, sample_go_code):
+    """A vendored ``.cjs`` bundle must never reach the embedder, even if a
+    caller bypassed the upstream watcher / bulk-reindex filter."""
+    result = indexer.index_file(
+        content=sample_go_code,
+        file_path="/data/codebase/x/.yarn/releases/yarn-4.9.4.cjs",
+        collection="mnemos_code",
+    )
+    assert result == 0
+    mock_embeddings.embed_batch.assert_not_called()
+    mock_qdrant.upsert.assert_not_called()
+
+
+def test_index_file_skips_report_html(indexer, mock_qdrant, mock_embeddings, sample_go_code):
+    result = indexer.index_file(
+        content=sample_go_code,
+        file_path="/data/codebase/x/others/report-tnr-gherkin-analysis.html",
+        collection="mnemos_code",
+    )
+    assert result == 0
+    mock_qdrant.upsert.assert_not_called()
+
+
 def test_delete_file(indexer, mock_qdrant):
     indexer.delete_file(
         file_path="myproject/services/core/old.go",

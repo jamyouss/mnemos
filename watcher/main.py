@@ -7,74 +7,23 @@ import logging
 
 import httpx
 from core.collections import COLLECTIONS
+from core.path_filter import should_skip_path
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler, FileSystemEvent
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("rag-watcher")
 
-IGNORE_PATTERNS = [
-    # Dependencies & package managers
-    "node_modules/",
-    ".pnpm-store/",
-    "vendor/",
-    # Version control
-    ".git/",
-    # Build outputs
-    "dist/",
-    "build/",
-    ".nuxt/",
-    ".output/",
-    # Caches & tooling
-    "__pycache__/",
-    ".nx/",
-    ".cache/",
-    ".pytest_cache/",
-    ".storybook/",
-    # IDE & editors
-    ".idea/",
-    ".vscode/",
-    # Virtualenvs
-    ".venv/",
-    "venv/",
-    # Test artifacts
-    "test-results/",
-    "coverage/",
-]
-
-IGNORE_EXTENSIONS = [
-    ".min.js", ".map", ".lock",
-    # Logs & generated data
-    ".log",
-    # Binary & compiled
-    ".pyc", ".o", ".a",
-    # Images & fonts
-    ".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg",
-    ".woff", ".woff2", ".ttf", ".eot",
-    # Archives & binaries
-    ".pdf", ".zip", ".tar", ".gz", ".exe", ".bin", ".so", ".dylib",
-]
-
-IGNORE_FILENAMES = [
-    "CHANGELOG.md",
-    "pnpm-lock.yaml",
-    "package-lock.json",
-    "yarn.lock",
-    "poetry.lock",
-    ".last-run.json",
-]
-
 RAG_SERVER_URL = os.getenv("MNEMOS_SERVER_URL", "http://rag-server:8100")
 DEBOUNCE_MS = int(os.getenv("WATCHER_DEBOUNCE_MS", "2000"))
 
 
 def should_ignore(path: str) -> bool:
-    basename = path.rsplit("/", 1)[-1] if "/" in path else path
-    return (
-        any(pattern in path for pattern in IGNORE_PATTERNS)
-        or any(path.endswith(ext) for ext in IGNORE_EXTENSIONS)
-        or basename in IGNORE_FILENAMES
-    )
+    """Thin alias kept for backwards compatibility with existing tests.
+
+    The actual policy lives in :func:`core.path_filter.should_skip_path`.
+    """
+    return should_skip_path(path)
 
 
 class PathRouter:
@@ -138,7 +87,7 @@ class DebouncedHandler(FileSystemEventHandler):
                 self._queue(event.dest_path, "created")
 
     def _queue(self, abs_path: str, event_type: str) -> None:
-        if should_ignore(abs_path):
+        if should_skip_path(abs_path):
             return
         route = self._router.route(abs_path)
         if route is None:

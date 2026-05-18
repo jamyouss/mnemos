@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 from datetime import datetime, timezone
@@ -26,8 +27,11 @@ from core.chunkers.vue_chunker import VueChunker
 from core.collections import DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME, TAGS_PAYLOAD_FIELD
 from core.contextual import ContextualEnricher
 from core.embeddings import EmbeddingService
+from core.path_filter import should_skip_path
 from core.projects import PathTags, detect_tags
 from core.sparse import bm25_sparse
+
+_logger = logging.getLogger(__name__)
 
 # Collections whose payload is filtered by `tags` at query time. We
 # create the keyword payload index on those at startup so the filter scales.
@@ -128,6 +132,14 @@ class Indexer:
         file_mtime: float | None = None,
         tags: list[str] | None = None,
     ) -> int:
+        # Defense-in-depth: even if a caller (push API, hook) forgot to
+        # pre-filter, vendored bundles / build outputs never reach the
+        # embedder. Watcher and bulk reindex still pre-filter to avoid
+        # the round-trip cost.
+        if should_skip_path(file_path):
+            _logger.debug("path_filter: skipping %s", file_path)
+            return 0
+
         self.delete_file(file_path, collection)
 
         chunker = self._select_chunker(file_path)

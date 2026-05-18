@@ -85,10 +85,11 @@ For the active improvement plan, see [ROADMAP.md](ROADMAP.md).
 | `chunkers/vue_chunker.py` | SFC sections: `<script>`, `<template>`, `<style>` |
 | `chunkers/markdown_chunker.py` | Header-based splits |
 | `chunkers/fallback_chunker.py` | Fixed-size sliding window |
+| `path_filter.py` | Single source of truth for "do not index" rules (vendored bundles, build outputs, generated reports). Enforced by the indexer; also consumed upstream by the watcher and the bulk reindex walker. |
 | `embeddings.py` | sentence-transformers (`all-MiniLM-L6-v2`, 384d, normalised) |
 | `sparse.py` | BM25 encoder — camelCase/snake split, stable 31-bit hash |
 | `contextual.py` | LLM-generated preamble per chunk (Anthropic-style) |
-| `indexer.py` | Orchestrator: chunk → contextualise → embed → upsert |
+| `indexer.py` | Orchestrator: path_filter check → chunk → contextualise → embed → upsert |
 | `collections.py` | Collection registry; named-vector schema constants |
 
 ### Retrieval (`server/search.py` + `packages/core/`)
@@ -211,6 +212,31 @@ Memory entries add: `id`, `memory_type`, `status`, `topic`, `created_at`.
 The mapping `path → tags` comes from `config/projects.yaml`, with a default
 cumulative-segment fallback when the file is absent. See
 [`CONFIGURATION.md`](CONFIGURATION.md#tags--scoping-chunks-across-projects).
+
+## Ignored paths
+
+Three ingestion paths converge on `Indexer.index_file`: the filesystem
+watcher, the bulk reindex walker, and the push API. To avoid policy drift,
+every caller delegates to `core.path_filter.should_skip_path(path)`. The
+indexer itself short-circuits inside `index_file` as a defense-in-depth
+check, so a misbehaving push-API client can never bypass the rules.
+
+What's filtered:
+
+| Category | Examples |
+|---|---|
+| Dependencies / vendored | `node_modules/`, `vendor/`, `.yarn/` (Yarn PnP cache), `Pods/`, `.pnpm-store/` |
+| Build outputs | `dist/`, `build/`, `.nuxt/`, `_nuxt/`, `.next/`, `.output/`, `.turbo/`, `.svelte-kit/`, `.parcel-cache/` |
+| Vendored CommonJS bundles | any `.cjs` (covers `.pnp.cjs`, `yarn-X.Y.Z.cjs`) |
+| Minified / chunked JS | `*.min.js`, `*.bundle.js`, `*.chunk.js`, `*.map` |
+| Mobile native build artefacts | `webapp/android/…`, `webapp/ios/…`, `App/App/public/…` |
+| Generated reports | `report-tnr-*`, `*.lighthouse-report.html`, `lighthouse-report-*` |
+| Lockfiles / changelogs | `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `poetry.lock`, `CHANGELOG.md` |
+| Binaries & assets | images, fonts, archives, `.so`/`.dylib`/`.exe`, `.pyc`, `.log` |
+
+To add a pattern, edit `packages/core/path_filter.py` and add a test in
+`tests/test_path_filter.py`. The rule applies to every ingestion path
+without further change.
 
 ## Configuration model
 

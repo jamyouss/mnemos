@@ -159,6 +159,9 @@ What's distinctive about the bundle Mnemos ships:
 - **Tree-sitter Go** — Functions, methods, types as discrete chunks
 - **Vue SFC** — `<script>`, `<template>`, `<style>` sections separated
 - **Markdown** — Heading-based splits preserve document structure
+- **Unified ignore policy** — Vendored bundles (`.yarn/`, `.cjs`), build
+  outputs (`dist/`, `.nuxt/`), generated reports — single source of truth
+  enforced at every ingestion path ([see ARCHITECTURE](docs/ARCHITECTURE.md#ignored-paths))
 - **Watcher** — Incremental indexing on file change (`watchdog`, debounced)
 - **Push API** — CI/CD-friendly REST endpoint for headless ingestion
 - **Contextual chunking** — Optional Anthropic-style preambles via LLM

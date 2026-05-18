@@ -46,13 +46,13 @@ MEMORY (git hook / API):
 
 ```
 mnemos/
-  packages/core/      # Lib partagée (chunkers, embeddings, indexer, dedup, memory_extractor)
+  packages/core/      # Lib partagée (chunkers, embeddings, indexer, path_filter, dedup, memory_extractor)
   server/                 # FastAPI + MCP server (port 8100)
   watcher/                # File watcher (watchdog)
   cli/                    # Click CLI client
   config/                 # Tenant configuration
   scripts/hooks/          # Global git hooks (post-commit, pre-push)
-  tests/                  # pytest suite (16 fichiers)
+  tests/                  # pytest suite
   eval/                   # Eval harness (Phase 1.2, en cours)
   docs/                   # ROADMAP.md, EVAL.md, ARCHITECTURE.md
   docker-compose.yml      # Local dev stack
@@ -181,6 +181,22 @@ Conventions tests :
 1. Toujours ajouter un test dans `tests/test_chunkers/`
 2. Préserver les métadonnées `chunk_type`, `symbol_name`, `language`, `chunk_index`
 3. Tester avec un fichier réel du codebase indexé
+
+### Modifications du filtre d'indexation (`core.path_filter`)
+1. **Single source of truth** : ajouter le pattern dans
+   `packages/core/path_filter.py` (`IGNORE_DIRS`, `IGNORE_EXTS`,
+   `IGNORE_FILENAMES`, `IGNORE_PATH_SUBSTRINGS`, `IGNORE_BASENAME_SUBSTRINGS`).
+   Ne jamais re-déclarer une liste locale dans `watcher/`, `server/` ou
+   ailleurs — les call sites importent `should_skip_path`.
+2. Ajouter un test dans `tests/test_path_filter.py` :
+   - un cas positif (le pattern skip)
+   - un cas négatif non-régression (un path légitime proche n'est PAS skippé,
+     ex. `my_node_modules_helper/` ne doit pas matcher `node_modules`)
+3. Le filtre est appliqué à 3 endroits, **automatiquement** : watcher (early),
+   bulk reindex walker (`_should_skip`), et `Indexer.index_file`
+   (defense-in-depth pour la push API). Aucun wiring supplémentaire à faire.
+4. Pour qu'un nouveau pattern s'applique aux chunks déjà indexés, lancer un
+   `./scripts/reindex-all.py --recreate`.
 
 ### Modifications memory pipeline
 1. Toute extraction passe par `MemoryExtractor` (LLM provider injecté)
