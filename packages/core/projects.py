@@ -119,3 +119,64 @@ def load_project_overrides(config_path: Path | str) -> ProjectOverrides:
         if cleaned:
             out[str(name)] = cleaned
     return out
+
+
+# ---------------------------------------------------------------------------
+# Tags model (new) — replaces the single-value `project` over time.
+# ---------------------------------------------------------------------------
+
+PathTags = dict[str, list[str]]
+"""Mapping path-prefix (relative to codebase root) → list of tags to apply
+to every chunk whose file lives under that prefix. The first tag is the
+'primary' (mirrored into the legacy `project` payload field for display)."""
+
+
+def detect_tags(
+    rel_path: str,
+    overrides: PathTags | None = None,
+) -> list[str]:
+    """Resolve the list of tags for a path relative to the codebase mount.
+
+    Resolution order:
+        1. Explicit ``overrides`` (longest matching prefix wins).
+        2. Default convention: cumulative path-segments
+           (``foo/bar/baz`` → ``["foo", "foo/bar", "foo/bar/baz"]``)
+           so users with zero configuration still get a usable hierarchy.
+
+    Returns an empty list for empty / absolute / dot-only paths.
+    """
+    if not rel_path or rel_path.startswith("/"):
+        return []
+
+    # 1. Explicit overrides — longest matching prefix wins.
+    if overrides:
+        best_tags: list[str] | None = None
+        best_len = 0
+        for prefix, tags in overrides.items():
+            if not prefix:
+                continue
+            normalised = prefix if prefix.endswith("/") else prefix + "/"
+            if rel_path.startswith(normalised) and len(normalised) > best_len:
+                best_tags = list(tags)
+                best_len = len(normalised)
+        if best_tags:
+            return best_tags
+
+    # 2. Default: cumulative segment hierarchy.
+    parts = Path(rel_path).parts
+    if not parts or parts[0] in (".", ".."):
+        # './file.go' becomes ('file.go',); '..' is skipped.
+        if parts and parts[0] == "..":
+            return []
+        return [parts[0]] if parts else []
+
+    cumulative: list[str] = []
+    acc = ""
+    # Drop the filename: tags should reflect directories, not the file itself.
+    dir_parts = parts[:-1] if len(parts) > 1 else parts
+    for segment in dir_parts:
+        if not segment:
+            continue
+        acc = f"{acc}/{segment}" if acc else segment
+        cumulative.append(acc)
+    return cumulative or [parts[0]]
