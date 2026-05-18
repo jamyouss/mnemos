@@ -1,41 +1,50 @@
-# Optional project-detection override for Mnemos.
+# Mnemos — path → tags mapping (config/projects.yaml).
 #
-# Copy this file to `config/projects.yaml` (gitignored) and edit it ONLY if
-# the default "first directory segment = project name" rule doesn't fit your
-# layout. The default works out of the box when each top-level dir under your
-# codebase mount is a distinct project.
+# Copy this file to `config/projects.yaml` (gitignored) and adapt it to your
+# layout. Without this file, Mnemos emits cumulative path segments as tags
+# by default (`foo/bar/baz/file.go` → `[foo, foo/bar, foo/bar/baz]`) — usable
+# but coarse-grained. Custom tags let you express both the project hierarchy
+# and cross-cutting labels (techno, client, team) for richer filtering.
 #
-# Examples of when you need this file:
-#   - Org-wrapper layout where the first segment is an org name, not a project.
-#       /data/codebase/my-org/serviceA  →  project should be "serviceA"
-#   - Several physical dirs that belong to the same logical project
-#     (monorepo split):
-#       apps/billing/payments/   and   libs/shared/payments/   →   both "payments"
-#   - You want a project name that differs from the folder name.
+# Schema
+# ------
+# Top-level key:   `paths:`
+# Sub-keys:        path prefixes RELATIVE to the codebase mount root (no
+#                  leading slash). Longest matching prefix wins on conflict.
+# Values:          list of tags. First tag = primary (displayed as the
+#                  default project label in search results).
 #
-# Resolution rules:
-#   - path_prefixes are matched against the path RELATIVE to the codebase mount
-#     root (i.e. without "/data/codebase/" in front).
-#   - Longest matching prefix wins on conflict.
-#   - If no prefix matches, the default first-segment rule kicks in.
+# Search
+# ------
+# Filters are exposed everywhere as `tags_any` (OR) and `tags_all` (AND).
+#   mnemos search --tags acme,moby                # OR
+#   mnemos search --tags-all acme,vue3            # AND
+#   mnemos_search_code(tags_any=["acme-front-app-ecommerce", "acme-front-lib-auth"])
 
-projects:
+paths:
 
-  # Example 1 — org-wrapper layout
-  # serviceA:
-  #   path_prefixes:
-  #     - my-org/serviceA/
-  # serviceB:
-  #   path_prefixes:
-  #     - my-org/serviceB/
+  # Example 1 — monorepo with explicit per-service tagging + a techno tag
+  # myorg/services/billing/:
+  #   - billing                    # primary tag (default display label)
+  #   - myorg
+  #   - myorg-services
+  #   - go
+  # myorg/services/payments/:
+  #   - payments
+  #   - myorg
+  #   - myorg-services
+  #   - go
 
-  # Example 2 — monorepo split (one logical project, two physical dirs)
-  # payments:
-  #   path_prefixes:
-  #     - apps/billing/payments/
-  #     - libs/shared/payments/
+  # Example 2 — one logical project living under two physical paths
+  # apps/billing/payments/:
+  #   - payments
+  #   - billing-team
+  # libs/shared/payments/:
+  #   - payments                   # same primary → unified project view
+  #   - shared
 
-  # Example 3 — rename to a friendlier project label
-  # api:
-  #   path_prefixes:
-  #     - really-long-internal-dirname/
+  # Example 3 — cross-cutting techno labels for transverse queries
+  # apps/dashboard/:
+  #   - dashboard
+  #   - vue3                       # `mnemos search --tags vue3` matches it
+  #   - typescript

@@ -23,15 +23,15 @@ from core.chunkers.fallback_chunker import FallbackChunker
 from core.chunkers.go_chunker import GoChunker
 from core.chunkers.markdown_chunker import MarkdownChunker
 from core.chunkers.vue_chunker import VueChunker
-from core.collections import DENSE_VECTOR_NAME, PROJECT_PAYLOAD_FIELD, SPARSE_VECTOR_NAME
+from core.collections import DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME, TAGS_PAYLOAD_FIELD
 from core.contextual import ContextualEnricher
 from core.embeddings import EmbeddingService
-from core.projects import ProjectOverrides, detect_project
+from core.projects import PathTags, detect_tags
 from core.sparse import bm25_sparse
 
-# Collections whose payload is filtered by `project` at query time. We
-# create the payload index on those at startup so the filter scales.
-_PROJECT_INDEXED_COLLECTIONS = ("mnemos_code", "mnemos_memory")
+# Collections whose payload is filtered by `tags` at query time. We
+# create the keyword payload index on those at startup so the filter scales.
+_TAGGED_COLLECTIONS = ("mnemos_code", "mnemos_memory")
 
 
 class Indexer:
@@ -40,13 +40,13 @@ class Indexer:
         qdrant_client: QdrantClient,
         embedding_service: EmbeddingService,
         contextual_enricher: ContextualEnricher | None = None,
-        project_overrides: ProjectOverrides | None = None,
+        path_tags: PathTags | None = None,
         codebase_root: str = "/data/codebase",
     ) -> None:
         self._qdrant = qdrant_client
         self._embeddings = embedding_service
         self._contextual = contextual_enricher
-        self._project_overrides = project_overrides or {}
+        self._path_tags = path_tags or {}
         self._codebase_root = codebase_root.rstrip("/")
         self._go_chunker = GoChunker()
         self._vue_chunker = VueChunker()
@@ -56,9 +56,9 @@ class Indexer:
     def ensure_collection(self, collection_name: str, vector_size: int = 384) -> None:
         """Create the collection if missing, configured for hybrid (dense + sparse BM25).
 
-        For collections that scope by project (mnemos_code, mnemos_memory) we
-        also create a keyword payload index on the `project` field so that
-        per-project filters stay O(log n).
+        For collections that scope by tags (mnemos_code, mnemos_memory) we
+        also create a keyword payload index on the `tags` field so that
+        tag filters stay O(log n).
         """
         existing = {c.name for c in self._qdrant.get_collections().collections}
         if collection_name not in existing:
@@ -72,15 +72,15 @@ class Indexer:
                 },
             )
 
-        if collection_name in _PROJECT_INDEXED_COLLECTIONS:
-            self._ensure_project_payload_index(collection_name)
+        if collection_name in _TAGGED_COLLECTIONS:
+            self._ensure_tags_payload_index(collection_name)
 
-    def _ensure_project_payload_index(self, collection_name: str) -> None:
-        """Idempotently create a keyword payload index on the `project` field."""
+    def _ensure_tags_payload_index(self, collection_name: str) -> None:
+        """Idempotently create a keyword payload index on the `tags` field."""
         try:
             self._qdrant.create_payload_index(
                 collection_name=collection_name,
-                field_name=PROJECT_PAYLOAD_FIELD,
+                field_name=TAGS_PAYLOAD_FIELD,
                 field_schema=KeywordIndexParams(type=PayloadSchemaType.KEYWORD),
             )
         except Exception:
@@ -105,21 +105,20 @@ class Indexer:
             pass
         self.ensure_collection(collection_name, vector_size)
 
-    def _resolve_project(self, file_path: str, override: str | None) -> str | None:
-        """Decide which `project` value to write into a chunk's payload.
+    def _resolve_tags(self, file_path: str, override: list[str] | None) -> list[str]:
+        """Decide which tag list to write into a chunk's payload.
 
         Order:
-            1. explicit `override` (CLI flag, push API field, hook env var)
-            2. YAML / first-segment detection on the path relative to the codebase root
+            1. Explicit ``override`` (CLI flag / push API field).
+            2. YAML / segment-based detection on the path relative to the
+               codebase mount root.
         """
         if override:
-            return override
-        # Strip the codebase mount root before passing to detect_project so the
-        # rules can be written in terms of paths the user actually sees.
+            return list(override)
         rel = file_path
         if file_path.startswith(self._codebase_root + "/"):
             rel = file_path[len(self._codebase_root) + 1:]
-        return detect_project(rel, overrides=self._project_overrides)
+        return detect_tags(rel, overrides=self._path_tags)
 
     def index_file(
         self,
@@ -127,7 +126,7 @@ class Indexer:
         file_path: str,
         collection: str,
         file_mtime: float | None = None,
-        project: str | None = None,
+        tags: list[str] | None = None,
     ) -> int:
         self.delete_file(file_path, collection)
 
@@ -142,10 +141,13 @@ class Indexer:
         if self._contextual is not None and self._contextual.enabled:
             chunks = self._contextual.enrich(content, chunks, file_path)
 
-        # Resolve project once per file. Only relevant for the code/memory
+        # Resolve tags once per file. Only relevant for the code/memory
         # collections; skills/docs leave the field unset.
-        resolved_project = self._resolve_project(file_path, project) \
-            if collection in _PROJECT_INDEXED_COLLECTIONS else None
+        resolved_tags: list[str] = (
+            self._resolve_tags(file_path, tags)
+            if collection in _TAGGED_COLLECTIONS
+            else []
+        )
 
         texts = [c["content"] for c in chunks]
         dense_vectors = self._embeddings.embed_batch(texts)
@@ -160,8 +162,8 @@ class Indexer:
                 "last_indexed_at": now,
                 "file_mtime": file_mtime or time.time(),
             }
-            if resolved_project is not None:
-                payload[PROJECT_PAYLOAD_FIELD] = resolved_project
+            if resolved_tags:
+                payload[TAGS_PAYLOAD_FIELD] = resolved_tags
             points.append(
                 PointStruct(
                     id=point_id,

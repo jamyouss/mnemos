@@ -172,14 +172,15 @@ Manually-added memories go straight to `approved` (since you wrote them).
 
 Via CLI:
 ```bash
-mnemos search-memory "API routing decisions" --project myproject
+mnemos search-memory "API routing decisions" --tags myproject       # OR
+mnemos search-memory "API routing decisions" --tags-all myproject,decision
 ```
 
 Via MCP (agent):
 ```python
 mnemos_search_memory(
   query="API routing decisions",
-  project="myproject",
+  tags_any=["myproject"],
   memory_type="decision",
   limit=5,
 )

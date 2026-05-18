@@ -61,17 +61,35 @@ mnemos/
 
 ### Collections Qdrant
 
-| Collection | Source | Path prefixes | Project scoping |
+| Collection | Source | Path prefixes | Scoping |
 |---|---|---|---|
 | `mnemos_skills` | `~/.claude/skills/` | `skills/` | — |
 | `mnemos_docs` | `~/.claude/docs/` | `docs/` | — |
-| `mnemos_memory` | API / git hooks | _(aucun)_ | via `project` payload |
-| `mnemos_code` | codebase | _(tout le reste)_ | via `project` payload (filtre `--project`) |
+| `mnemos_memory` | API / git hooks | _(aucun)_ | via `tags` payload |
+| `mnemos_code` | codebase | _(tout le reste)_ | via `tags` payload (filtres `tags_any` / `tags_all`) |
 
-Une seule collection `mnemos_code` héberge **tous** les projets, chaque chunk
-portant un champ `project` dans son payload. La détection automatique
-(premier segment du path) peut être surchargée par `config/projects.yaml`
-(template : `config/projects.example.yaml`).
+Une seule collection `mnemos_code` héberge **tous** les projets. Chaque chunk
+porte un champ `tags: list[str]` — le premier tag sert de label primaire
+(display), les suivants sont des labels transverses (parent, techno, équipe).
+
+Le mapping `path → tags` est défini dans `config/projects.yaml` (template
+`config/projects.example.yaml`). Sans ce fichier, Mnemos émet par défaut les
+segments cumulatifs du path (`foo/bar/baz/file.go` →
+`["foo", "foo/bar", "foo/bar/baz"]`).
+
+Côté requête, deux filtres sont exposés partout (CLI, REST, MCP) :
+- `tags_any` (CLI `--tags`) — match si l'un des tags est présent (OR).
+- `tags_all` (CLI `--tags-all`) — match si **tous** les tags sont présents (AND).
+
+```bash
+mnemos search-code "auth"  --tags acme,moby           # OR
+mnemos search-code "auth"  --tags-all acme,vue3       # AND
+```
+
+```python
+mnemos_search_code(query="auth", tags_any=["acme-front-app-ecommerce", "acme-front-lib-auth"])
+mnemos_search_code(query="auth", tags_all=["acme", "vue3"])
+```
 
 ### MCP Tools exposés (9)
 
@@ -109,8 +127,8 @@ mnemos status
 ```bash
 mnemos reindex --collection mnemos_skills --path /data/claude-config/skills --full
 mnemos reindex --collection mnemos_docs --path /data/claude-config/docs --full
-mnemos reindex --collection mnemos_code --path /data/codebase/myproject --project myproject --full
-mnemos reindex --collection mnemos_code --path /data/codebase/otherproject --project otherproject --full
+mnemos reindex --collection mnemos_code --path /data/codebase/myproject --tags myproject,go --full
+mnemos reindex --collection mnemos_code --path /data/codebase/otherproject --tags otherproject,vue3 --full
 ```
 
 Note : paths sont les **chemins container** (mount via `docker-compose.yml`).
@@ -148,7 +166,8 @@ Conventions tests :
 - `id` toujours UUID
 - `status` ∈ {`pending`, `approved`, `rejected`}
 - `memory_type` ∈ {`decision`, `pattern`, `lesson`, `convention`}
-- `project` optionnel, scope multi-tenant
+- `tags: list[str]` — scoping multi-label (project, techno, équipe). Filtrable
+  via `tags_any` (OR) et `tags_all` (AND).
 - Search ne retourne **que** les `approved`
 
 ## Quand intervenir dans ce repo

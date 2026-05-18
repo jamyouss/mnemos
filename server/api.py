@@ -40,7 +40,7 @@ class IndexPushRequest(BaseModel):
     file_path: str
     collection: str
     content: str
-    project: Optional[str] = None  # Override auto-detection of the `project` payload field.
+    tags: Optional[List[str]] = None  # Override the auto-detected tag list for this file.
 
 
 class SearchRequest(BaseModel):
@@ -49,16 +49,18 @@ class SearchRequest(BaseModel):
     file_types: Optional[List[str]] = None
     path_filter: Optional[str] = None
     limit: int = 5
-    project: Optional[str] = None  # Restrict to a single project (filter on payload).
+    tags_any: Optional[List[str]] = None  # OR filter on payload `tags`.
+    tags_all: Optional[List[str]] = None  # AND filter on payload `tags`.
 
 
 class SearchCodeRequest(BaseModel):
     query: str
     language: Optional[str] = None
     symbol_type: Optional[str] = None
-    project: Optional[str] = None
     path_filter: Optional[str] = None
     limit: int = 5
+    tags_any: Optional[List[str]] = None
+    tags_all: Optional[List[str]] = None
 
 
 class SearchSkillsRequest(BaseModel):
@@ -72,7 +74,7 @@ class ReindexRequest(BaseModel):
     full: bool = False
     recreate: bool = False           # Drop + recreate (needed when migrating to hybrid schema)
     workers: int = 1                 # Parallel worker threads for indexing
-    project: Optional[str] = None    # Override auto-detected project tag for every file under `path`.
+    tags: Optional[List[str]] = None # Override the auto-detected tag list for every file under `path`.
 
 
 class MemoryCreateRequest(BaseModel):
@@ -161,7 +163,7 @@ async def push_index(body: IndexPushRequest, request: Request):
         content=body.content,
         file_path=body.file_path,
         collection=body.collection,
-        project=body.project,
+        tags=body.tags,
     )
     return {"status": "indexed", "file_path": body.file_path, "chunks": count}
 
@@ -188,7 +190,8 @@ async def search(body: SearchRequest, request: Request):
         file_types=body.file_types,
         path_filter=body.path_filter,
         limit=body.limit,
-        project=body.project,
+        tags_any=body.tags_any,
+        tags_all=body.tags_all,
     )
     return {"results": [r.model_dump() for r in results]}
 
@@ -199,9 +202,10 @@ async def search_code(body: SearchCodeRequest, request: Request):
         query=body.query,
         language=body.language,
         symbol_type=body.symbol_type,
-        project=body.project,
         path_filter=body.path_filter,
         limit=body.limit,
+        tags_any=body.tags_any,
+        tags_all=body.tags_all,
     )
     return {"results": [r.model_dump() for r in results]}
 
@@ -217,18 +221,20 @@ async def search_skills(body: SearchSkillsRequest, request: Request):
 
 class SearchMemoryRequest(BaseModel):
     query: str
-    project: Optional[str] = None
     memory_type: Optional[str] = None
     limit: int = 5
+    tags_any: Optional[List[str]] = None
+    tags_all: Optional[List[str]] = None
 
 
 @api_router.post("/api/search-memory")
 async def search_memory(body: SearchMemoryRequest, request: Request):
     results = request.app.state.search_service.search_memory(
         query=body.query,
-        project=body.project,
         memory_type=body.memory_type,
         limit=body.limit,
+        tags_any=body.tags_any,
+        tags_all=body.tags_all,
     )
     # Map memory results to a search-result-compatible shape so eval/harness can consume them.
     return {
@@ -239,7 +245,6 @@ async def search_memory(body: SearchMemoryRequest, request: Request):
                 "score": r.score,
                 "collection": "mnemos_memory",
                 "memory_type": r.memory_type,
-                "project": r.project,
                 "tags": r.tags,
             }
             for r in results
@@ -404,7 +409,7 @@ def _should_skip(fp) -> bool:
     return any(sub in s for sub in _REINDEX_IGNORE_PATH_SUBSTRINGS)
 
 
-def _index_one_file(indexer, collection: str, fp, project: str | None = None) -> int:
+def _index_one_file(indexer, collection: str, fp, tags: list[str] | None = None) -> int:
     """Index a single file. Returns the number of chunks indexed (0 on error)."""
     try:
         content = fp.read_text(encoding="utf-8")
@@ -413,7 +418,7 @@ def _index_one_file(indexer, collection: str, fp, project: str | None = None) ->
             file_path=str(fp),
             collection=collection,
             file_mtime=fp.stat().st_mtime,
-            project=project,
+            tags=tags,
         )
     except Exception:
         return -1  # sentinel for "skipped on error"
@@ -425,7 +430,7 @@ def _run_reindex(
     base_path,
     full: bool,
     workers: int = 1,
-    project: str | None = None,
+    tags: list[str] | None = None,
 ) -> None:
     """Background task: walk files and index them, optionally in parallel."""
     import logging
@@ -446,14 +451,14 @@ def _run_reindex(
 
     if workers == 1:
         for fp in files:
-            n = _index_one_file(indexer, collection, fp, project=project)
+            n = _index_one_file(indexer, collection, fp, tags=tags)
             if n < 0:
                 skipped += 1
             else:
                 indexed += n
     else:
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = [pool.submit(_index_one_file, indexer, collection, fp, project) for fp in files]
+            futures = [pool.submit(_index_one_file, indexer, collection, fp, tags) for fp in files]
             for fut in as_completed(futures):
                 n = fut.result()
                 if n < 0:
@@ -491,7 +496,7 @@ async def reindex(body: ReindexRequest, request: Request, background_tasks: Back
             base_path,
             body.full,
             body.workers,
-            body.project,
+            body.tags,
         )
         return {
             "status": "reindex_started",
@@ -499,7 +504,7 @@ async def reindex(body: ReindexRequest, request: Request, background_tasks: Back
             "path": str(base_path),
             "workers": body.workers,
             "recreated": body.recreate,
-            "project": body.project,
+            "tags": body.tags,
         }
 
     return {"status": "no_path", "collection": body.collection}

@@ -190,6 +190,28 @@ explicit: `mnemos reindex --recreate --collection <name>`.
 The cache collection (`mnemos_cache`) is a single unnamed dense vector — no
 hybrid needed for the cache key itself.
 
+### Payload schema
+
+Every chunk carries:
+
+| Field | Type | Notes |
+|------|------|-------|
+| `file_path` | str | Container path (or synthetic `memory/<id>` for memories) |
+| `content` | str | Chunk text |
+| `language` | str | `go`, `vue`, `markdown`, … (from chunker) |
+| `chunk_type` | str | `function`, `type`, `script`, `heading`, `memory`, … |
+| `symbol_name` | str | Function / type / method name when AST-derived |
+| `tags` | list[str] | Scoping labels — first tag is primary (display). Filtered with `tags_any` (OR) and `tags_all` (AND). |
+| `last_indexed_at` | iso8601 | When the chunk was last written |
+| `file_mtime` | float | Source file mtime — drives incremental skip logic |
+
+Memory entries add: `id`, `memory_type`, `status`, `topic`, `created_at`.
+
+`tags` is the single scoping field across `mnemos_code` and `mnemos_memory`.
+The mapping `path → tags` comes from `config/projects.yaml`, with a default
+cumulative-segment fallback when the file is absent. See
+[`CONFIGURATION.md`](CONFIGURATION.md#tags--scoping-chunks-across-projects).
+
 ## Configuration model
 
 All knobs are **environment variables**. Defaults are conservative:

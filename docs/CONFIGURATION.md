@@ -89,6 +89,56 @@ MNEMOS_LLM_BASE_URL=http://host.docker.internal:1234/v1
 Enabling contextual chunking forces a full reindex on the next ingest. Plan a
 maintenance window — see [`RETRIEVAL_PIPELINE.md`](RETRIEVAL_PIPELINE.md#contextual-chunking).
 
+### Tags — scoping chunks across projects
+
+Every chunk in `mnemos_code` carries a `tags: list[str]` payload. The first
+tag is the **primary** (used as the default display label); the rest are
+cross-cutting labels (parent projects, techno, team) that enable OR/AND
+filtering at query time.
+
+**Where tags come from**, in order of precedence:
+
+1. **CLI override** — `mnemos reindex --tags moby,dgf,go` applies the same
+   list to every file under `--path`.
+2. **YAML mapping** — `config/projects.yaml` declares `path-prefix → tags`.
+   Longest-matching prefix wins.
+3. **Default fallback** — cumulative path segments
+   (`foo/bar/baz/file.go` → `["foo", "foo/bar", "foo/bar/baz"]`).
+
+`config/projects.yaml` (copy from `config/projects.example.yaml`, gitignored):
+
+```yaml
+paths:
+  myorg/services/billing/:
+    - billing                    # primary (display label)
+    - myorg
+    - go
+  apps/dashboard/:
+    - dashboard
+    - vue3
+    - typescript
+```
+
+Search filters are exposed everywhere:
+
+```bash
+mnemos search "auth"  --tags acme,moby           # OR  → tags_any
+mnemos search "auth"  --tags-all acme,vue3       # AND → tags_all
+```
+
+```python
+mnemos_search_code(query="auth", tags_any=["acme-front-app-ecommerce", "acme-front-lib-auth"])
+mnemos_search_code(query="auth", tags_all=["acme", "vue3"])
+```
+
+Changes to `config/projects.yaml` take effect on the next indexing event.
+Re-tag an existing project with:
+
+```bash
+mnemos reindex --recreate --full --collection mnemos_code \
+       --path /data/codebase/myproject --tags myproject,go
+```
+
 ## Retrieval
 
 ### Cross-encoder reranker (Phase 2B)
@@ -200,6 +250,6 @@ For changes that affect indexing (embedding model, contextual flag), you must
 reindex with `--recreate`:
 
 ```bash
-mnemos reindex --recreate --full --collection mnemos_code --project myproject \
+mnemos reindex --recreate --full --collection mnemos_code --tags myproject,go \
        --path /data/codebase/myproject
 ```

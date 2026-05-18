@@ -1,9 +1,10 @@
 """Tests for MCP tool definitions."""
+import asyncio
 from unittest.mock import MagicMock
 
 import mcp.types as types
 
-from server.mcp_tools import TOOL_DEFINITIONS, create_mcp_server
+from server.mcp_tools import TOOL_DEFINITIONS, _dispatch_tool, create_mcp_server
 
 
 def test_mcp_server_has_all_tools():
@@ -76,3 +77,128 @@ def test_mcp_server_registers_call_tool_handler():
     assert types.CallToolRequest in mcp_server.request_handlers, (
         "Server must register a call_tool handler"
     )
+
+
+def _schema_props(tool_name: str) -> dict:
+    tool = next(t for t in TOOL_DEFINITIONS if t.name == tool_name)
+    return tool.inputSchema.get("properties", {})
+
+
+def test_search_tool_exposes_tags_filters():
+    """mnemos_search schema should declare tags_any and tags_all as arrays of strings."""
+    props = _schema_props("mnemos_search")
+    assert "tags_any" in props, "mnemos_search must expose tags_any"
+    assert "tags_all" in props, "mnemos_search must expose tags_all"
+    assert props["tags_any"]["type"] == "array"
+    assert props["tags_any"]["items"]["type"] == "string"
+    assert props["tags_all"]["type"] == "array"
+    assert props["tags_all"]["items"]["type"] == "string"
+    # Regression guard: project must never be added to this schema.
+    assert "project" not in props
+
+
+def test_search_code_tool_exposes_tags_and_drops_project():
+    """mnemos_search_code schema must use tags_any/tags_all and not legacy project."""
+    props = _schema_props("mnemos_search_code")
+    assert "tags_any" in props
+    assert "tags_all" in props
+    assert props["tags_any"]["type"] == "array"
+    assert props["tags_any"]["items"]["type"] == "string"
+    assert props["tags_all"]["type"] == "array"
+    assert props["tags_all"]["items"]["type"] == "string"
+    assert "project" not in props, "mnemos_search_code should no longer expose project"
+
+
+def test_search_memory_tool_exposes_tags_and_drops_project():
+    """mnemos_search_memory schema must use tags_any/tags_all and not legacy project."""
+    props = _schema_props("mnemos_search_memory")
+    assert "tags_any" in props
+    assert "tags_all" in props
+    assert props["tags_any"]["type"] == "array"
+    assert props["tags_any"]["items"]["type"] == "string"
+    assert props["tags_all"]["type"] == "array"
+    assert props["tags_all"]["items"]["type"] == "string"
+    assert "project" not in props, "mnemos_search_memory should no longer expose project"
+
+
+def test_dispatch_search_code_forwards_tag_filters():
+    """Dispatching mnemos_search_code with tag args must forward both kwargs and NOT project."""
+    search_service = MagicMock()
+    search_service.search_code.return_value = []
+    indexer = MagicMock()
+
+    asyncio.run(
+        _dispatch_tool(
+            name="mnemos_search_code",
+            args={
+                "query": "hybrid retrieval",
+                "tags_any": ["moby", "trevio"],
+                "tags_all": ["go"],
+            },
+            search_service=search_service,
+            indexer=indexer,
+            qdrant_client=None,
+        )
+    )
+
+    search_service.search_code.assert_called_once()
+    kwargs = search_service.search_code.call_args.kwargs
+    assert kwargs["query"] == "hybrid retrieval"
+    assert kwargs["tags_any"] == ["moby", "trevio"]
+    assert kwargs["tags_all"] == ["go"]
+    assert "project" not in kwargs, "Dispatcher must not forward the legacy project kwarg"
+
+
+def test_dispatch_search_memory_forwards_tag_filters():
+    """Dispatching mnemos_search_memory with tag args must forward both kwargs and NOT project."""
+    search_service = MagicMock()
+    search_service.search_memory.return_value = []
+    indexer = MagicMock()
+
+    asyncio.run(
+        _dispatch_tool(
+            name="mnemos_search_memory",
+            args={
+                "query": "past decisions",
+                "tags_any": ["moby"],
+                "tags_all": ["lesson"],
+            },
+            search_service=search_service,
+            indexer=indexer,
+            qdrant_client=None,
+        )
+    )
+
+    search_service.search_memory.assert_called_once()
+    kwargs = search_service.search_memory.call_args.kwargs
+    assert kwargs["query"] == "past decisions"
+    assert kwargs["tags_any"] == ["moby"]
+    assert kwargs["tags_all"] == ["lesson"]
+    assert "project" not in kwargs, "Dispatcher must not forward the legacy project kwarg"
+
+
+def test_dispatch_search_forwards_tag_filters():
+    """Dispatching mnemos_search with tag args must forward both kwargs."""
+    search_service = MagicMock()
+    search_service.search.return_value = []
+    indexer = MagicMock()
+
+    asyncio.run(
+        _dispatch_tool(
+            name="mnemos_search",
+            args={
+                "query": "anything",
+                "tags_any": ["a"],
+                "tags_all": ["b"],
+            },
+            search_service=search_service,
+            indexer=indexer,
+            qdrant_client=None,
+        )
+    )
+
+    search_service.search.assert_called_once()
+    kwargs = search_service.search.call_args.kwargs
+    assert kwargs["query"] == "anything"
+    assert kwargs["tags_any"] == ["a"]
+    assert kwargs["tags_all"] == ["b"]

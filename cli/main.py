@@ -22,6 +22,11 @@ def _handle_http_error(exc: Exception) -> None:
     sys.exit(1)
 
 
+def _parse_tags(value: str) -> list[str]:
+    """Split a comma-separated tag list and drop empty/whitespace entries."""
+    return [t.strip() for t in value.split(",") if t.strip()]
+
+
 # ---------------------------------------------------------------------------
 # Root group
 # ---------------------------------------------------------------------------
@@ -161,7 +166,26 @@ def status() -> None:
 @click.option("--collection", multiple=True, help="Restrict to specific collections.")
 @click.option("--file-type", multiple=True, help="Restrict to specific file types.")
 @click.option("--path-filter", default=None, help="Filter by file path substring.")
-def search(query: str, limit: int, collection: tuple, file_type: tuple, path_filter: str | None) -> None:
+@click.option(
+    "--tags",
+    default=None,
+    help="Comma-separated tags, OR semantics (sent as tags_any). Example: --tags acme,moby",
+)
+@click.option(
+    "--tags-all",
+    "tags_all",
+    default=None,
+    help="Comma-separated tags, AND semantics (sent as tags_all). Example: --tags-all acme,vue3",
+)
+def search(
+    query: str,
+    limit: int,
+    collection: tuple,
+    file_type: tuple,
+    path_filter: str | None,
+    tags: str | None,
+    tags_all: str | None,
+) -> None:
     """Search across all indexed documents."""
     url = f"{_base_url()}/api/search"
     payload: dict = {"query": query, "limit": limit}
@@ -171,6 +195,10 @@ def search(query: str, limit: int, collection: tuple, file_type: tuple, path_fil
         payload["file_types"] = list(file_type)
     if path_filter:
         payload["path_filter"] = path_filter
+    if tags:
+        payload["tags_any"] = _parse_tags(tags)
+    if tags_all:
+        payload["tags_all"] = _parse_tags(tags_all)
 
     try:
         resp = httpx.post(url, json=payload, timeout=30)
@@ -193,14 +221,26 @@ def search(query: str, limit: int, collection: tuple, file_type: tuple, path_fil
 @click.option("--limit", default=5, show_default=True, help="Number of results to return.")
 @click.option("--language", default=None, help="Filter by programming language.")
 @click.option("--symbol-type", default=None, help="Filter by symbol type (func, type, etc.).")
-@click.option("--project", default=None, help="Filter by project name.")
+@click.option(
+    "--tags",
+    "tags",
+    default=None,
+    help="Comma-separated tags (OR filter). Example: --tags acme,moby-services",
+)
+@click.option(
+    "--tags-all",
+    "tags_all",
+    default=None,
+    help="Comma-separated tags (AND filter). Example: --tags-all acme,vue3",
+)
 @click.option("--path-filter", default=None, help="Filter by file path substring.")
 def search_code(
     query: str,
     limit: int,
     language: str | None,
     symbol_type: str | None,
-    project: str | None,
+    tags: str | None,
+    tags_all: str | None,
     path_filter: str | None,
 ) -> None:
     """Search code-specific index."""
@@ -210,8 +250,10 @@ def search_code(
         payload["language"] = language
     if symbol_type:
         payload["symbol_type"] = symbol_type
-    if project:
-        payload["project"] = project
+    if tags:
+        payload["tags_any"] = _parse_tags(tags)
+    if tags_all:
+        payload["tags_all"] = _parse_tags(tags_all)
     if path_filter:
         payload["path_filter"] = path_filter
 
@@ -258,14 +300,33 @@ def search_skills(query: str, limit: int) -> None:
 @cli.command("search-memory")
 @click.argument("query")
 @click.option("--limit", default=5, show_default=True, help="Number of results to return.")
-@click.option("--project", default=None, help="Restrict to a specific project.")
+@click.option(
+    "--tags",
+    "tags",
+    default=None,
+    help="Comma-separated tags (OR filter). Example: --tags decision,convention",
+)
+@click.option(
+    "--tags-all",
+    "tags_all",
+    default=None,
+    help="Comma-separated tags (AND filter). Example: --tags-all moby,decision",
+)
 @click.option("--type", "memory_type", default=None, help="Filter by memory_type (decision, pattern, lesson, convention).")
-def search_memory(query: str, limit: int, project: str | None, memory_type: str | None) -> None:
+def search_memory(
+    query: str,
+    limit: int,
+    tags: str | None,
+    tags_all: str | None,
+    memory_type: str | None,
+) -> None:
     """Search approved memory entries."""
     url = f"{_base_url()}/api/search-memory"
     payload: dict = {"query": query, "limit": limit}
-    if project:
-        payload["project"] = project
+    if tags:
+        payload["tags_any"] = _parse_tags(tags)
+    if tags_all:
+        payload["tags_all"] = _parse_tags(tags_all)
     if memory_type:
         payload["memory_type"] = memory_type
 
@@ -284,15 +345,14 @@ def search_memory(query: str, limit: int, project: str | None, memory_type: str 
     for i, r in enumerate(results, start=1):
         score = r.get("score", 0)
         mtype = r.get("memory_type", "")
-        project = r.get("project") or "-"
-        tags = ", ".join(r.get("tags", []) or [])
+        result_tags = ", ".join(r.get("tags", []) or [])
         console.print(
-            f"[bold]{i}.[/bold] [cyan]{mtype}[/cyan] [dim]({project})[/dim] "
+            f"[bold]{i}.[/bold] [cyan]{mtype}[/cyan] "
             f"[dim](score: {score:.3f})[/dim]"
         )
         console.print(f"   {r.get('content', '')[:300]}")
-        if tags:
-            console.print(f"   [dim]tags: {tags}[/dim]")
+        if result_tags:
+            console.print(f"   [dim]tags: {result_tags}[/dim]")
         console.print()
 
 
@@ -319,9 +379,11 @@ def search_memory(query: str, limit: int, project: str | None, memory_type: str 
     help="Parallel worker threads (use 4 for contextual chunking).",
 )
 @click.option(
-    "--project",
+    "--tags",
+    "tags",
     default=None,
-    help="Override the auto-detected project tag for every file under --path.",
+    help="Comma-separated tags to attach to every file under --path "
+    "(overrides auto-detected tags). Example: --tags moby,dgf,go",
 )
 def reindex(
     collection: str,
@@ -329,7 +391,7 @@ def reindex(
     full: bool,
     recreate: bool,
     workers: int,
-    project: str | None,
+    tags: str | None,
 ) -> None:
     """Trigger a reindex operation on the server."""
     url = f"{_base_url()}/api/reindex"
@@ -341,8 +403,8 @@ def reindex(
     }
     if path:
         payload["path"] = path
-    if project:
-        payload["project"] = project
+    if tags:
+        payload["tags"] = _parse_tags(tags)
 
     try:
         resp = httpx.post(url, json=payload, timeout=600)

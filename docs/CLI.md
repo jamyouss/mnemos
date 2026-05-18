@@ -46,7 +46,7 @@ Cross-collection semantic search.
 ```bash
 mnemos search "JWT validation"
 mnemos search "JWT validation" --limit 10
-mnemos search "JWT validation" --collection mnemos_code --project myproject
+mnemos search "JWT validation" --collection mnemos_code
 mnemos search "logger init" --file-type go
 mnemos search "config" --path-filter /data/codebase/myproject/
 ```
@@ -63,7 +63,9 @@ mnemos search "config" --path-filter /data/codebase/myproject/
 Code-only search with structured filters.
 
 ```bash
-mnemos search-code "ride cancel" --project myproject --language go --symbol-type func
+mnemos search-code "ride cancel" --tags myproject --language go --symbol-type func
+mnemos search-code "auth"        --tags acme,moby                  # OR
+mnemos search-code "auth"        --tags-all acme,vue3              # AND
 ```
 
 | Flag | Description |
@@ -71,7 +73,8 @@ mnemos search-code "ride cancel" --project myproject --language go --symbol-type
 | `--limit` | Results count (default 5) |
 | `--language` | `go`, `vue`, `typescript`, etc. |
 | `--symbol-type` | `function`, `type`, `method` (from chunker metadata) |
-| `--project` | Maps to `mnemos_code_<project>` |
+| `--tags` | Comma-separated tags (OR filter on the `tags` payload) |
+| `--tags-all` | Comma-separated tags (AND filter — every tag must be present) |
 | `--path-filter` | Substring on `file_path` |
 
 ### `mnemos search-skills QUERY`
@@ -96,22 +99,25 @@ Trigger a server-side reindex.
 mnemos reindex --recreate --full --workers 4 \
        --collection mnemos_code \
        --path /data/codebase/myproject \
-       --project myproject
+       --tags myproject,go
 
-# Subsequent incremental: just re-index a single file
+# Subsequent incremental: just re-index a single file (tags inherited from projects.yaml)
 mnemos reindex --collection mnemos_code \
-       --path /data/codebase/myproject/services/handler.go \
-       --project myproject
+       --path /data/codebase/myproject/services/handler.go
 ```
 
 | Flag | Description |
 |------|-------------|
 | `--collection` (required) | Collection name (e.g. `mnemos_code`, `mnemos_docs`) |
 | `--path` | Container path of a file or directory |
-| `--project` | Project label written into each chunk's payload (for `mnemos_code` and `mnemos_memory`) |
+| `--tags` | Comma-separated tags applied to every file under `--path`. Overrides the auto-detected list from `config/projects.yaml`. First tag is the primary (display label). |
 | `--full` | Recursively walk `--path`. Without `--full`, only the path itself is indexed. |
 | `--recreate` | Drop + recreate the collection before indexing. Required to migrate to hybrid. |
 | `--workers` | Parallel worker threads (use 4 with contextual chunking on) |
+
+Without `--tags`, Mnemos resolves tags from `config/projects.yaml` (longest
+path-prefix wins). Without that file either, it falls back to cumulative
+path segments. See [`CONFIGURATION.md`](CONFIGURATION.md#tags--scoping-chunks-across-projects).
 
 The reindex runs as a **background task** server-side. The CLI returns
 immediately with `reindex_started`. Watch progress with `mnemos status`.

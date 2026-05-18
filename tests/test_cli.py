@@ -90,6 +90,29 @@ def test_search_with_limit():
     assert call_kwargs is not None
 
 
+def test_search_with_tags():
+    runner = CliRunner()
+    mock_resp = _mock_response({"results": []})
+    with patch("httpx.post", return_value=mock_resp) as mock_post:
+        result = runner.invoke(cli, ["search", "--tags", "acme,moby", "query"])
+    assert result.exit_code == 0
+    body = mock_post.call_args.kwargs["json"]
+    assert body["tags_any"] == ["acme", "moby"]
+    assert "tags_all" not in body
+    assert "project" not in body
+
+
+def test_search_with_tags_all():
+    runner = CliRunner()
+    mock_resp = _mock_response({"results": []})
+    with patch("httpx.post", return_value=mock_resp) as mock_post:
+        result = runner.invoke(cli, ["search", "--tags-all", "acme,vue3", "query"])
+    assert result.exit_code == 0
+    body = mock_post.call_args.kwargs["json"]
+    assert body["tags_all"] == ["acme", "vue3"]
+    assert "tags_any" not in body
+
+
 # ---------------------------------------------------------------------------
 # rag search-code
 # ---------------------------------------------------------------------------
@@ -124,9 +147,95 @@ def test_search_code_with_language():
     assert posted_json.get("language") == "go"
 
 
+def test_search_code_with_tags():
+    runner = CliRunner()
+    mock_resp = _mock_response({"results": []})
+    with patch("httpx.post", return_value=mock_resp) as mock_post:
+        result = runner.invoke(
+            cli, ["search-code", "--tags", "acme,moby-services", "handler"]
+        )
+    assert result.exit_code == 0
+    posted_json = mock_post.call_args[1].get("json") or mock_post.call_args[0][1]
+    assert posted_json.get("tags_any") == ["acme", "moby-services"]
+    assert "tags_all" not in posted_json
+    assert "project" not in posted_json
+
+
+def test_search_code_with_tags_all():
+    runner = CliRunner()
+    mock_resp = _mock_response({"results": []})
+    with patch("httpx.post", return_value=mock_resp) as mock_post:
+        result = runner.invoke(
+            cli, ["search-code", "--tags-all", "acme,vue3", "handler"]
+        )
+    assert result.exit_code == 0
+    posted_json = mock_post.call_args[1].get("json") or mock_post.call_args[0][1]
+    assert posted_json.get("tags_all") == ["acme", "vue3"]
+    assert "tags_any" not in posted_json
+    assert "project" not in posted_json
+
+
+def test_search_code_project_flag_removed():
+    """--project must no longer be accepted by search-code."""
+    runner = CliRunner()
+    mock_resp = _mock_response({"results": []})
+    with patch("httpx.post", return_value=mock_resp):
+        result = runner.invoke(
+            cli, ["search-code", "--project", "moby", "handler"]
+        )
+    # Click exits with code 2 on unknown options (UsageError), not a crash.
+    assert result.exit_code == 2
+    assert "no such option" in result.output.lower() or "--project" in result.output
+
+
 # ---------------------------------------------------------------------------
 # rag search-skills
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# rag search-memory
+# ---------------------------------------------------------------------------
+
+
+def test_search_memory_with_tags():
+    runner = CliRunner()
+    mock_resp = _mock_response({"results": []})
+    with patch("httpx.post", return_value=mock_resp) as mock_post:
+        result = runner.invoke(
+            cli, ["search-memory", "--tags", "decision", "auth"]
+        )
+    assert result.exit_code == 0
+    called_url = mock_post.call_args[0][0]
+    assert called_url.endswith("/api/search-memory")
+    posted_json = mock_post.call_args[1].get("json") or mock_post.call_args[0][1]
+    assert posted_json.get("tags_any") == ["decision"]
+    assert "project" not in posted_json
+
+
+def test_search_memory_with_tags_all():
+    runner = CliRunner()
+    mock_resp = _mock_response({"results": []})
+    with patch("httpx.post", return_value=mock_resp) as mock_post:
+        result = runner.invoke(
+            cli, ["search-memory", "--tags-all", "moby,decision", "auth"]
+        )
+    assert result.exit_code == 0
+    posted_json = mock_post.call_args[1].get("json") or mock_post.call_args[0][1]
+    assert posted_json.get("tags_all") == ["moby", "decision"]
+    assert "project" not in posted_json
+
+
+def test_search_memory_project_flag_removed():
+    """--project must no longer be accepted by search-memory."""
+    runner = CliRunner()
+    mock_resp = _mock_response({"results": []})
+    with patch("httpx.post", return_value=mock_resp):
+        result = runner.invoke(
+            cli, ["search-memory", "--project", "moby", "auth"]
+        )
+    assert result.exit_code == 2
+    assert "no such option" in result.output.lower() or "--project" in result.output
 
 
 def test_search_skills_returns_results():
@@ -177,6 +286,49 @@ def test_reindex_with_path():
     posted_json = mock_post.call_args[1].get("json") or mock_post.call_args[0][1]
     assert posted_json.get("full") is True
     assert posted_json.get("path") == "/data/src"
+
+
+def test_reindex_with_tags():
+    runner = CliRunner()
+    mock_resp = _mock_response(
+        {"status": "reindex_started", "collection": "mnemos_code", "path": "/data/src"}
+    )
+    with patch("httpx.post", return_value=mock_resp) as mock_post:
+        result = runner.invoke(
+            cli,
+            [
+                "reindex",
+                "--collection",
+                "mnemos_code",
+                "--path",
+                "/data/src",
+                "--tags",
+                "moby,dgf,go",
+            ],
+        )
+    assert result.exit_code == 0
+    posted_json = mock_post.call_args[1].get("json") or mock_post.call_args[0][1]
+    assert posted_json.get("tags") == ["moby", "dgf", "go"]
+    assert "project" not in posted_json
+
+
+def test_reindex_project_flag_removed():
+    """--project must no longer be accepted by reindex."""
+    runner = CliRunner()
+    mock_resp = _mock_response({"status": "reindex_started"})
+    with patch("httpx.post", return_value=mock_resp):
+        result = runner.invoke(
+            cli,
+            [
+                "reindex",
+                "--collection",
+                "mnemos_code",
+                "--project",
+                "moby",
+            ],
+        )
+    assert result.exit_code == 2
+    assert "no such option" in result.output.lower() or "--project" in result.output
 
 
 # ---------------------------------------------------------------------------

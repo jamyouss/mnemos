@@ -191,19 +191,24 @@ class SearchService:
         file_types: list[str] | None = None,
         path_filter: str | None = None,
         limit: int = 5,
-        project: str | None = None,
+        tags_any: list[str] | None = None,
+        tags_all: list[str] | None = None,
     ) -> list[SearchResult]:
         t_start = time.perf_counter()
 
         # --- 0. Cache lookup (Phase 4E) ---
         # Cache key includes the limit and filter set so that a more permissive
-        # entry can never be reused for a stricter call.
+        # entry can never be reused for a stricter call. Tag scopes also go into
+        # the namespace so a result cached for one tag set is never reused for
+        # a different one.
         cache_namespace = (
             "search:"
             f"limit={limit}:"
             f"colls={','.join(sorted(collections)) if collections else 'auto'}:"
             f"types={','.join(sorted(file_types)) if file_types else ''}:"
-            f"path={path_filter or ''}"
+            f"path={path_filter or ''}:"
+            f"tagsAny={','.join(sorted(tags_any)) if tags_any else ''}:"
+            f"tagsAll={','.join(sorted(tags_all)) if tags_all else ''}"
         )
         if self._cache and self._cache.enabled:
             cached = self._cache.lookup(query, namespace=cache_namespace)
@@ -235,8 +240,14 @@ class SearchService:
             must_conditions.append(FieldCondition(key="language", match=MatchAny(any=file_types)))
         if path_filter:
             must_conditions.append(FieldCondition(key="file_path", match=MatchValue(value=path_filter)))
-        if project:
-            must_conditions.append(FieldCondition(key="project", match=MatchValue(value=project)))
+        if tags_any:
+            # OR semantics across the provided tags — one MatchAny on `tags`.
+            must_conditions.append(FieldCondition(key="tags", match=MatchAny(any=list(tags_any))))
+        if tags_all:
+            # AND semantics — one MatchAny([tag]) condition per tag in the `must`
+            # list (Qdrant's `must` is itself an AND).
+            for tag in tags_all:
+                must_conditions.append(FieldCondition(key="tags", match=MatchAny(any=[tag])))
         query_filter = Filter(must=must_conditions) if must_conditions else None
 
         # Pull a wider candidate pool per collection when a reranker is going to
@@ -295,18 +306,23 @@ class SearchService:
         query: str,
         language: str | None = None,
         symbol_type: str | None = None,
-        project: str | None = None,
+        tags_any: list[str] | None = None,
+        tags_all: list[str] | None = None,
         path_filter: str | None = None,
         limit: int = 5,
     ) -> list[CodeSearchResult]:
-        """Search the single `mnemos_code` collection; scope to a project via
-        the `project` payload filter rather than per-project collections."""
+        """Search the single `mnemos_code` collection; scope to a project or
+        any other slice via the `tags` payload filter rather than per-project
+        collections."""
         dense_vec = self._embeddings.embed(query)
         sparse_vec = bm25_sparse(query)
 
         must_conditions: list = []
-        if project:
-            must_conditions.append(FieldCondition(key="project", match=MatchValue(value=project)))
+        if tags_any:
+            must_conditions.append(FieldCondition(key="tags", match=MatchAny(any=list(tags_any))))
+        if tags_all:
+            for tag in tags_all:
+                must_conditions.append(FieldCondition(key="tags", match=MatchAny(any=[tag])))
         if language:
             must_conditions.append(FieldCondition(key="language", match=MatchValue(value=language)))
         if symbol_type:
@@ -325,7 +341,7 @@ class SearchService:
                 score=hit.score,
                 chunk_type=hit.payload.get("chunk_type", ""),
                 collection="mnemos_code",
-                metadata={"project": hit.payload.get("project")},
+                metadata={"tags": hit.payload.get("tags", [])},
                 language=hit.payload.get("language", ""),
                 symbol_name=hit.payload.get("symbol_name"),
                 package=hit.payload.get("package"),
@@ -359,7 +375,8 @@ class SearchService:
     def search_memory(
         self,
         query: str,
-        project: str | None = None,
+        tags_any: list[str] | None = None,
+        tags_all: list[str] | None = None,
         memory_type: str | None = None,
         limit: int = 5,
     ) -> list[MemoryResult]:
@@ -367,8 +384,11 @@ class SearchService:
         sparse_vec = bm25_sparse(query)
 
         must_conditions = [FieldCondition(key="status", match=MatchValue(value="approved"))]
-        if project:
-            must_conditions.append(FieldCondition(key="project", match=MatchValue(value=project)))
+        if tags_any:
+            must_conditions.append(FieldCondition(key="tags", match=MatchAny(any=list(tags_any))))
+        if tags_all:
+            for tag in tags_all:
+                must_conditions.append(FieldCondition(key="tags", match=MatchAny(any=[tag])))
         if memory_type:
             must_conditions.append(FieldCondition(key="memory_type", match=MatchValue(value=memory_type)))
         query_filter = Filter(must=must_conditions)
