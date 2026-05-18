@@ -22,6 +22,11 @@ def _handle_http_error(exc: Exception) -> None:
     sys.exit(1)
 
 
+def _parse_tags(value: str) -> list[str]:
+    """Split a comma-separated tag list and drop empty/whitespace entries."""
+    return [t.strip() for t in value.split(",") if t.strip()]
+
+
 # ---------------------------------------------------------------------------
 # Root group
 # ---------------------------------------------------------------------------
@@ -223,9 +228,9 @@ def search_code(
     if symbol_type:
         payload["symbol_type"] = symbol_type
     if tags:
-        payload["tags_any"] = [t.strip() for t in tags.split(",") if t.strip()]
+        payload["tags_any"] = _parse_tags(tags)
     if tags_all:
-        payload["tags_all"] = [t.strip() for t in tags_all.split(",") if t.strip()]
+        payload["tags_all"] = _parse_tags(tags_all)
     if path_filter:
         payload["path_filter"] = path_filter
 
@@ -296,9 +301,9 @@ def search_memory(
     url = f"{_base_url()}/api/search-memory"
     payload: dict = {"query": query, "limit": limit}
     if tags:
-        payload["tags_any"] = [t.strip() for t in tags.split(",") if t.strip()]
+        payload["tags_any"] = _parse_tags(tags)
     if tags_all:
-        payload["tags_all"] = [t.strip() for t in tags_all.split(",") if t.strip()]
+        payload["tags_all"] = _parse_tags(tags_all)
     if memory_type:
         payload["memory_type"] = memory_type
 
@@ -376,7 +381,7 @@ def reindex(
     if path:
         payload["path"] = path
     if tags:
-        payload["tags"] = [t.strip() for t in tags.split(",") if t.strip()]
+        payload["tags"] = _parse_tags(tags)
 
     try:
         resp = httpx.post(url, json=payload, timeout=600)

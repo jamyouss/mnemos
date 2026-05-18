@@ -160,7 +160,8 @@ def test_search_code_project_flag_removed():
         result = runner.invoke(
             cli, ["search-code", "--project", "moby", "handler"]
         )
-    assert result.exit_code != 0
+    # Click exits with code 2 on unknown options (UsageError), not a crash.
+    assert result.exit_code == 2
     assert "no such option" in result.output.lower() or "--project" in result.output
 
 
@@ -210,7 +211,7 @@ def test_search_memory_project_flag_removed():
         result = runner.invoke(
             cli, ["search-memory", "--project", "moby", "auth"]
         )
-    assert result.exit_code != 0
+    assert result.exit_code == 2
     assert "no such option" in result.output.lower() or "--project" in result.output
 
 
@@ -303,7 +304,7 @@ def test_reindex_project_flag_removed():
                 "moby",
             ],
         )
-    assert result.exit_code != 0
+    assert result.exit_code == 2
     assert "no such option" in result.output.lower() or "--project" in result.output
 
 
