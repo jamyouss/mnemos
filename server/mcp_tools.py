@@ -41,6 +41,16 @@ TOOL_DEFINITIONS: list[types.Tool] = [
                     "description": "Maximum number of results (default 5)",
                     "default": 5,
                 },
+                "tags_any": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Filter to chunks tagged with ANY of these (OR). Use for cross-cutting queries that span multiple sub-projects.",
+                },
+                "tags_all": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Filter to chunks tagged with ALL of these (AND). Combine with tags_any to narrow further.",
+                },
             },
             "required": ["query"],
         },
@@ -60,10 +70,6 @@ TOOL_DEFINITIONS: list[types.Tool] = [
                     "type": "string",
                     "description": "Optional chunk type filter (e.g. function, type)",
                 },
-                "project": {
-                    "type": "string",
-                    "description": "Optional project name — applied as a payload filter on the `mnemos_code` collection",
-                },
                 "path_filter": {
                     "type": "string",
                     "description": "Optional file path filter",
@@ -72,6 +78,16 @@ TOOL_DEFINITIONS: list[types.Tool] = [
                     "type": "integer",
                     "description": "Maximum number of results (default 5)",
                     "default": 5,
+                },
+                "tags_any": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Filter to chunks tagged with ANY of these (OR). Use for cross-cutting queries that span multiple sub-projects.",
+                },
+                "tags_all": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Filter to chunks tagged with ALL of these (AND). Combine with tags_any to narrow further.",
                 },
             },
             "required": ["query"],
@@ -100,10 +116,6 @@ TOOL_DEFINITIONS: list[types.Tool] = [
             "type": "object",
             "properties": {
                 "query": {"type": "string", "description": "The memory search query"},
-                "project": {
-                    "type": "string",
-                    "description": "Optional project name filter",
-                },
                 "memory_type": {
                     "type": "string",
                     "description": "Optional memory type filter",
@@ -112,6 +124,16 @@ TOOL_DEFINITIONS: list[types.Tool] = [
                     "type": "integer",
                     "description": "Maximum number of results (default 5)",
                     "default": 5,
+                },
+                "tags_any": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Filter to chunks tagged with ANY of these (OR). Use for cross-cutting queries that span multiple sub-projects.",
+                },
+                "tags_all": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Filter to chunks tagged with ALL of these (AND). Combine with tags_any to narrow further.",
                 },
             },
             "required": ["query"],
@@ -263,6 +285,8 @@ async def _dispatch_tool(
             file_types=args.get("file_types"),
             path_filter=args.get("path_filter"),
             limit=args.get("limit", 5),
+            tags_any=args.get("tags_any"),
+            tags_all=args.get("tags_all"),
         )
         return [r.model_dump() for r in results]
 
@@ -271,9 +295,10 @@ async def _dispatch_tool(
             query=args["query"],
             language=args.get("language"),
             symbol_type=args.get("symbol_type"),
-            project=args.get("project"),
             path_filter=args.get("path_filter"),
             limit=args.get("limit", 5),
+            tags_any=args.get("tags_any"),
+            tags_all=args.get("tags_all"),
         )
         return [r.model_dump() for r in results]
 
@@ -287,9 +312,10 @@ async def _dispatch_tool(
     if name == "mnemos_search_memory":
         results = search_service.search_memory(
             query=args["query"],
-            project=args.get("project"),
             memory_type=args.get("memory_type"),
             limit=args.get("limit", 5),
+            tags_any=args.get("tags_any"),
+            tags_all=args.get("tags_all"),
         )
         return [r.model_dump() for r in results]
 
