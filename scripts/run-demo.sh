@@ -40,7 +40,7 @@ RESP=$(curl -s -X POST "${MNEMOS_URL}/api/reindex" \
     \"recreate\":false,
     \"workers\":1,
     \"path\":\"${CONTAINER_PATH}\",
-    \"project\":\"quickstart-demo\"
+    \"tags\":[\"quickstart-demo\"]
   }")
 echo "    $RESP"
 
@@ -60,13 +60,13 @@ echo ""
 echo "==> Sample search: 'how is the user created?'"
 curl -s -X POST "${MNEMOS_URL}/api/search-code" \
   -H "Content-Type: application/json" \
-  -d '{"query":"how is the user created?","project":"quickstart-demo","limit":3}' \
+  -d '{"query":"how is the user created?","tags_any":["quickstart-demo"],"limit":3}' \
   | python3 -c '
 import json, sys
 d = json.load(sys.stdin)
 for i, r in enumerate(d.get("results", []), 1):
-    proj = (r.get("metadata") or {}).get("project") or "-"
-    print(f"  {i}. project={proj!r:20s} score={r[\"score\"]:.3f}")
+    tags = ", ".join((r.get("metadata") or {}).get("tags") or [])
+    print(f"  {i}. tags=[{tags}]  score={r[\"score\"]:.3f}")
     print(f"     {r[\"file_path\"]}")
 '
 
