@@ -71,23 +71,48 @@ search.
 
 ## 🎯 What makes Mnemos different
 
-| | Mnemos | Cursor | GitHub Copilot | Continue.dev | Sourcegraph Cody | mem0 |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| **Self-hosted (no SaaS)** | ✅ | ❌ | ❌ | ✅ | ⚠️ ent. | ✅ |
-| **MCP server (native)** | ✅ | ❌ | ❌ | client | ❌ | partial |
-| **Memories from git history** | ✅ **unique** | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Approval workflow on memories** | ✅ **unique** | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **AST-based code chunking** | ✅ | ?? | ?? | partial | ✅ | n/a |
-| **Skill indexing for agents** | ✅ **unique** | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Hybrid BM25 + dense + RRF** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **Cross-encoder reranker** | ✅ | ✅ | ✅ | ✅ | ✅ | partial |
-| **CRAG corrective loop** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **LLM-pluggable** (Ollama/Anthropic/OpenAI) | ✅ | ❌ | ❌ | ✅ | ⚠️ | ✅ |
-| **Multi-tenant deployable** | ✅ | n/a | n/a | ❌ | enterprise | ✅ |
-| **Open eval harness shipped** | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ |
+There are plenty of code-retrieval and AI-coding products out there. Mnemos
+isn't trying to replace your editor or your code search — it sits behind
+them and gives any MCP-compatible agent a sharper memory of your code, your
+docs and your work history.
 
-The combination is what's unique: **memory pipeline from git + agent-first
-design + SOTA retrieval, all self-hosted**. Nobody else ships that bundle.
+What's distinctive about the bundle Mnemos ships:
+
+- **Memories extracted from your git history.** A pre-push hook reads each
+  diff through an LLM, structures it into decisions / patterns / lessons,
+  dedupes against what's already known, and queues it for your approval.
+  The agent recalls those memories on demand. This pipeline — git → LLM →
+  dedup → human review → searchable memory — isn't something we've seen in
+  other coding tools.
+
+- **A human-in-the-loop approval gate** on every extracted memory. Only
+  approved entries surface in search. You get the benefit of automatic
+  capture without the noise of letting an LLM auto-decide what to remember.
+
+- **Agent-skill and agent-doc indexing as first-class citizens.** Alongside
+  your code, Mnemos indexes your `~/.claude/skills/` and `~/.claude/docs/`
+  collections, so an agent can ask "is there a skill for X?" or "what's our
+  internal convention on Y?" against the same retrieval pipeline.
+
+- **MCP-native server, not a wrapper.** Drop the URL in your agent config
+  and you get 9 tools immediately: cross-collection search, code-only
+  search, skill search, memory search, memory mutations, reindex, status.
+
+- **Production-grade retrieval, all opt-in.** Hybrid BM25 + dense + RRF
+  fusion, cross-encoder reranker, contextual chunking, CRAG corrective
+  loop (grader + rewriter), semantic router, semantic cache — every
+  component is feature-flagged so you upgrade behaviour without breaking
+  reproducibility.
+
+- **Self-hosted, LLM-agnostic.** Qdrant + sentence-transformers + your
+  choice of LLM (Ollama / Anthropic / any OpenAI-compatible endpoint,
+  including vLLM, LM Studio, Groq, Together, OpenRouter). Nothing leaves
+  your machine unless you point it at a cloud LLM.
+
+- **Open eval harness with measured numbers.** Bench your own retrieval
+  changes: `mnemos eval run` against a golden set, MRR / NDCG / R@k /
+  P@k reported, runs diffable across configurations. The +47 % MRR
+  headline comes from this same harness on the clean golden set.
 
 ---
 
