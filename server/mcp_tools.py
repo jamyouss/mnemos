@@ -17,7 +17,15 @@ from server.search import SearchService
 TOOL_DEFINITIONS: list[types.Tool] = [
     types.Tool(
         name="mnemos_search",
-        description="Search across all indexed collections (docs, skills, code) using semantic similarity.",
+        description=(
+            "Broad semantic search across docs + skills + code. Use when the question "
+            "spans multiple sources or you're not sure where the answer lives. For "
+            "pure code lookups prefer mnemos_search_code (cheaper, code-aware). "
+            "Workflow: start with the default mode=preview and limit=5; if the "
+            "right hit appears, re-call with mode=full and a path_filter to fetch "
+            "the whole chunk. Use tags_any/tags_all to scope to a project. "
+            "Truncated previews are marked metadata.truncated=true."
+        ),
         inputSchema={
             "type": "object",
             "properties": {
@@ -63,7 +71,16 @@ TOOL_DEFINITIONS: list[types.Tool] = [
     ),
     types.Tool(
         name="mnemos_search_code",
-        description="Search code-specific collections for functions, types, or logic.",
+        description=(
+            "Code-aware semantic search over the indexed codebase (Go AST chunks, "
+            "Vue SFC blocks, fallback). Returns functions, types or sections — not "
+            "whole files. Prefer this over mnemos_search for any 'where is X "
+            "implemented / how does Y work' question. Workflow: keep the default "
+            "limit=3 and mode=preview, scope with tags_any (project) and/or "
+            "path_filter, then re-call with mode=full once you've identified the "
+            "target file. metadata.truncated=true signals a preview was cut. "
+            "Bumping limit past 5 usually means the query is too vague."
+        ),
         inputSchema={
             "type": "object",
             "properties": {
@@ -107,7 +124,12 @@ TOOL_DEFINITIONS: list[types.Tool] = [
     ),
     types.Tool(
         name="mnemos_search_skills",
-        description="Search Claude Code skills by semantic similarity.",
+        description=(
+            "Find Claude Code skills relevant to the user's task. Returns "
+            "skill name + 200-char description preview. Use when you suspect a "
+            "specialised skill exists (DevOps, DDD, frontend…) but you don't "
+            "remember the exact slug. Already preview-only — no mode flag needed."
+        ),
         inputSchema={
             "type": "object",
             "properties": {
@@ -123,7 +145,14 @@ TOOL_DEFINITIONS: list[types.Tool] = [
     ),
     types.Tool(
         name="mnemos_search_memory",
-        description="Search approved memory entries for past decisions and context.",
+        description=(
+            "Search approved memories (decisions, patterns, lessons, conventions) "
+            "extracted from prior work. Only returns status='approved' entries. "
+            "Use BEFORE re-deciding anything that smells like a recurring choice "
+            "('which library', 'how do we handle X', past incidents). Default "
+            "mode=preview is usually enough since memories are short; switch to "
+            "mode=full only if a preview was truncated."
+        ),
         inputSchema={
             "type": "object",
             "properties": {
