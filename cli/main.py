@@ -177,6 +177,13 @@ def status() -> None:
     default=None,
     help="Comma-separated tags, AND semantics (sent as tags_all). Example: --tags-all acme,vue3",
 )
+@click.option(
+    "--mode",
+    type=click.Choice(["preview", "full"]),
+    default="preview",
+    show_default=True,
+    help="preview truncates each chunk; full returns whole chunks.",
+)
 def search(
     query: str,
     limit: int,
@@ -185,10 +192,11 @@ def search(
     path_filter: str | None,
     tags: str | None,
     tags_all: str | None,
+    mode: str,
 ) -> None:
     """Search across all indexed documents."""
     url = f"{_base_url()}/api/search"
-    payload: dict = {"query": query, "limit": limit}
+    payload: dict = {"query": query, "limit": limit, "mode": mode}
     if collection:
         payload["collections"] = list(collection)
     if file_type:
@@ -234,6 +242,13 @@ def search(
     help="Comma-separated tags (AND filter). Example: --tags-all acme,vue3",
 )
 @click.option("--path-filter", default=None, help="Filter by file path substring.")
+@click.option(
+    "--mode",
+    type=click.Choice(["preview", "full"]),
+    default="preview",
+    show_default=True,
+    help="preview truncates each chunk; full returns whole chunks.",
+)
 def search_code(
     query: str,
     limit: int,
@@ -242,10 +257,11 @@ def search_code(
     tags: str | None,
     tags_all: str | None,
     path_filter: str | None,
+    mode: str,
 ) -> None:
     """Search code-specific index."""
     url = f"{_base_url()}/api/search-code"
-    payload: dict = {"query": query, "limit": limit}
+    payload: dict = {"query": query, "limit": limit, "mode": mode}
     if language:
         payload["language"] = language
     if symbol_type:
@@ -313,16 +329,24 @@ def search_skills(query: str, limit: int) -> None:
     help="Comma-separated tags (AND filter). Example: --tags-all moby,decision",
 )
 @click.option("--type", "memory_type", default=None, help="Filter by memory_type (decision, pattern, lesson, convention).")
+@click.option(
+    "--mode",
+    type=click.Choice(["preview", "full"]),
+    default="preview",
+    show_default=True,
+    help="preview truncates each entry's content; full returns whole entries.",
+)
 def search_memory(
     query: str,
     limit: int,
     tags: str | None,
     tags_all: str | None,
     memory_type: str | None,
+    mode: str,
 ) -> None:
     """Search approved memory entries."""
     url = f"{_base_url()}/api/search-memory"
-    payload: dict = {"query": query, "limit": limit}
+    payload: dict = {"query": query, "limit": limit, "mode": mode}
     if tags:
         payload["tags_any"] = _parse_tags(tags)
     if tags_all:

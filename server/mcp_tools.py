@@ -51,6 +51,12 @@ TOOL_DEFINITIONS: list[types.Tool] = [
                     "items": {"type": "string"},
                     "description": "Filter to chunks tagged with ALL of these (AND). Combine with tags_any to narrow further.",
                 },
+                "mode": {
+                    "type": "string",
+                    "enum": ["preview", "full"],
+                    "description": "preview (default) truncates each chunk's content to ~30 lines / 1500 chars and sets metadata.truncated=true; full returns the entire chunk. Start with preview, re-call with mode=full + path_filter once you've identified the relevant file.",
+                    "default": "preview",
+                },
             },
             "required": ["query"],
         },
@@ -88,6 +94,12 @@ TOOL_DEFINITIONS: list[types.Tool] = [
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "Filter to chunks tagged with ALL of these (AND). Combine with tags_any to narrow further.",
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["preview", "full"],
+                    "description": "preview (default) truncates each chunk's content to ~30 lines / 1500 chars and sets metadata.truncated=true; full returns the entire chunk. Start with preview, re-call with mode=full + path_filter once you've identified the relevant file.",
+                    "default": "preview",
                 },
             },
             "required": ["query"],
@@ -134,6 +146,12 @@ TOOL_DEFINITIONS: list[types.Tool] = [
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "Filter to chunks tagged with ALL of these (AND). Combine with tags_any to narrow further.",
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["preview", "full"],
+                    "description": "preview (default) truncates each chunk's content to ~30 lines / 1500 chars and sets metadata.truncated=true; full returns the entire chunk. Start with preview, re-call with mode=full + path_filter once you've identified the relevant file.",
+                    "default": "preview",
                 },
             },
             "required": ["query"],
@@ -292,6 +310,7 @@ async def _dispatch_tool(
             limit=args.get("limit", 5),
             tags_any=args.get("tags_any"),
             tags_all=args.get("tags_all"),
+            mode=args.get("mode", "preview"),
         )
         return [r.model_dump() for r in results]
 
@@ -304,6 +323,7 @@ async def _dispatch_tool(
             limit=args.get("limit", 5),
             tags_any=args.get("tags_any"),
             tags_all=args.get("tags_all"),
+            mode=args.get("mode", "preview"),
         )
         return [r.model_dump() for r in results]
 
@@ -321,6 +341,7 @@ async def _dispatch_tool(
             limit=args.get("limit", 5),
             tags_any=args.get("tags_any"),
             tags_all=args.get("tags_all"),
+            mode=args.get("mode", "preview"),
         )
         return [r.model_dump() for r in results]
 

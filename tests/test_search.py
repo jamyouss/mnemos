@@ -73,6 +73,92 @@ def test_search_returns_search_results(search_service, mock_qdrant):
     assert results[0].score == 0.87
 
 
+def _big_content(lines: int = 80) -> str:
+    """A chunk content long enough to overflow preview budgets."""
+    return "\n".join(f"line_{i}_with_some_filler_text_for_chars" for i in range(lines))
+
+
+def test_search_preview_mode_truncates_long_content(search_service, mock_qdrant):
+    big = _big_content(80)
+    _mock_query_points(mock_qdrant, [
+        MagicMock(
+            score=0.9,
+            payload={
+                "content": big,
+                "file_path": "x.go",
+                "chunk_type": "function",
+                "language": "go",
+                "symbol_name": "Big",
+            },
+        )
+    ])
+    results = search_service.search(
+        query="anything", collections=["mnemos_code"], limit=5, mode="preview"
+    )
+    assert len(results) == 1
+    out = results[0].content
+    assert len(out) < len(big), "preview must shrink the content"
+    assert "[truncated" in out, "preview must signal truncation inside content"
+    assert results[0].metadata.get("truncated") is True
+
+
+def test_search_full_mode_returns_full_content(search_service, mock_qdrant):
+    big = _big_content(80)
+    _mock_query_points(mock_qdrant, [
+        MagicMock(
+            score=0.9,
+            payload={
+                "content": big,
+                "file_path": "x.go",
+                "chunk_type": "function",
+            },
+        )
+    ])
+    results = search_service.search(
+        query="anything", collections=["mnemos_code"], limit=5, mode="full"
+    )
+    assert len(results) == 1
+    assert results[0].content == big
+    assert "truncated" not in results[0].metadata
+
+
+def test_search_preview_mode_leaves_short_content_intact(search_service, mock_qdrant):
+    """Chunks already under the budget must not be touched (no marker appended)."""
+    short = "func Tiny() {}"
+    _mock_query_points(mock_qdrant, [
+        MagicMock(
+            score=0.9,
+            payload={"content": short, "file_path": "x.go", "chunk_type": "function"},
+        )
+    ])
+    results = search_service.search(
+        query="anything", collections=["mnemos_code"], limit=5, mode="preview"
+    )
+    assert results[0].content == short
+    assert "truncated" not in results[0].metadata
+
+
+def test_search_code_respects_mode(search_service, mock_qdrant):
+    big = _big_content(80)
+    _mock_query_points(mock_qdrant, [
+        MagicMock(
+            score=0.9,
+            payload={
+                "content": big,
+                "file_path": "x.go",
+                "chunk_type": "function",
+                "language": "go",
+                "symbol_name": "Big",
+                "tags": ["proj"],
+            },
+        )
+    ])
+    preview = search_service.search_code(query="x", limit=3, mode="preview")
+    full = search_service.search_code(query="x", limit=3, mode="full")
+    assert preview[0].content != big
+    assert full[0].content == big
+
+
 def test_search_metadata_drops_bookkeeping_fields(search_service, mock_qdrant):
     """SearchResult.metadata should not leak indexer bookkeeping fields like
     last_indexed_at / file_mtime / chunk_index — they bloat LLM responses

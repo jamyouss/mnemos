@@ -52,6 +52,7 @@ class SearchRequest(BaseModel):
     limit: int = 5
     tags_any: Optional[List[str]] = None  # OR filter on payload `tags`.
     tags_all: Optional[List[str]] = None  # AND filter on payload `tags`.
+    mode: str = "preview"                 # "preview" truncates chunks; "full" returns whole chunks.
 
 
 class SearchCodeRequest(BaseModel):
@@ -62,6 +63,7 @@ class SearchCodeRequest(BaseModel):
     limit: int = 5
     tags_any: Optional[List[str]] = None
     tags_all: Optional[List[str]] = None
+    mode: str = "preview"
 
 
 class SearchSkillsRequest(BaseModel):
@@ -193,6 +195,7 @@ async def search(body: SearchRequest, request: Request):
         limit=body.limit,
         tags_any=body.tags_any,
         tags_all=body.tags_all,
+        mode=body.mode,
     )
     return {"results": [r.model_dump() for r in results]}
 
@@ -207,6 +210,7 @@ async def search_code(body: SearchCodeRequest, request: Request):
         limit=body.limit,
         tags_any=body.tags_any,
         tags_all=body.tags_all,
+        mode=body.mode,
     )
     return {"results": [r.model_dump() for r in results]}
 
@@ -226,6 +230,7 @@ class SearchMemoryRequest(BaseModel):
     limit: int = 5
     tags_any: Optional[List[str]] = None
     tags_all: Optional[List[str]] = None
+    mode: str = "preview"
 
 
 @api_router.post("/api/search-memory")
@@ -236,6 +241,7 @@ async def search_memory(body: SearchMemoryRequest, request: Request):
         limit=body.limit,
         tags_any=body.tags_any,
         tags_all=body.tags_all,
+        mode=body.mode,
     )
     # Map memory results to a search-result-compatible shape so eval/harness can consume them.
     return {

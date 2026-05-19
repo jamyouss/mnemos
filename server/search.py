@@ -55,6 +55,53 @@ def _filter_metadata(payload: dict) -> dict:
     return {k: payload[k] for k in _METADATA_KEEP if k in payload}
 
 
+# Preview mode budget. Most code chunks fit comfortably; only long
+# Go functions / Markdown sections get truncated. Callers asking for
+# `mode="full"` bypass this entirely.
+_PREVIEW_MAX_LINES = 30
+_PREVIEW_MAX_CHARS = 1500
+_TRUNCATION_MARKER = "\n… [truncated — call again with mode=\"full\" or a narrower path_filter]"
+
+
+def _truncate_preview(text: str) -> tuple[str, bool]:
+    """Return (text, truncated) where the text is capped to the preview budget.
+
+    Truncation triggers on whichever budget (lines or chars) hits first.
+    """
+    if not text:
+        return text, False
+    char_budget_hit = len(text) > _PREVIEW_MAX_CHARS
+    lines = text.splitlines()
+    line_budget_hit = len(lines) > _PREVIEW_MAX_LINES
+    if not (char_budget_hit or line_budget_hit):
+        return text, False
+    # Take min of both budgets so we never overshoot either.
+    cut_by_lines = "\n".join(lines[:_PREVIEW_MAX_LINES])
+    cut_by_chars = text[:_PREVIEW_MAX_CHARS]
+    truncated = cut_by_lines if len(cut_by_lines) <= len(cut_by_chars) else cut_by_chars
+    return truncated.rstrip() + _TRUNCATION_MARKER, True
+
+
+def _apply_preview_mode(results: list, mode: str) -> list:
+    """Mutate each result's `content` to a preview when `mode == "preview"`.
+
+    Sets `metadata["truncated"] = True` on results that were cut so the LLM
+    caller knows it can re-fetch in `mode="full"` to see the rest.
+    """
+    if mode != "preview" or not results:
+        return results
+    for r in results:
+        new_content, truncated = _truncate_preview(r.content)
+        if truncated:
+            r.content = new_content
+            # SearchResult.metadata is a plain dict on the base model; on
+            # subclasses with dedicated fields it's still present.
+            meta = getattr(r, "metadata", None)
+            if isinstance(meta, dict):
+                meta["truncated"] = True
+    return results
+
+
 class SearchService:
     def __init__(
         self,
@@ -206,6 +253,7 @@ class SearchService:
         limit: int = 5,
         tags_any: list[str] | None = None,
         tags_all: list[str] | None = None,
+        mode: str = "preview",
     ) -> list[SearchResult]:
         t_start = time.perf_counter()
 
@@ -217,6 +265,7 @@ class SearchService:
         cache_namespace = (
             "search:"
             f"limit={limit}:"
+            f"mode={mode}:"
             f"colls={','.join(sorted(collections)) if collections else 'auto'}:"
             f"types={','.join(sorted(file_types)) if file_types else ''}:"
             f"path={path_filter or ''}:"
@@ -291,6 +340,9 @@ class SearchService:
         # --- 3. Rerank + (optional) MMR ---
         final = self._rerank_and_select(query, all_results, limit)
 
+        # --- 3b. Preview truncation (default) ---
+        final = _apply_preview_mode(final, mode)
+
         # --- 4. Cache write-through ---
         if self._cache and self._cache.enabled and final:
             self._cache.store(query, final, namespace=cache_namespace)
@@ -323,6 +375,7 @@ class SearchService:
         tags_all: list[str] | None = None,
         path_filter: str | None = None,
         limit: int = 5,
+        mode: str = "preview",
     ) -> list[CodeSearchResult]:
         """Search the single `mnemos_code` collection; scope to a project or
         any other slice via the `tags` payload filter rather than per-project
@@ -362,7 +415,8 @@ class SearchService:
             for hit in hits
         ]
 
-        return self._rerank_and_select(query, all_results, limit)
+        final = self._rerank_and_select(query, all_results, limit)
+        return _apply_preview_mode(final, mode)
 
     def search_skills(self, query: str, limit: int = 3) -> list[SkillResult]:
         dense_vec = self._embeddings.embed(query)
@@ -392,6 +446,7 @@ class SearchService:
         tags_all: list[str] | None = None,
         memory_type: str | None = None,
         limit: int = 5,
+        mode: str = "preview",
     ) -> list[MemoryResult]:
         dense_vec = self._embeddings.embed(query)
         sparse_vec = bm25_sparse(query)
@@ -424,5 +479,5 @@ class SearchService:
         if self._reranker is not None and self._reranker.enabled and results:
             candidates = [(r.content, r) for r in results]
             ranked = self._reranker.rerank(query, candidates, top_k=limit)
-            return [s.payload for s in ranked]
-        return results[:limit]
+            return _apply_preview_mode([s.payload for s in ranked], mode)
+        return _apply_preview_mode(results[:limit], mode)
