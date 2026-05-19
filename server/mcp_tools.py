@@ -13,6 +13,51 @@ from core.embeddings import EmbeddingService
 from core.indexer import Indexer
 from server.search import SearchService
 
+# Hard cap on the JSON payload size for search-tool responses, in characters.
+# 32K chars ≈ 8K tokens at the standard ~4-chars-per-token estimate. Even after
+# preview-mode truncation and metadata whitelisting, a degenerate hit (a
+# 1500-char preview × limit) can still chip away at the LLM context. This is
+# the last-line defence so a Mnemos call can never blow the caller out of its
+# context window. Overrideable via env (MNEMOS_RESPONSE_BUDGET_CHARS).
+import os as _os
+_RESPONSE_BUDGET_CHARS = int(_os.environ.get("MNEMOS_RESPONSE_BUDGET_CHARS", "32000"))
+
+
+def _apply_response_budget(results: list[dict], budget_chars: int = _RESPONSE_BUDGET_CHARS) -> dict:
+    """Wrap a list of result dicts in an envelope and drop the tail if needed.
+
+    The envelope always has the same shape so the LLM caller can rely on it::
+
+        {"results": [...], "kept": <int>, "dropped": <int>}
+
+    The first result is always kept (even if it alone exceeds the budget) —
+    returning zero hits on a successful retrieval would mislead the caller
+    more than returning one big one.
+    """
+    envelope: dict = {"results": [], "kept": 0, "dropped": 0}
+    if not results:
+        return envelope
+
+    # Cost of the empty envelope (give or take a few bytes — we only need a
+    # ballpark since the per-result lengths dominate).
+    base_cost = len(json.dumps(envelope, separators=(",", ":"), ensure_ascii=False))
+    running = base_cost
+    kept: list[dict] = []
+    for r in results:
+        item_len = len(json.dumps(r, separators=(",", ":"), ensure_ascii=False))
+        # +1 for the comma between array elements (when there's already one).
+        delta = item_len + (1 if kept else 0)
+        if kept and running + delta > budget_chars:
+            break
+        kept.append(r)
+        running += delta
+
+    envelope["results"] = kept
+    envelope["kept"] = len(kept)
+    envelope["dropped"] = len(results) - len(kept)
+    return envelope
+
+
 # Registry of all tool definitions, used in list_tools and for testing
 TOOL_DEFINITIONS: list[types.Tool] = [
     types.Tool(
@@ -341,7 +386,7 @@ async def _dispatch_tool(
             tags_all=args.get("tags_all"),
             mode=args.get("mode", "preview"),
         )
-        return [r.model_dump() for r in results]
+        return _apply_response_budget([r.model_dump() for r in results])
 
     if name == "mnemos_search_code":
         results = search_service.search_code(
@@ -354,14 +399,14 @@ async def _dispatch_tool(
             tags_all=args.get("tags_all"),
             mode=args.get("mode", "preview"),
         )
-        return [r.model_dump() for r in results]
+        return _apply_response_budget([r.model_dump() for r in results])
 
     if name == "mnemos_search_skills":
         results = search_service.search_skills(
             query=args["query"],
             limit=args.get("limit", 3),
         )
-        return [r.model_dump() for r in results]
+        return _apply_response_budget([r.model_dump() for r in results])
 
     if name == "mnemos_search_memory":
         results = search_service.search_memory(
@@ -372,7 +417,7 @@ async def _dispatch_tool(
             tags_all=args.get("tags_all"),
             mode=args.get("mode", "preview"),
         )
-        return [r.model_dump() for r in results]
+        return _apply_response_budget([r.model_dump() for r in results])
 
     if name == "mnemos_memory":
         if deduplicator is None:

@@ -189,6 +189,83 @@ def test_dispatch_search_memory_forwards_tag_filters():
     assert "project" not in kwargs, "Dispatcher must not forward the legacy project kwarg"
 
 
+def _make_search_result(content: str = "x", file_path: str = "f.go"):
+    """Build a SearchResult-like Pydantic object the dispatcher can dump."""
+    from core.models import SearchResult
+    return SearchResult(
+        content=content,
+        file_path=file_path,
+        score=0.9,
+        chunk_type="function",
+        collection="mnemos_code",
+        metadata={},
+    )
+
+
+def test_apply_response_budget_envelope_shape():
+    from server.mcp_tools import _apply_response_budget
+
+    envelope = _apply_response_budget([{"a": 1}, {"b": 2}])
+    assert set(envelope.keys()) == {"results", "kept", "dropped"}
+    assert envelope["results"] == [{"a": 1}, {"b": 2}]
+    assert envelope["kept"] == 2
+    assert envelope["dropped"] == 0
+
+
+def test_apply_response_budget_drops_trailing_results_when_over_budget():
+    from server.mcp_tools import _apply_response_budget
+
+    big = {"content": "x" * 5000}
+    envelope = _apply_response_budget([big, big, big, big, big], budget_chars=12000)
+    # First item is always kept; later ones depend on budget. 5000 chars × 5 ≈ 25k chars,
+    # so a 12k budget should drop at least the last two.
+    assert envelope["kept"] >= 1
+    assert envelope["dropped"] >= 1
+    assert envelope["kept"] + envelope["dropped"] == 5
+
+
+def test_apply_response_budget_keeps_first_result_even_if_oversized():
+    from server.mcp_tools import _apply_response_budget
+
+    huge = {"content": "x" * 50000}
+    envelope = _apply_response_budget([huge, {"small": 1}], budget_chars=10000)
+    assert envelope["kept"] == 1, "first hit must always be returned"
+    assert envelope["dropped"] == 1
+    assert envelope["results"][0] is huge
+
+
+def test_apply_response_budget_empty_input():
+    from server.mcp_tools import _apply_response_budget
+
+    envelope = _apply_response_budget([])
+    assert envelope == {"results": [], "kept": 0, "dropped": 0}
+
+
+def test_dispatch_search_wraps_results_in_envelope():
+    """The MCP search dispatcher must return the envelope shape so the LLM
+    caller can rely on a stable response structure."""
+    search_service = MagicMock()
+    search_service.search.return_value = [
+        _make_search_result(),
+        _make_search_result(file_path="g.go"),
+    ]
+    indexer = MagicMock()
+
+    result = asyncio.run(
+        _dispatch_tool(
+            name="mnemos_search",
+            args={"query": "x"},
+            search_service=search_service,
+            indexer=indexer,
+            qdrant_client=None,
+        )
+    )
+    assert isinstance(result, dict)
+    assert set(result.keys()) == {"results", "kept", "dropped"}
+    assert result["kept"] == 2
+    assert result["dropped"] == 0
+
+
 def test_call_tool_returns_compact_json():
     """MCP responses must be compact JSON (no pretty-printing) — every newline
     or extra space inside the envelope eats LLM tokens for no benefit."""
