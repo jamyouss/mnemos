@@ -7,6 +7,18 @@ import mcp.types as types
 from server.mcp_tools import TOOL_DEFINITIONS, _dispatch_tool, create_mcp_server
 
 
+def _call_tool_text(mcp_server, name: str, args: dict | None = None) -> str:
+    """Invoke the registered call_tool handler and return the text payload."""
+    handler = mcp_server.request_handlers[types.CallToolRequest]
+    req = types.CallToolRequest(
+        method="tools/call",
+        params=types.CallToolRequestParams(name=name, arguments=args or {}),
+    )
+    result = asyncio.run(handler(req))
+    # ServerResult.root.content[0].text
+    return result.root.content[0].text
+
+
 def test_mcp_server_has_all_tools():
     search_service = MagicMock()
     indexer = MagicMock()
@@ -175,6 +187,26 @@ def test_dispatch_search_memory_forwards_tag_filters():
     assert kwargs["tags_any"] == ["moby"]
     assert kwargs["tags_all"] == ["lesson"]
     assert "project" not in kwargs, "Dispatcher must not forward the legacy project kwarg"
+
+
+def test_call_tool_returns_compact_json():
+    """MCP responses must be compact JSON (no pretty-printing) — every newline
+    or extra space inside the envelope eats LLM tokens for no benefit."""
+    search_service = MagicMock()
+    search_service.search.return_value = []
+    indexer = MagicMock()
+    mcp_server = create_mcp_server(search_service=search_service, indexer=indexer)
+
+    text = _call_tool_text(mcp_server, "mnemos_search", {"query": "anything"})
+    # An indent=2 dump of `[]` is just "[]" too, so we use a tool with non-empty
+    # output: mnemos_search returns [] for no hits but we round-trip a dispatch
+    # that actually produces a dict — use mnemos_reindex which always returns one.
+    text = _call_tool_text(
+        mcp_server, "mnemos_reindex", {"collection": "mnemos_code", "mode": "incremental"}
+    )
+    assert "\n" not in text, f"Response should be single-line compact JSON, got: {text!r}"
+    # Compact JSON uses no spaces around separators.
+    assert ", " not in text and ": " not in text
 
 
 def test_dispatch_search_forwards_tag_filters():

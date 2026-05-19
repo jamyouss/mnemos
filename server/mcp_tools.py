@@ -263,7 +263,12 @@ def create_mcp_server(
         args = arguments or {}
         try:
             result = await _dispatch_tool(name, args, search_service, indexer, qdrant_client, deduplicator)
-            return [types.TextContent(type="text", text=json.dumps(result, indent=2))]
+            # Compact JSON: LLMs don't need pretty-printing. Roughly halves the
+            # token cost of every MCP response.
+            return [types.TextContent(
+                type="text",
+                text=json.dumps(result, separators=(",", ":"), ensure_ascii=False),
+            )]
         except Exception as exc:
             return [types.TextContent(type="text", text=f"Error: {exc}")]
 
