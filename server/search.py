@@ -37,6 +37,23 @@ _PREFETCH_LIMIT = 20
 # How many candidates each per-collection hybrid query returns before reranking.
 _HYBRID_TOP = 20
 
+# Whitelist of payload fields surfaced to MCP/CLI clients in `SearchResult.metadata`.
+# Everything else (last_indexed_at, file_mtime, chunk_index, internal flags…) is
+# bookkeeping that adds tokens to LLM responses for zero retrieval value.
+_METADATA_KEEP: tuple[str, ...] = (
+    "symbol_name",
+    "package",
+    "language",
+    "tags",
+    "section",
+    "doc_title",
+    "preamble",
+)
+
+
+def _filter_metadata(payload: dict) -> dict:
+    return {k: payload[k] for k in _METADATA_KEEP if k in payload}
+
 
 class SearchService:
     def __init__(
@@ -163,11 +180,7 @@ class SearchService:
                         score=hit.score,
                         chunk_type=hit.payload.get("chunk_type", ""),
                         collection=coll_name,
-                        metadata={
-                            k: v
-                            for k, v in hit.payload.items()
-                            if k not in ("content", "file_path", "chunk_type")
-                        },
+                        metadata=_filter_metadata(hit.payload),
                     )
                 )
         return out

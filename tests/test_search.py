@@ -73,6 +73,41 @@ def test_search_returns_search_results(search_service, mock_qdrant):
     assert results[0].score == 0.87
 
 
+def test_search_metadata_drops_bookkeeping_fields(search_service, mock_qdrant):
+    """SearchResult.metadata should not leak indexer bookkeeping fields like
+    last_indexed_at / file_mtime / chunk_index — they bloat LLM responses
+    for zero retrieval value."""
+    _mock_query_points(mock_qdrant, [
+        MagicMock(
+            score=0.7,
+            payload={
+                "content": "func F()",
+                "file_path": "x.go",
+                "chunk_type": "function",
+                "language": "go",
+                "symbol_name": "F",
+                "tags": ["proj"],
+                # Bookkeeping fields that MUST be filtered out:
+                "last_indexed_at": "2026-05-19T00:00:00Z",
+                "file_mtime": 1716000000.0,
+                "chunk_index": 3,
+            },
+        )
+    ])
+    results = search_service.search(
+        query="anything", collections=["mnemos_code"], limit=5
+    )
+    assert len(results) == 1
+    meta = results[0].metadata
+    assert "last_indexed_at" not in meta
+    assert "file_mtime" not in meta
+    assert "chunk_index" not in meta
+    # And the useful ones survive
+    assert meta.get("symbol_name") == "F"
+    assert meta.get("language") == "go"
+    assert meta.get("tags") == ["proj"]
+
+
 def test_search_code_returns_code_results(search_service, mock_qdrant):
     _mock_query_points(mock_qdrant, [
         MagicMock(
