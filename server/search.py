@@ -374,7 +374,7 @@ class SearchService:
         tags_any: list[str] | None = None,
         tags_all: list[str] | None = None,
         path_filter: str | None = None,
-        limit: int = 5,
+        limit: int = 3,
         mode: str = "preview",
     ) -> list[CodeSearchResult]:
         """Search the single `mnemos_code` collection; scope to a project or

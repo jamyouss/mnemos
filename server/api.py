@@ -60,7 +60,7 @@ class SearchCodeRequest(BaseModel):
     language: Optional[str] = None
     symbol_type: Optional[str] = None
     path_filter: Optional[str] = None
-    limit: int = 5
+    limit: int = 3
     tags_any: Optional[List[str]] = None
     tags_all: Optional[List[str]] = None
     mode: str = "preview"

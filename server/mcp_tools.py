@@ -82,8 +82,8 @@ TOOL_DEFINITIONS: list[types.Tool] = [
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "Maximum number of results (default 5)",
-                    "default": 5,
+                    "description": "Maximum number of results (default 3 — small on purpose; bump only if the first call clearly missed the right chunk).",
+                    "default": 3,
                 },
                 "tags_any": {
                     "type": "array",
@@ -320,7 +320,7 @@ async def _dispatch_tool(
             language=args.get("language"),
             symbol_type=args.get("symbol_type"),
             path_filter=args.get("path_filter"),
-            limit=args.get("limit", 5),
+            limit=args.get("limit", 3),
             tags_any=args.get("tags_any"),
             tags_all=args.get("tags_all"),
             mode=args.get("mode", "preview"),

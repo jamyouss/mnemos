@@ -226,7 +226,7 @@ def search(
 
 @cli.command("search-code")
 @click.argument("query")
-@click.option("--limit", default=5, show_default=True, help="Number of results to return.")
+@click.option("--limit", default=3, show_default=True, help="Number of results to return.")
 @click.option("--language", default=None, help="Filter by programming language.")
 @click.option("--symbol-type", default=None, help="Filter by symbol type (func, type, etc.).")
 @click.option(
