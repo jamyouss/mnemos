@@ -1,18 +1,58 @@
 from __future__ import annotations
 
-import os
-import time
-import threading
+import errno
 import logging
+import os
+import threading
+import time
 
 import httpx
 from core.collections import COLLECTIONS
-from core.path_filter import should_skip_path
+from core.path_filter import IGNORE_DIRS, IGNORE_PATH_SUBSTRINGS, should_skip_path
+from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler, FileSystemEvent
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("rag-watcher")
+
+
+def _install_inotify_prune() -> None:
+    """Monkey-patch ``Inotify._add_dir_watch`` so the recursive walk skips
+    :data:`IGNORE_DIRS` and :data:`IGNORE_PATH_SUBSTRINGS`.
+
+    Keeps a single inotify instance + fd (one ``observer.schedule(...,
+    recursive=True)``) while pruning junk directories (``node_modules``,
+    ``.git``, ``dist`` …) so they never consume the host's
+    ``fs.inotify.max_user_watches`` budget.
+
+    No-op on non-Linux platforms (the inotify backend only exists on Linux).
+    """
+    try:
+        from watchdog.observers.inotify_c import Inotify  # type: ignore[import-not-found]
+    except Exception as e:
+        logger.info(f"Inotify backend unavailable ({e}); skipping prune patch")
+        return
+
+    ignore_bytes = {d.encode() for d in IGNORE_DIRS}
+    ignore_sub_bytes = tuple(s.encode() for s in IGNORE_PATH_SUBSTRINGS)
+
+    def _add_dir_watch(self, path: bytes, mask: int, *, recursive: bool) -> None:  # type: ignore[override]
+        if not os.path.isdir(path):
+            raise OSError(errno.ENOTDIR, os.strerror(errno.ENOTDIR), path)
+        self._add_watch(path, mask)
+        if not recursive:
+            return
+        for root, dirnames, _ in os.walk(path):
+            dirnames[:] = [d for d in dirnames if d not in ignore_bytes]
+            for dirname in dirnames:
+                full_path = os.path.join(root, dirname)
+                if os.path.islink(full_path):
+                    continue
+                if any(sub in full_path for sub in ignore_sub_bytes):
+                    continue
+                self._add_watch(full_path, mask)
+
+    Inotify._add_dir_watch = _add_dir_watch  # type: ignore[method-assign]
 
 RAG_SERVER_URL = os.getenv("MNEMOS_SERVER_URL", "http://rag-server:8100")
 DEBOUNCE_MS = int(os.getenv("WATCHER_DEBOUNCE_MS", "2000"))
@@ -61,9 +101,15 @@ class PathRouter:
 
 
 class DebouncedHandler(FileSystemEventHandler):
-    def __init__(self, router: PathRouter, debounce_seconds: float = 2.0) -> None:
+    def __init__(
+        self,
+        router: PathRouter,
+        debounce_seconds: float = 2.0,
+        observer: Observer | None = None,
+    ) -> None:
         self._router = router
         self._debounce = debounce_seconds
+        self._observer = observer
         self._pending: dict[str, tuple[str, str, str]] = {}
         self._timer: threading.Timer | None = None
         self._lock = threading.Lock()
@@ -127,18 +173,27 @@ def main() -> None:
     config_root = os.getenv("CLAUDE_CONFIG_PATH", "/data/claude-config")
     debounce = DEBOUNCE_MS / 1000.0
 
+    _install_inotify_prune()
+
     router = PathRouter(codebase_root=codebase_root, config_root=config_root)
-    handler = DebouncedHandler(router=router, debounce_seconds=debounce)
-
     observer = Observer()
-    observer.schedule(handler, codebase_root, recursive=True)
+    handler = DebouncedHandler(router=router, debounce_seconds=debounce, observer=observer)
 
+    if os.path.isdir(codebase_root):
+        observer.schedule(handler, codebase_root, recursive=True)
     if os.path.isdir(config_root):
         observer.schedule(handler, config_root, recursive=True)
 
     logger.info(f"Watching: {codebase_root}, {config_root}")
     logger.info(f"Debounce: {debounce}s")
-    observer.start()
+    try:
+        observer.start()
+    except OSError as e:
+        logger.error(
+            f"Cannot start observer: {e}. "
+            "Raise fs.inotify.max_user_watches and fs.inotify.max_user_instances on the host."
+        )
+        raise
 
     try:
         while True:
