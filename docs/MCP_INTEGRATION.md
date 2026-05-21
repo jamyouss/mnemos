@@ -43,31 +43,36 @@ Drop this in your `~/.claude/CLAUDE.md`:
 ```markdown
 ## Mnemos MCP — Search Priority
 
-ALWAYS try Mnemos MCP tools before Grep / Glob / Read. Mnemos has language-aware
-chunking, hybrid retrieval, and your indexed memory; it is faster and more
-relevant than text search for most questions.
+**ALWAYS try Mnemos MCP tools before falling back to traditional search (Grep, Glob, Read).** Mnemos provides semantic search across your indexed codebase, docs, skills, and memory — it is faster and more relevant than text-based search for most questions.
 
-### Search order
+### Search Order
 
-1. **First**: pick the right Mnemos tool by intent:
-   - `mnemos_search_code` — functions, types, implementations
-   - `mnemos_search` — general cross-collection (docs + code + skills)
-   - `mnemos_search_skills` — find the right agent skill
+1. **First**: Use Mnemos MCP tools based on intent:
+   - `mnemos_search_code` — looking for functions, types, patterns, implementations
+   - `mnemos_search` — general cross-collection search (docs + code + skills)
+   - `mnemos_search_skills` — finding relevant agent skills
    - `mnemos_search_memory` — past decisions, conventions, lessons learned
-   - `mnemos_status` — sanity check before assuming Mnemos is down
-2. **Fallback to Grep/Glob/Read** only when:
-   - Mnemos returns no results
-   - Scores are below 0.5
-   - `mnemos_status` shows an empty / unhealthy state
-3. **Persist insights**: after resolving a non-trivial question,
-   `mnemos_memory(content, project, memory_type)` to save it.
+   - `mnemos_status` — check if Mnemos is available and collections are populated
+
+2. **Fallback only if Mnemos returns no useful results**:
+   - No results at all, OR
+   - Results have low relevance scores (< 0.5), OR
+   - `mnemos_status` shows collection is empty or Mnemos is down
+
+   Then use Grep / Glob / Read as usual.
+
+3. **Always store insights**: After resolving a non-trivial question, use `mnemos_memory` to store the decision, pattern, or lesson — so future sessions benefit.
 
 ### When to skip Mnemos
 
-- Reading a specific known file path → Read directly
-- Listing directory contents → Glob directly
-- Checking git state → use git
-- Searching files just created in this session (not yet indexed)
+- Reading a specific known file path → use Read directly
+- Listing directory contents → use Glob directly
+- Checking git state → use git commands directly
+- Searching in files just created in current session (not yet indexed)
+
+### Rationale
+
+Mnemos is indexed with language-aware chunking (AST for Go/Vue), semantic embeddings, and auto-extracted memories from git history. A single `mnemos_search_code` call often replaces 5-10 Grep invocations. Use it.
 ```
 
 ## Claude Desktop
