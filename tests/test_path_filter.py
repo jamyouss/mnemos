@@ -330,3 +330,36 @@ def test_runtime_volumes_skipped(path: str) -> None:
 )
 def test_data_lookalikes_not_skipped(path: str) -> None:
     assert should_skip_path(path) is False
+# Tabular data built-ins + per-run exclude mechanism
+# ---------------------------------------------------------------------------
+
+
+def test_data_dumps_skipped() -> None:
+    """CSV/TSV are analytics/log exports, never source — denied by default so
+    the watcher (built-in list only) drops them durably."""
+    assert should_skip_path("/data/codebase/x/exports/run-2024-06-02.csv") is True
+    assert should_skip_path("/data/codebase/x/reports/audit.tsv") is True
+
+
+def test_extra_exts_opt_in() -> None:
+    """--exclude-ext extends the deny list for this run; leading dot optional."""
+    p = "/data/codebase/x/schema/service.proto"
+    assert should_skip_path(p) is False
+    assert should_skip_path(p, extra_exts=[".proto"]) is True
+    assert should_skip_path(p, extra_exts=["proto"]) is True  # dot optional
+
+
+def test_extra_dirs_opt_in() -> None:
+    """--exclude-dir skips a directory anywhere in the path via parts membership,
+    without matching a merely-similar sibling name."""
+    p = "/data/codebase/x/mocks/fake_client.go"
+    assert should_skip_path(p) is False
+    assert should_skip_path(p, extra_dirs=["mocks"]) is True
+    # near-miss: 'mockingbird' must NOT be caught by extra_dirs=['mocks']
+    assert should_skip_path("/data/codebase/x/mockingbird/main.go", extra_dirs=["mocks"]) is False
+
+
+def test_extras_default_noop() -> None:
+    """Empty extras must not change behaviour for legitimate source files."""
+    assert should_skip_path("/data/codebase/x/services/cart.ts") is False
+    assert should_skip_path("/data/codebase/x/services/cart.ts", extra_exts=[], extra_dirs=[]) is False

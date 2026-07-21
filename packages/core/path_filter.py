@@ -16,6 +16,7 @@ API caller cannot bypass the policy.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -100,6 +101,10 @@ IGNORE_EXTS: tuple[str, ...] = (
     ".woff", ".woff2", ".ttf", ".eot",
     # Archives & binaries
     ".pdf", ".zip", ".tar", ".gz", ".exe", ".bin", ".so", ".dylib",
+    # Tabular data / analytics & log exports — never source code, and a
+    # frequent source of retrieval noise when a project dumps report/log
+    # extracts into the indexed tree. Deny by default.
+    ".csv", ".tsv",
 )
 
 # Exact basenames.
@@ -129,18 +134,34 @@ IGNORE_BASENAME_SUBSTRINGS: tuple[str, ...] = (
 # ---------------------------------------------------------------------------
 
 
-def should_skip_path(path: str | Path) -> bool:
+def should_skip_path(
+    path: str | Path,
+    *,
+    extra_exts: Iterable[str] = (),
+    extra_dirs: Iterable[str] = (),
+) -> bool:
     """Return True if ``path`` must not be indexed.
 
     Callers should short-circuit before any chunking / embedding work.
+
+    ``extra_exts`` / ``extra_dirs`` extend the built-in deny lists for this
+    call only — e.g. ``mnemos reindex --exclude-ext .proto --exclude-dir mocks``
+    threads per-run excludes down to the walker. Both default to empty, so
+    existing call sites (watcher, indexer, push API) are unaffected. Leading
+    dots on ``extra_exts`` are optional (``"csv"`` == ``".csv"``); ``extra_dirs``
+    match against ``Path.parts`` membership like the built-in ``IGNORE_DIRS``.
     """
     if not path:
         return True
 
     p = path if isinstance(path, Path) else Path(path)
     name = p.name
+    parts = set(p.parts)
 
-    if set(p.parts) & IGNORE_DIRS:
+    if parts & IGNORE_DIRS:
+        return True
+
+    if extra_dirs and parts & {d.strip("/") for d in extra_dirs}:
         return True
 
     s = str(p)
@@ -151,6 +172,11 @@ def should_skip_path(path: str | Path) -> bool:
         return True
 
     if any(name.endswith(ext) for ext in IGNORE_EXTS):
+        return True
+
+    if extra_exts and any(
+        name.endswith(e if e.startswith(".") else "." + e) for e in extra_exts
+    ):
         return True
 
     if any(pat in name for pat in IGNORE_BASENAME_SUBSTRINGS):
