@@ -78,6 +78,8 @@ class ReindexRequest(BaseModel):
     recreate: bool = False           # Drop + recreate (needed when migrating to hybrid schema)
     workers: int = 1                 # Parallel worker threads for indexing
     tags: Optional[List[str]] = None # Override the auto-detected tag list for every file under `path`.
+    exclude_exts: List[str] = []     # Extra extensions to skip for this run (on top of the built-in deny list).
+    exclude_dirs: List[str] = []     # Extra directory names to skip for this run.
 
 
 class MemoryCreateRequest(BaseModel):
@@ -347,13 +349,14 @@ async def eval_sample(body: EvalSampleRequest, request: Request):
 # ---------------------------------------------------------------------------
 
 
-def _should_skip(fp) -> bool:
+def _should_skip(fp, extra_exts=(), extra_dirs=()) -> bool:
     """Delegate to the unified policy in :mod:`core.path_filter`.
 
     Kept as a thin wrapper so the existing call sites (``_run_reindex`` walker
-    and ``test_should_skip.py``) need no further change.
+    and ``test_should_skip.py``) need no further change. ``extra_exts`` /
+    ``extra_dirs`` carry the per-run ``--exclude-ext`` / ``--exclude-dir`` opts.
     """
-    return should_skip_path(fp)
+    return should_skip_path(fp, extra_exts=extra_exts, extra_dirs=extra_dirs)
 
 
 def _index_one_file(indexer, collection: str, fp, tags: list[str] | None = None) -> int:
@@ -378,6 +381,8 @@ def _run_reindex(
     full: bool,
     workers: int = 1,
     tags: list[str] | None = None,
+    exclude_exts: list[str] | None = None,
+    exclude_dirs: list[str] | None = None,
 ) -> None:
     """Background task: walk files and index them, optionally in parallel."""
     import logging
@@ -385,8 +390,11 @@ def _run_reindex(
 
     logger = logging.getLogger("rag.reindex")
 
+    exclude_exts = exclude_exts or []
+    exclude_dirs = exclude_dirs or []
+
     files = [fp for fp in (base_path.rglob("*") if full else [base_path])
-             if fp.is_file() and not _should_skip(fp)]
+             if fp.is_file() and not _should_skip(fp, exclude_exts, exclude_dirs)]
 
     if not files:
         logger.info(f"Reindex: collection={collection} no files to index")
@@ -444,6 +452,8 @@ async def reindex(body: ReindexRequest, request: Request, background_tasks: Back
             body.full,
             body.workers,
             body.tags,
+            body.exclude_exts,
+            body.exclude_dirs,
         )
         return {
             "status": "reindex_started",
@@ -452,6 +462,8 @@ async def reindex(body: ReindexRequest, request: Request, background_tasks: Back
             "workers": body.workers,
             "recreated": body.recreate,
             "tags": body.tags,
+            "exclude_exts": body.exclude_exts,
+            "exclude_dirs": body.exclude_dirs,
         }
 
     return {"status": "no_path", "collection": body.collection}

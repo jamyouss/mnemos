@@ -409,6 +409,20 @@ def search_memory(
     help="Comma-separated tags to attach to every file under --path "
     "(overrides auto-detected tags). Example: --tags moby,dgf,go",
 )
+@click.option(
+    "--exclude-ext",
+    "exclude_exts",
+    multiple=True,
+    help="Extra file extension to skip for this run (on top of the built-in "
+    "deny list). Repeatable. Leading dot optional. Example: --exclude-ext .csv --exclude-ext proto",
+)
+@click.option(
+    "--exclude-dir",
+    "exclude_dirs",
+    multiple=True,
+    help="Extra directory name to skip for this run (matched anywhere in the "
+    "path). Repeatable. Example: --exclude-dir mocks --exclude-dir fixtures",
+)
 def reindex(
     collection: str,
     path: str | None,
@@ -416,6 +430,8 @@ def reindex(
     recreate: bool,
     workers: int,
     tags: str | None,
+    exclude_exts: tuple[str, ...],
+    exclude_dirs: tuple[str, ...],
 ) -> None:
     """Trigger a reindex operation on the server."""
     url = f"{_base_url()}/api/reindex"
@@ -429,6 +445,10 @@ def reindex(
         payload["path"] = path
     if tags:
         payload["tags"] = _parse_tags(tags)
+    if exclude_exts:
+        payload["exclude_exts"] = list(exclude_exts)
+    if exclude_dirs:
+        payload["exclude_dirs"] = list(exclude_dirs)
 
     try:
         resp = httpx.post(url, json=payload, timeout=600)
