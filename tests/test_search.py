@@ -476,18 +476,25 @@ def test_every_search_entry_point_is_logged(
     assert logger.log.call_args.kwargs["latency_ms"] >= 0
 
 
-def test_stage_flags_are_recorded_on_every_entry_point(logging_search_service, mock_qdrant):
-    """Without knowing which stages ran, a latency or score number cannot be
-    attributed to anything."""
+def test_logged_stages_match_the_path_actually_taken(logging_search_service, mock_qdrant):
+    """`search_code` runs neither the router, the cache, the grader nor the
+    rewriter — those live in `search()` alone. Recording them anyway would
+    describe the service config, not the call, and make the log lie about
+    what a latency number covers."""
     service, logger = logging_search_service
     _mock_query_points(mock_qdrant, [_hit(content="c", file_path="a.go")])
 
-    for method in ("search", "search_code"):
-        logger.log.reset_mock()
-        getattr(service, method)("q")
-        extra = logger.log.call_args.kwargs["extra"]
-        for stage in ("reranker", "grader", "router"):
-            assert stage in extra, f"{method} lost the {stage} flag"
+    service.search("q")
+    extra = logger.log.call_args.kwargs["extra"]
+    for stage in ("reranker", "grader", "router", "rewriter", "cache_hit"):
+        assert stage in extra, f"search lost the {stage} flag"
+
+    logger.log.reset_mock()
+    service.search_code("q")
+    extra = logger.log.call_args.kwargs["extra"]
+    assert "reranker" in extra, "the reranker does run on search_code"
+    for stage in ("grader", "router", "rewriter", "cache_hit"):
+        assert stage not in extra, f"search_code does not run the {stage}"
 
 
 def test_nothing_is_logged_when_the_log_is_off(mock_qdrant, mock_embeddings):

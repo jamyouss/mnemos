@@ -261,11 +261,12 @@ class SearchService:
         """
         if not (self._query_logger and self._query_logger.enabled):
             return
-        stages = {
-            "reranker": bool(self._reranker and self._reranker.enabled),
-            "grader": bool(self._grader and self._grader.enabled),
-            "router": bool(self._router and self._router.enabled),
-        }
+        # Only the reranker is shared by every entry point. The router, cache,
+        # grader and rewriter live in `search()` alone, so recording them here
+        # for `search_code` would describe the service configuration rather
+        # than the path the call actually took — and a log that overstates
+        # what ran is worse than no log when judging a retrieval change.
+        stages = {"reranker": bool(self._reranker and self._reranker.enabled)}
         self._query_logger.log(
             query,
             results,
@@ -384,6 +385,9 @@ class SearchService:
                 "cache_hit": False,
                 "collections": target_collections,
                 "n_candidates": len(all_results),
+                "grader": bool(self._grader and self._grader.enabled),
+                "router": bool(self._router and self._router.enabled),
+                "rewriter": bool(self._rewriter and self._rewriter.enabled),
             },
         )
 
