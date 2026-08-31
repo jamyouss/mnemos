@@ -144,7 +144,7 @@ def test_dispatch_search_code_forwards_tag_filters():
             name="mnemos_search_code",
             args={
                 "query": "hybrid retrieval",
-                "tags_any": ["moby", "trevio"],
+                "tags_any": ["webshop", "corelib"],
                 "tags_all": ["go"],
             },
             search_service=search_service,
@@ -156,7 +156,7 @@ def test_dispatch_search_code_forwards_tag_filters():
     search_service.search_code.assert_called_once()
     kwargs = search_service.search_code.call_args.kwargs
     assert kwargs["query"] == "hybrid retrieval"
-    assert kwargs["tags_any"] == ["moby", "trevio"]
+    assert kwargs["tags_any"] == ["webshop", "corelib"]
     assert kwargs["tags_all"] == ["go"]
     assert "project" not in kwargs, "Dispatcher must not forward the legacy project kwarg"
 
@@ -172,7 +172,7 @@ def test_dispatch_search_memory_forwards_tag_filters():
             name="mnemos_search_memory",
             args={
                 "query": "past decisions",
-                "tags_any": ["moby"],
+                "tags_any": ["webshop"],
                 "tags_all": ["lesson"],
             },
             search_service=search_service,
@@ -184,7 +184,7 @@ def test_dispatch_search_memory_forwards_tag_filters():
     search_service.search_memory.assert_called_once()
     kwargs = search_service.search_memory.call_args.kwargs
     assert kwargs["query"] == "past decisions"
-    assert kwargs["tags_any"] == ["moby"]
+    assert kwargs["tags_any"] == ["webshop"]
     assert kwargs["tags_all"] == ["lesson"]
     assert "project" not in kwargs, "Dispatcher must not forward the legacy project kwarg"
 

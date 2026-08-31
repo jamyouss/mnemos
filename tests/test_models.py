@@ -60,7 +60,7 @@ def test_memory_entry_defaults():
 def test_skill_result():
     result = SkillResult(
         skill_name="project-expert",
-        description="Expert on Moby project",
+        description="Expert on Webshop project",
         score=0.92,
         instructions_preview="Expert on the example project...",
     )

@@ -228,9 +228,9 @@ def test_search_skills(search_service, mock_qdrant):
         MagicMock(
             score=0.92,
             payload={
-                "content": "Expert on Moby project...",
+                "content": "Expert on Webshop project...",
                 "skill_name": "project-expert",
-                "description": "Expert on Moby project",
+                "description": "Expert on Webshop project",
                 "chunk_type": "skill",
             },
         )

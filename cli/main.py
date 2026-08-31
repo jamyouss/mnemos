@@ -169,7 +169,7 @@ def status() -> None:
 @click.option(
     "--tags",
     default=None,
-    help="Comma-separated tags, OR semantics (sent as tags_any). Example: --tags acme,moby",
+    help="Comma-separated tags, OR semantics (sent as tags_any). Example: --tags acme,webshop",
 )
 @click.option(
     "--tags-all",
@@ -233,7 +233,7 @@ def search(
     "--tags",
     "tags",
     default=None,
-    help="Comma-separated tags (OR filter). Example: --tags acme,moby-services",
+    help="Comma-separated tags (OR filter). Example: --tags acme,webshop-services",
 )
 @click.option(
     "--tags-all",
@@ -326,7 +326,7 @@ def search_skills(query: str, limit: int) -> None:
     "--tags-all",
     "tags_all",
     default=None,
-    help="Comma-separated tags (AND filter). Example: --tags-all moby,decision",
+    help="Comma-separated tags (AND filter). Example: --tags-all webshop,decision",
 )
 @click.option("--type", "memory_type", default=None, help="Filter by memory_type (decision, pattern, lesson, convention).")
 @click.option(
@@ -407,7 +407,7 @@ def search_memory(
     "tags",
     default=None,
     help="Comma-separated tags to attach to every file under --path "
-    "(overrides auto-detected tags). Example: --tags moby,dgf,go",
+    "(overrides auto-detected tags). Example: --tags webshop,globex,go",
 )
 def reindex(
     collection: str,

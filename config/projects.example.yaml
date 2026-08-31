@@ -17,7 +17,7 @@
 # Search
 # ------
 # Filters are exposed everywhere as `tags_any` (OR) and `tags_all` (AND).
-#   mnemos search --tags acme,moby                # OR
+#   mnemos search --tags acme,webshop                # OR
 #   mnemos search --tags-all acme,vue3            # AND
 #   mnemos_search_code(tags_any=["acme-front-app-ecommerce", "acme-front-lib-auth"])
 

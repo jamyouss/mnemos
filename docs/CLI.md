@@ -64,7 +64,7 @@ Code-only search with structured filters.
 
 ```bash
 mnemos search-code "ride cancel" --tags myproject --language go --symbol-type func
-mnemos search-code "auth"        --tags acme,moby                  # OR
+mnemos search-code "auth"        --tags acme,webshop                  # OR
 mnemos search-code "auth"        --tags-all acme,vue3              # AND
 ```
 

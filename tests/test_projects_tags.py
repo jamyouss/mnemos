@@ -93,10 +93,10 @@ paths:
     - acme-front
     - acme-corp
 
-  Projects/digital-gigafactory/moby/services/:
-    - moby-services
-    - moby
-    - dgf
+  Projects/globex/webshop/services/:
+    - webshop-services
+    - webshop
+    - globex
 """,
         encoding="utf-8",
     )
@@ -105,8 +105,8 @@ paths:
         "Projects/acme-corp/acme/front/applications/ecommerce/": [
             "acme-front-app-ecommerce", "acme", "acme-front", "acme-corp",
         ],
-        "Projects/digital-gigafactory/moby/services/": [
-            "moby-services", "moby", "dgf",
+        "Projects/globex/webshop/services/": [
+            "webshop-services", "webshop", "globex",
         ],
     }
 

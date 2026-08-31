@@ -10,7 +10,7 @@ Typical use:
     ./scripts/reindex-all.py --workers 4
 
     # Just one slice:
-    ./scripts/reindex-all.py --filter 'moby|trevio'
+    ./scripts/reindex-all.py --filter 'webshop|corelib'
 
 NOTE on async reindex:
     The server queues each reindex as a background task and returns
