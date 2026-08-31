@@ -6,10 +6,16 @@ a bag of comma-joined values with no column names in it at all, so neither
 BM25 nor the dense vector can match a query naming a column.
 
 This chunker keeps each row readable on its own by rendering it as
-``column: value`` pairs, so the column names ride along in every chunk::
+``column: value`` pairs, and opens every chunk with the full column list::
 
-    id: 449 | customer: alice-449 | city: paris
-    status: shipped | total: 1347.00
+    columns: id, customer, city, status, total
+
+    id: 449 | customer: alice-449 | city: paris | status: shipped | total: 1347.00
+
+The header line is not redundant with the pairs. Empty cells are skipped when
+rendering a row — ``col: `` with nothing after it is noise — so on sparse real
+data a column can be absent from every row of a chunk. Stating the columns
+once per chunk means a query naming one still matches, whatever the rows hold.
 
 Rows are grouped up to a character budget rather than a fixed row count, so a
 wide table produces fewer rows per chunk instead of oversized ones.
@@ -26,6 +32,7 @@ DEFAULT_CHAR_BUDGET = 1500
 # Rendering separators.
 _PAIR_SEP = " | "
 _ROW_SEP = "\n\n"
+_HEADER_SEP = "\n\n"
 
 # csv.Sniffer only needs a taste of the file, and feeding it a huge string is
 # both slow and more likely to confuse it.
@@ -66,6 +73,8 @@ class TabularChunker:
         if len(header) < 2 or not rows:
             return self._delegate(content, file_path)
 
+        header_line = "columns: " + ", ".join(h for h in header if h)
+
         chunks: list[dict] = []
         buffer: list[str] = []
         size = 0
@@ -76,7 +85,7 @@ class TabularChunker:
                 return
             chunks.append(
                 {
-                    "content": _ROW_SEP.join(buffer),
+                    "content": header_line + _HEADER_SEP + _ROW_SEP.join(buffer),
                     "file_path": file_path,
                     "chunk_type": "rows",
                     "symbol_name": "",

@@ -10,6 +10,11 @@ def _chunker(**kw) -> TabularChunker:
     return TabularChunker(fallback=FallbackChunker(), **kw)
 
 
+def _rows(chunk: dict) -> str:
+    """Chunk content minus the leading `columns: ...` header line."""
+    return chunk["content"].split("\n\n", 1)[1]
+
+
 # ---------------------------------------------------------------------------
 # The reason this chunker exists
 # ---------------------------------------------------------------------------
@@ -22,7 +27,21 @@ def test_every_chunk_carries_the_column_names():
     assert len(chunks) > 1, "600 rows must not collapse into a single chunk"
     for c in chunks:
         for column in ("id", "customer", "city", "status", "total"):
-            assert f"{column}: " in c["content"]
+            assert column in c["content"]
+
+
+def test_columns_survive_even_when_every_cell_is_empty():
+    """Real exports are sparse. Empty cells are skipped when rendering a row,
+    so without the header line a column could be missing from a whole chunk —
+    which is exactly the failure this chunker exists to prevent."""
+    content = "id,city,status\n1,,\n2,,\n3,,\n"
+    chunks = _chunker().chunk(content, "sparse.csv")
+    assert chunks
+    for c in chunks:
+        assert "city" in c["content"]
+        assert "status" in c["content"]
+        # …but no dangling "city: " with nothing after it.
+        assert "city: " not in _rows(c)
 
 
 def test_fallback_chunker_loses_the_header_after_the_first_chunk():
@@ -34,7 +53,7 @@ def test_fallback_chunker_loses_the_header_after_the_first_chunk():
 
 def test_rows_render_as_column_value_pairs():
     chunks = _chunker().chunk("id,city\n7,paris\n", "x.csv")
-    assert chunks[0]["content"] == "id: 7 | city: paris"
+    assert _rows(chunks[0]) == "id: 7 | city: paris"
 
 
 # ---------------------------------------------------------------------------
@@ -57,13 +76,13 @@ def test_quoted_field_containing_a_newline_survives():
 
 def test_tsv_uses_tab_delimiter():
     chunks = _chunker().chunk("id\tcity\n7\tparis\n", "x.tsv")
-    assert chunks[0]["content"] == "id: 7 | city: paris"
+    assert _rows(chunks[0]) == "id: 7 | city: paris"
     assert chunks[0]["language"] == "tsv"
 
 
 def test_semicolon_delimiter_is_sniffed():
     chunks = _chunker().chunk("id;city;status\n7;paris;shipped\n", "x.csv")
-    assert chunks[0]["content"] == "id: 7 | city: paris | status: shipped"
+    assert _rows(chunks[0]) == "id: 7 | city: paris | status: shipped"
 
 
 # ---------------------------------------------------------------------------
@@ -109,17 +128,17 @@ def test_without_a_fallback_degenerate_input_yields_nothing():
 
 def test_short_row_stops_early():
     chunks = _chunker().chunk("id,city,status\n7,paris\n", "x.csv")
-    assert chunks[0]["content"] == "id: 7 | city: paris"
+    assert _rows(chunks[0]) == "id: 7 | city: paris"
 
 
 def test_extra_cells_beyond_the_header_are_dropped():
     chunks = _chunker().chunk("id,city\n7,paris,extra,more\n", "x.csv")
-    assert chunks[0]["content"] == "id: 7 | city: paris"
+    assert _rows(chunks[0]) == "id: 7 | city: paris"
 
 
 def test_empty_cells_are_skipped():
     chunks = _chunker().chunk("id,city,status\n7,,shipped\n", "x.csv")
-    assert chunks[0]["content"] == "id: 7 | status: shipped"
+    assert _rows(chunks[0]) == "id: 7 | status: shipped"
 
 
 def test_fully_empty_row_produces_no_text():
