@@ -427,3 +427,77 @@ def test_search_cache_namespace_includes_tags(search_service, mock_qdrant):
     ns_with_b = captured["ns"]
     assert "tagsAny=b" in ns_with_b
     assert ns_with_a != ns_with_b
+
+
+# ---------------------------------------------------------------------------
+# Query log coverage
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def logging_search_service(mock_qdrant, mock_embeddings):
+    logger = MagicMock()
+    logger.enabled = True
+    return SearchService(
+        qdrant_client=mock_qdrant,
+        embedding_service=mock_embeddings,
+        query_logger=logger,
+    ), logger
+
+
+def _hit(**payload):
+    h = MagicMock()
+    h.score = 0.9
+    h.payload = payload
+    return h
+
+
+@pytest.mark.parametrize(
+    "method,kwargs,intent,payload",
+    [
+        ("search", {}, "search", {"content": "c", "file_path": "a.go"}),
+        ("search_code", {}, "search_code", {"content": "c", "file_path": "a.go"}),
+        ("search_skills", {}, "search_skills", {"skill_name": "s", "content": "c"}),
+        ("search_memory", {}, "search_memory", {"id": "1", "content": "c"}),
+    ],
+)
+def test_every_search_entry_point_is_logged(
+    logging_search_service, mock_qdrant, method, kwargs, intent, payload
+):
+    """search_code backs the busiest MCP tool. Leaving any entry point
+    uninstrumented makes the log blind to the traffic being measured."""
+    service, logger = logging_search_service
+    _mock_query_points(mock_qdrant, [_hit(**payload)])
+
+    getattr(service, method)("q", **kwargs)
+
+    assert logger.log.call_count == 1, f"{method} did not log"
+    assert logger.log.call_args.kwargs["intent"] == intent
+    assert logger.log.call_args.kwargs["latency_ms"] >= 0
+
+
+def test_stage_flags_are_recorded_on_every_entry_point(logging_search_service, mock_qdrant):
+    """Without knowing which stages ran, a latency or score number cannot be
+    attributed to anything."""
+    service, logger = logging_search_service
+    _mock_query_points(mock_qdrant, [_hit(content="c", file_path="a.go")])
+
+    for method in ("search", "search_code"):
+        logger.log.reset_mock()
+        getattr(service, method)("q")
+        extra = logger.log.call_args.kwargs["extra"]
+        for stage in ("reranker", "grader", "router"):
+            assert stage in extra, f"{method} lost the {stage} flag"
+
+
+def test_nothing_is_logged_when_the_log_is_off(mock_qdrant, mock_embeddings):
+    logger = MagicMock()
+    logger.enabled = False
+    service = SearchService(
+        qdrant_client=mock_qdrant,
+        embedding_service=mock_embeddings,
+        query_logger=logger,
+    )
+    _mock_query_points(mock_qdrant, [_hit(content="c", file_path="a.go")])
+    service.search_code("q")
+    logger.log.assert_not_called()

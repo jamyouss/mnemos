@@ -244,6 +244,36 @@ class SearchService:
             out.append(r)
         return out
 
+    def _log_query(
+        self,
+        query: str,
+        results: list,
+        t_start: float,
+        intent: str,
+        extra: dict | None = None,
+    ) -> None:
+        """Record one retrieval call, if the query log is on.
+
+        Every public search entry point goes through here. `search_code` in
+        particular is the busiest path — it backs the `mnemos_search_code` MCP
+        tool — and leaving it uninstrumented made the log blind to the traffic
+        that matters most when judging a retrieval change.
+        """
+        if not (self._query_logger and self._query_logger.enabled):
+            return
+        stages = {
+            "reranker": bool(self._reranker and self._reranker.enabled),
+            "grader": bool(self._grader and self._grader.enabled),
+            "router": bool(self._router and self._router.enabled),
+        }
+        self._query_logger.log(
+            query,
+            results,
+            latency_ms=(time.perf_counter() - t_start) * 1000.0,
+            intent=intent,
+            extra={**stages, **(extra or {})},
+        )
+
     def search(
         self,
         query: str,
@@ -348,21 +378,14 @@ class SearchService:
             self._cache.store(query, final, namespace=cache_namespace)
 
         # --- 5. Observability ---
-        if self._query_logger and self._query_logger.enabled:
-            self._query_logger.log(
-                query,
-                final,
-                latency_ms=(time.perf_counter() - t_start) * 1000.0,
-                intent="search",
-                extra={
-                    "cache_hit": False,
-                    "collections": target_collections,
-                    "n_candidates": len(all_results),
-                    "reranker": bool(self._reranker and self._reranker.enabled),
-                    "grader": bool(self._grader and self._grader.enabled),
-                    "router": bool(self._router and self._router.enabled),
-                },
-            )
+        self._log_query(
+            query, final, t_start, "search",
+            {
+                "cache_hit": False,
+                "collections": target_collections,
+                "n_candidates": len(all_results),
+            },
+        )
 
         return final
 
@@ -380,6 +403,7 @@ class SearchService:
         """Search the single `mnemos_code` collection; scope to a project or
         any other slice via the `tags` payload filter rather than per-project
         collections."""
+        t_start = time.perf_counter()
         dense_vec = self._embeddings.embed(query)
         sparse_vec = bm25_sparse(query)
 
@@ -415,10 +439,20 @@ class SearchService:
             for hit in hits
         ]
 
-        final = self._rerank_and_select(query, all_results, limit)
-        return _apply_preview_mode(final, mode)
+        final = _apply_preview_mode(self._rerank_and_select(query, all_results, limit), mode)
+        self._log_query(
+            query, final, t_start, "search_code",
+            {
+                "collections": ["mnemos_code"],
+                "n_candidates": len(all_results),
+                "tags_any": tags_any or [],
+                "tags_all": tags_all or [],
+            },
+        )
+        return final
 
     def search_skills(self, query: str, limit: int = 3) -> list[SkillResult]:
+        t_start = time.perf_counter()
         dense_vec = self._embeddings.embed(query)
         sparse_vec = bm25_sparse(query)
         per_collection = _HYBRID_TOP if (self._reranker and self._reranker.enabled) else limit
@@ -436,8 +470,14 @@ class SearchService:
         if self._reranker is not None and self._reranker.enabled and results:
             candidates = [(r.instructions_preview, r) for r in results]
             ranked = self._reranker.rerank(query, candidates, top_k=limit)
-            return [s.payload for s in ranked]
-        return results[:limit]
+            final = [s.payload for s in ranked]
+        else:
+            final = results[:limit]
+        self._log_query(
+            query, final, t_start, "search_skills",
+            {"collections": ["mnemos_skills"], "n_candidates": len(results)},
+        )
+        return final
 
     def search_memory(
         self,
@@ -451,6 +491,7 @@ class SearchService:
         dense_vec = self._embeddings.embed(query)
         sparse_vec = bm25_sparse(query)
 
+        t_start = time.perf_counter()
         must_conditions = [FieldCondition(key="status", match=MatchValue(value="approved"))]
         if tags_any:
             must_conditions.append(FieldCondition(key="tags", match=MatchAny(any=list(tags_any))))
@@ -479,5 +520,15 @@ class SearchService:
         if self._reranker is not None and self._reranker.enabled and results:
             candidates = [(r.content, r) for r in results]
             ranked = self._reranker.rerank(query, candidates, top_k=limit)
-            return _apply_preview_mode([s.payload for s in ranked], mode)
-        return _apply_preview_mode(results[:limit], mode)
+            final = _apply_preview_mode([s.payload for s in ranked], mode)
+        else:
+            final = _apply_preview_mode(results[:limit], mode)
+        self._log_query(
+            query, final, t_start, "search_memory",
+            {
+                "collections": ["mnemos_memory"],
+                "n_candidates": len(results),
+                "memory_type": memory_type or "",
+            },
+        )
+        return final
