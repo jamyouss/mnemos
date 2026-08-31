@@ -101,10 +101,6 @@ IGNORE_EXTS: tuple[str, ...] = (
     ".woff", ".woff2", ".ttf", ".eot",
     # Archives & binaries
     ".pdf", ".zip", ".tar", ".gz", ".exe", ".bin", ".so", ".dylib",
-    # Tabular data / analytics & log exports — never source code, and a
-    # frequent source of retrieval noise when a project dumps report/log
-    # extracts into the indexed tree. Deny by default.
-    ".csv", ".tsv",
 )
 
 # Exact basenames.

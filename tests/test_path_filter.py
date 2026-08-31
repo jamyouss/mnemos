@@ -330,15 +330,16 @@ def test_runtime_volumes_skipped(path: str) -> None:
 )
 def test_data_lookalikes_not_skipped(path: str) -> None:
     assert should_skip_path(path) is False
-# Tabular data built-ins + per-run exclude mechanism
+# Per-run exclude mechanism
 # ---------------------------------------------------------------------------
 
 
-def test_data_dumps_skipped() -> None:
-    """CSV/TSV are analytics/log exports, never source — denied by default so
-    the watcher (built-in list only) drops them durably."""
-    assert should_skip_path("/data/codebase/x/exports/run-2024-06-02.csv") is True
-    assert should_skip_path("/data/codebase/x/reports/audit.tsv") is True
+def test_tabular_data_not_denied_by_default() -> None:
+    """CSV/TSV stay indexable: mnemos is not only a code RAG, and a silent
+    default-deny loses data invisibly. Projects that only ever dump analytics
+    exports turn them off through config/projects.yaml instead."""
+    assert should_skip_path("/data/codebase/x/exports/run-2024-06-02.csv") is False
+    assert should_skip_path("/data/codebase/x/reports/audit.tsv") is False
 
 
 def test_extra_exts_opt_in() -> None:
