@@ -27,6 +27,41 @@ PathTags = dict[str, list[str]]
 to every chunk whose file lives under that prefix. The first tag is the
 'primary' (shown as the default display label in search results)."""
 
+PathExcludes = dict[str, dict[str, list[str]]]
+"""Mapping path-prefix → ``{"exts": [...], "dirs": [...]}``: extra ignore
+rules that apply to every file under that prefix, on top of the built-in
+policy in :mod:`core.path_filter`."""
+
+_EMPTY_EXCLUDES: dict[str, list[str]] = {"exts": [], "dirs": []}
+
+
+def detect_excludes(
+    rel_path: str,
+    overrides: PathExcludes | None = None,
+) -> dict[str, list[str]]:
+    """Resolve the extra ignore rules for a path relative to the codebase mount.
+
+    Longest matching prefix wins, exactly like :func:`detect_tags`. Unlike
+    tags there is no convention-based fallback: a path with no matching entry
+    simply has no extra rules, so the built-in policy applies alone.
+    """
+    if not rel_path or rel_path.startswith("/") or not overrides:
+        return dict(_EMPTY_EXCLUDES)
+
+    best: dict[str, list[str]] | None = None
+    best_len = 0
+    for prefix, rules in overrides.items():
+        if not prefix:
+            continue
+        normalised = prefix if prefix.endswith("/") else prefix + "/"
+        if rel_path.startswith(normalised) and len(normalised) > best_len:
+            best = rules
+            best_len = len(normalised)
+
+    if not best:
+        return dict(_EMPTY_EXCLUDES)
+    return {"exts": list(best.get("exts", [])), "dirs": list(best.get("dirs", []))}
+
 
 def detect_tags(
     rel_path: str,
@@ -80,22 +115,13 @@ def detect_tags(
     return cumulative or [parts[0]]
 
 
-def load_path_tags(config_path: Path | str) -> PathTags:
-    """Load `config/projects.yaml` and return path → tags mapping.
+def _read_paths_block(config_path: Path | str) -> dict:
+    """Return the raw ``paths:`` mapping from a projects YAML file.
 
-    Expected YAML shape:
-
-        paths:
-          myproject/services/:
-            - my-service
-            - myproject
-          shared/lib/:
-            - lib-shared
-            - shared
-
-    Errors (missing PyYAML, parse failure, non-dict root, malformed entries)
-    are logged and result in an empty dict — callers fall back to the default
-    segment-based behaviour in that case.
+    Shared by both loaders so the file is parsed and error-handled in exactly
+    one place. Every failure mode (missing file, no PyYAML, parse error,
+    unexpected shape) degrades to an empty mapping, because a broken config
+    must never stop indexing — it just stops customising it.
     """
     path = Path(config_path)
     if not path.exists():
@@ -118,17 +144,82 @@ def load_path_tags(config_path: Path | str) -> PathTags:
         return {}
 
     paths_block = raw.get("paths")
-    if not isinstance(paths_block, dict):
-        return {}
+    return paths_block if isinstance(paths_block, dict) else {}
+
+
+def load_path_tags(config_path: Path | str) -> PathTags:
+    """Load `config/projects.yaml` and return path → tags mapping.
+
+    Expected YAML shape:
+
+        paths:
+          myproject/services/:
+            - my-service
+            - myproject
+          shared/lib/:
+            - lib-shared
+            - shared
+
+    An entry may also use the extended mapping form, which carries per-prefix
+    ignore rules alongside the tags (see :func:`load_path_excludes`):
+
+        paths:
+          myproject/reports/:
+            tags: [my-reports]
+            exclude_dirs: [exports]
+
+    Errors (missing PyYAML, parse failure, non-dict root, malformed entries)
+    are logged and result in an empty dict — callers fall back to the default
+    segment-based behaviour in that case.
+    """
+    path = Path(config_path)
+    paths_block = _read_paths_block(config_path)
 
     out: PathTags = {}
     for prefix, value in paths_block.items():
-        if not isinstance(value, list):
+        tags = value.get("tags") if isinstance(value, dict) else value
+        if not isinstance(tags, list):
             logger.warning(
-                "%s: entry for %r is not a list of tags; skipping.", path, prefix,
+                "%s: entry for %r has no list of tags; skipping.", path, prefix,
             )
             continue
-        cleaned = [t.strip() for t in value if isinstance(t, str) and t.strip()]
+        cleaned = [t.strip() for t in tags if isinstance(t, str) and t.strip()]
         if cleaned:
             out[str(prefix)] = cleaned
     return out
+
+
+def load_path_excludes(config_path: Path | str) -> PathExcludes:
+    """Load the per-prefix ignore rules from `config/projects.yaml`.
+
+    Only the extended (mapping) form carries them; the list shorthand is
+    tags-only and yields no rules:
+
+        paths:
+          myproject/services/:            # shorthand — tags only
+            - my-service
+
+          myproject/reports/:             # extended form
+            tags: [my-reports]
+            exclude_dirs: [exports]
+            exclude_exts: [.csv]
+
+    Entries without exclude keys are omitted entirely, so a config that never
+    uses the extended form resolves to an empty mapping and costs nothing.
+    """
+    raw_paths = _read_paths_block(config_path)
+    out: PathExcludes = {}
+    for prefix, value in raw_paths.items():
+        if not isinstance(value, dict):
+            continue
+        exts = _clean_str_list(value.get("exclude_exts"))
+        dirs = _clean_str_list(value.get("exclude_dirs"))
+        if exts or dirs:
+            out[str(prefix)] = {"exts": exts, "dirs": dirs}
+    return out
+
+
+def _clean_str_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [v.strip() for v in value if isinstance(v, str) and v.strip()]

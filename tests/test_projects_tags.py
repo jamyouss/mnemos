@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from core.projects import detect_tags, load_path_tags
+from core.projects import detect_excludes, detect_tags, load_path_excludes, load_path_tags
 
 
 # ---------------------------------------------------------------------------
@@ -166,3 +166,102 @@ paths:
         encoding="utf-8",
     )
     assert load_path_tags(p) == {"x/": ["real-tag"]}
+
+
+# ---------------------------------------------------------------------------
+# Extended entry form: tags + per-prefix ignore rules
+# ---------------------------------------------------------------------------
+
+
+def _write(tmp_path: Path, body: str) -> Path:
+    p = tmp_path / "projects.yaml"
+    p.write_text(body, encoding="utf-8")
+    return p
+
+
+EXTENDED_YAML = """
+paths:
+  Projects/acme/app/:
+    - acme-app
+    - acme
+
+  Projects/acme/reports/:
+    tags: [acme-reports, acme]
+    exclude_dirs: [exports, snapshots]
+    exclude_exts: [.csv, tsv]
+
+  Projects/acme/reports/keep/:
+    tags: [acme-reports-keep]
+"""
+
+
+def test_extended_form_still_yields_tags(tmp_path: Path):
+    """The mapping form must feed load_path_tags exactly like the shorthand."""
+    tags = load_path_tags(_write(tmp_path, EXTENDED_YAML))
+    assert tags["Projects/acme/app/"] == ["acme-app", "acme"]
+    assert tags["Projects/acme/reports/"] == ["acme-reports", "acme"]
+
+
+def test_shorthand_entries_carry_no_excludes(tmp_path: Path):
+    """A list entry is tags-only; it must not appear in the excludes mapping."""
+    excludes = load_path_excludes(_write(tmp_path, EXTENDED_YAML))
+    assert "Projects/acme/app/" not in excludes
+    # Nor does an extended entry that declares no exclude keys.
+    assert "Projects/acme/reports/keep/" not in excludes
+
+
+def test_load_path_excludes_reads_both_keys(tmp_path: Path):
+    excludes = load_path_excludes(_write(tmp_path, EXTENDED_YAML))
+    assert excludes["Projects/acme/reports/"] == {
+        "exts": [".csv", "tsv"],
+        "dirs": ["exports", "snapshots"],
+    }
+
+
+def test_detect_excludes_longest_prefix_wins(tmp_path: Path):
+    """A deeper entry overrides a shallower one, exactly like detect_tags."""
+    excludes = load_path_excludes(_write(tmp_path, EXTENDED_YAML))
+    assert detect_excludes("Projects/acme/reports/q1/data.csv", excludes)["dirs"] == [
+        "exports", "snapshots",
+    ]
+    # 'keep/' declares no rules, so the deeper match resolves to none rather
+    # than inheriting the parent's.
+    assert detect_excludes("Projects/acme/reports/keep/a.csv", excludes)["dirs"] == [
+        "exports", "snapshots",
+    ]
+
+
+def test_detect_excludes_without_match_is_empty():
+    assert detect_excludes("Projects/other/main.go", {}) == {"exts": [], "dirs": []}
+    assert detect_excludes("", {"a/": {"exts": [".csv"], "dirs": []}}) == {"exts": [], "dirs": []}
+    # Absolute paths are rejected like detect_tags does.
+    assert detect_excludes("/abs/path.csv", {"abs/": {"exts": [".csv"], "dirs": []}}) == {
+        "exts": [], "dirs": [],
+    }
+
+
+def test_detect_excludes_returns_a_copy(tmp_path: Path):
+    """Callers must not be able to mutate the loaded config through the result."""
+    excludes = load_path_excludes(_write(tmp_path, EXTENDED_YAML))
+    got = detect_excludes("Projects/acme/reports/x.csv", excludes)
+    got["dirs"].append("mutated")
+    assert "mutated" not in excludes["Projects/acme/reports/"]["dirs"]
+
+
+def test_malformed_entries_are_skipped(tmp_path: Path):
+    p = _write(tmp_path, """
+paths:
+  ok/:
+    tags: [fine]
+    exclude_exts: [.csv]
+  broken-tags/:
+    tags: "not-a-list"
+  broken-excludes/:
+    tags: [x]
+    exclude_exts: "not-a-list"
+""")
+    assert "broken-tags/" not in load_path_tags(p)
+    assert load_path_tags(p)["ok/"] == ["fine"]
+    excl = load_path_excludes(p)
+    assert excl["ok/"]["exts"] == [".csv"]
+    assert "broken-excludes/" not in excl

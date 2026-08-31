@@ -350,11 +350,12 @@ async def eval_sample(body: EvalSampleRequest, request: Request):
 
 
 def _should_skip(fp, extra_exts=(), extra_dirs=()) -> bool:
-    """Delegate to the unified policy in :mod:`core.path_filter`.
+    """Delegate to the built-in policy in :mod:`core.path_filter`.
 
-    Kept as a thin wrapper so the existing call sites (``_run_reindex`` walker
-    and ``test_should_skip.py``) need no further change. ``extra_exts`` /
-    ``extra_dirs`` carry the per-run ``--exclude-ext`` / ``--exclude-dir`` opts.
+    Kept for ``test_should_skip.py`` and for callers with no indexer at hand.
+    Note this sees the built-in list plus whatever the caller passes, but NOT
+    the per-prefix rules from ``config/projects.yaml`` — those are resolved by
+    :meth:`core.indexer.Indexer.should_skip`, which the reindex walker uses.
     """
     return should_skip_path(fp, extra_exts=extra_exts, extra_dirs=extra_dirs)
 
@@ -393,8 +394,13 @@ def _run_reindex(
     exclude_exts = exclude_exts or []
     exclude_dirs = exclude_dirs or []
 
+    # Ask the indexer rather than calling _should_skip directly: it is the one
+    # place that unions the built-in policy, the per-prefix rules from
+    # config/projects.yaml and these per-run extras. Re-deriving that here is
+    # exactly the drift core.path_filter exists to prevent.
     files = [fp for fp in (base_path.rglob("*") if full else [base_path])
-             if fp.is_file() and not _should_skip(fp, exclude_exts, exclude_dirs)]
+             if fp.is_file()
+             and not indexer.should_skip(str(fp), exclude_exts, exclude_dirs)]
 
     if not files:
         logger.info(f"Reindex: collection={collection} no files to index")

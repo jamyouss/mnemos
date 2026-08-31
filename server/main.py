@@ -61,17 +61,20 @@ def create_app() -> FastAPI:
         )
         # Optional YAML override for path → tags mapping. Missing file → empty dict,
         # which means "cumulative path segments" everywhere by default.
-        from core.projects import load_path_tags
+        from core.projects import load_path_excludes, load_path_tags
         from pathlib import Path as _Path
-        app.state.path_tags = load_path_tags(
-            _Path(settings.mnemos_projects_config_path)
-        )
+        _projects_config = _Path(settings.mnemos_projects_config_path)
+        app.state.path_tags = load_path_tags(_projects_config)
+        # Per-prefix ignore rules from the same file. Empty unless a project
+        # uses the extended entry form, so this costs nothing by default.
+        app.state.path_excludes = load_path_excludes(_projects_config)
 
         app.state.indexer = Indexer(
             qdrant_client=app.state.qdrant,
             embedding_service=app.state.embeddings,
             contextual_enricher=app.state.contextual,
             path_tags=app.state.path_tags,
+            path_excludes=app.state.path_excludes,
             codebase_root=settings.codebase_path,
         )
 

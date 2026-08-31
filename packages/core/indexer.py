@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
+from collections.abc import Iterable
 from datetime import datetime, timezone
 
 from qdrant_client import QdrantClient
@@ -23,12 +24,13 @@ from qdrant_client.models import (
 from core.chunkers.fallback_chunker import FallbackChunker
 from core.chunkers.go_chunker import GoChunker
 from core.chunkers.markdown_chunker import MarkdownChunker
+from core.chunkers.tabular_chunker import TabularChunker
 from core.chunkers.vue_chunker import VueChunker
 from core.collections import DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME, TAGS_PAYLOAD_FIELD
 from core.contextual import ContextualEnricher
 from core.embeddings import EmbeddingService
 from core.path_filter import should_skip_path
-from core.projects import PathTags, detect_tags
+from core.projects import PathExcludes, PathTags, detect_excludes, detect_tags
 from core.sparse import bm25_sparse
 
 _logger = logging.getLogger(__name__)
@@ -45,17 +47,20 @@ class Indexer:
         embedding_service: EmbeddingService,
         contextual_enricher: ContextualEnricher | None = None,
         path_tags: PathTags | None = None,
+        path_excludes: PathExcludes | None = None,
         codebase_root: str = "/data/codebase",
     ) -> None:
         self._qdrant = qdrant_client
         self._embeddings = embedding_service
         self._contextual = contextual_enricher
         self._path_tags = path_tags or {}
+        self._path_excludes = path_excludes or {}
         self._codebase_root = codebase_root.rstrip("/")
         self._go_chunker = GoChunker()
         self._vue_chunker = VueChunker()
         self._md_chunker = MarkdownChunker()
         self._fallback_chunker = FallbackChunker()
+        self._tabular_chunker = TabularChunker(fallback=self._fallback_chunker)
 
     def ensure_collection(self, collection_name: str, vector_size: int = 384) -> None:
         """Create the collection if missing, configured for hybrid (dense + sparse BM25).
@@ -109,6 +114,40 @@ class Indexer:
             pass
         self.ensure_collection(collection_name, vector_size)
 
+    def _relative_path(self, file_path: str) -> str:
+        """Strip the codebase mount root, so config prefixes match."""
+        if file_path.startswith(self._codebase_root + "/"):
+            return file_path[len(self._codebase_root) + 1:]
+        return file_path
+
+    def _resolve_excludes(self, file_path: str) -> dict[str, list[str]]:
+        """Per-prefix ignore rules from `config/projects.yaml` for this file."""
+        return detect_excludes(self._relative_path(file_path), self._path_excludes)
+
+    def should_skip(
+        self,
+        file_path: str,
+        extra_exts: Iterable[str] = (),
+        extra_dirs: Iterable[str] = (),
+    ) -> bool:
+        """Single entry point for "must this file be left out of the index?".
+
+        Unions three sources — the built-in policy in :mod:`core.path_filter`,
+        the per-prefix rules from ``config/projects.yaml``, and any caller
+        extras (``mnemos reindex --exclude-ext/--exclude-dir``). They add up;
+        none of them overrides another.
+
+        Both ``index_file`` and the bulk-reindex walker go through here, so the
+        resolution lives in one place. Re-deriving it at a call site is exactly
+        the drift ``core.path_filter`` was created to end.
+        """
+        config = self._resolve_excludes(file_path)
+        return should_skip_path(
+            file_path,
+            extra_exts=[*config["exts"], *extra_exts],
+            extra_dirs=[*config["dirs"], *extra_dirs],
+        )
+
     def _resolve_tags(self, file_path: str, override: list[str] | None) -> list[str]:
         """Decide which tag list to write into a chunk's payload.
 
@@ -119,10 +158,7 @@ class Indexer:
         """
         if override:
             return list(override)
-        rel = file_path
-        if file_path.startswith(self._codebase_root + "/"):
-            rel = file_path[len(self._codebase_root) + 1:]
-        return detect_tags(rel, overrides=self._path_tags)
+        return detect_tags(self._relative_path(file_path), overrides=self._path_tags)
 
     def index_file(
         self,
@@ -136,7 +172,7 @@ class Indexer:
         # pre-filter, vendored bundles / build outputs never reach the
         # embedder. Watcher and bulk reindex still pre-filter to avoid
         # the round-trip cost.
-        if should_skip_path(file_path):
+        if self.should_skip(file_path):
             _logger.debug("path_filter: skipping %s", file_path)
             return 0
 
@@ -208,6 +244,8 @@ class Indexer:
             return self._go_chunker
         if file_path.endswith(".vue"):
             return self._vue_chunker
+        if file_path.endswith((".csv", ".tsv")):
+            return self._tabular_chunker
         if file_path.endswith(".md"):
             return self._md_chunker
         return self._fallback_chunker
