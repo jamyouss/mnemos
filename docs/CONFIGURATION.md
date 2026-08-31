@@ -98,7 +98,7 @@ filtering at query time.
 
 **Where tags come from**, in order of precedence:
 
-1. **CLI override** — `mnemos reindex --tags moby,dgf,go` applies the same
+1. **CLI override** — `mnemos reindex --tags webshop,globex,go` applies the same
    list to every file under `--path`.
 2. **YAML mapping** — `config/projects.yaml` declares `path-prefix → tags`.
    Longest-matching prefix wins.
@@ -122,7 +122,7 @@ paths:
 Search filters are exposed everywhere:
 
 ```bash
-mnemos search "auth"  --tags acme,moby           # OR  → tags_any
+mnemos search "auth"  --tags acme,webshop           # OR  → tags_any
 mnemos search "auth"  --tags-all acme,vue3       # AND → tags_all
 ```
 
@@ -202,6 +202,25 @@ on every reindex (`POST /api/reindex`).
 | `MNEMOS_DEDUP_STRATEGY` | `merge` | `merge` (LLM consolidates) or `replace` (newer wins) |
 | `MNEMOS_HOOK_TRIGGER` | `pre-push` | Git hook trigger mode (used by `scripts/install-hooks.sh`) |
 | `MAX_DOCUMENTS` | `0` | Per-tenant max document count (`0` = unlimited) |
+
+## Git hooks (host side)
+
+These are read by `scripts/hooks/*`, which run on your machine — not by the
+server — so they are **not** container environment variables.
+
+Precedence is **environment > `~/.config/mnemos/config` > default**. The
+settings file exists because git hooks also fire from GUI clients and IDEs
+that never source a shell profile, where an exported variable would be lost.
+
+| Var | Default | Description |
+|-----|--------|------|
+| `MNEMOS_URL` | `http://localhost:8100` | Server the hooks talk to |
+| `MNEMOS_CODEBASE_ROOT` | `$HOME/code` | Host dir bind-mounted at `/data/codebase`. Must match `MNEMOS_CODEBASE_HOST_PATH`, otherwise hooks cannot map host paths to container paths and silently index nothing |
+| `MNEMOS_CONFIG_FILE` | `$HOME/.config/mnemos/config` | Machine-local settings, written by `install-hooks.sh --codebase-root` |
+| `MNEMOS_REPOS_CONFIG` | `$HOME/.config/mnemos/repos` | Roots whose pushes trigger **memory extraction** |
+| `MNEMOS_INDEX_REPOS_CONFIG` | `$HOME/.config/mnemos/index-repos` | Roots whose pulls trigger **code indexing**. Falls back to `repos` when the file is absent |
+| `MNEMOS_MAX_INCREMENTAL_FILES` | `200` | Above this many changed files, one bulk `/api/reindex` replaces the per-file pushes |
+| `MNEMOS_MAX_FILE_BYTES` | `1048576` | Files larger than this are not pushed (transport guard; path rules live in `core.path_filter`) |
 
 ## Observability
 

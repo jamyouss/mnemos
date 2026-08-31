@@ -9,11 +9,13 @@ For the active improvement plan, see [ROADMAP.md](ROADMAP.md).
 ## High-level data flow
 
 ```
-                      ┌────────────────────┐
-                      │  filesystem watcher│
-                      └────────┬───────────┘
-                               │ (file change events, debounced)
-                               ▼
+       ┌────────────────────┐   ┌──────────────────────────┐
+       │  filesystem watcher│   │ git post-merge/-checkout │
+       └────────┬───────────┘   └────────────┬─────────────┘
+                │ (file change events,       │ (diff of the pull,
+                │  debounced)                │  one POST per file)
+                └────────────┬───────────────┘
+                             ▼
 ┌──────────┐ chunker  ┌──────────────┐ embed  ┌──────────────┐
 │  source  │─────────▶│   AST/SFC    │───────▶│   dense vec  │
 │  files   │          │   chunks     │        │  + sparse vec│
@@ -118,7 +120,7 @@ removes it from the chain without affecting the others:
 ### Memory (`packages/core/memory_extractor.py` + `deduplicator.py`)
 
 ```
-git commit (pre-push hook)
+git push (pre-push hook, or git commit with post-commit)
         │
         ▼
         ▶ POST /api/memory/extract  with commit message + diff
@@ -215,9 +217,12 @@ cumulative-segment fallback when the file is absent. See
 
 ## Ignored paths
 
-Three ingestion paths converge on `Indexer.index_file`: the filesystem
-watcher, the bulk reindex walker, and the push API. To avoid policy drift,
-every caller delegates to `core.path_filter.should_skip_path(path)`. The
+Every ingestion path converges on `Indexer.index_file`: the filesystem
+watcher, the bulk reindex walker, and the push API — which the `post-merge` /
+`post-checkout` git hooks also drive, one POST per changed file. To avoid
+policy drift, every caller delegates to
+`core.path_filter.should_skip_path(path)`. Notably the hooks deliberately do
+**not** re-implement the policy in shell: they push, the server filters. The
 indexer itself short-circuits inside `index_file` as a defense-in-depth
 check, so a misbehaving push-API client can never bypass the rules.
 
@@ -233,6 +238,8 @@ What's filtered:
 | Generated reports | `report-tnr-*`, `*.lighthouse-report.html`, `lighthouse-report-*` |
 | Lockfiles / changelogs | `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `poetry.lock`, `CHANGELOG.md` |
 | Binaries & assets | images, fonts, archives, `.so`/`.dylib`/`.exe`, `.pyc`, `.log` |
+| Installed Python deps | any `site-packages/` or `dist-packages/` — matched on the marker dir, since virtualenv names are arbitrary (`venv/`, `.venv/`, `sam-env/`, `.direnv/`) |
+| Retired projects | `archived/` — kept on disk, but it answers questions about code that is no longer live |
 
 To add a pattern, edit `packages/core/path_filter.py` and add a test in
 `tests/test_path_filter.py`. The rule applies to every ingestion path

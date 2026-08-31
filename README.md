@@ -163,6 +163,8 @@ What's distinctive about the bundle Mnemos ships:
   outputs (`dist/`, `.nuxt/`), generated reports — single source of truth
   enforced at every ingestion path ([see ARCHITECTURE](docs/ARCHITECTURE.md#ignored-paths))
 - **Watcher** — Incremental indexing on file change (`watchdog`, debounced)
+- **Fresh on `git pull`** — `post-merge` / `post-checkout` hooks push just the
+  diff, so a pull never leaves the index quoting code you deleted
 - **Push API** — CI/CD-friendly REST endpoint for headless ingestion
 - **Contextual chunking** — Optional Anthropic-style preambles via LLM
 
@@ -208,7 +210,11 @@ mnemos search "JWT validation middleware"
 mnemos search-code "JWT validation middleware" --tags myproject
 mnemos search-code "JWT validation middleware" --tags-all myproject,go
 
-# 5. Plug it into Claude Code
+# 5. Keep it fresh — index on pull, extract memories on push
+./scripts/install-hooks.sh --global --codebase-root ~/code \
+    --watch-index ~/code --watch ~/code/your-org
+
+# 6. Plug it into Claude Code
 # → add { "type": "url", "url": "http://localhost:8100/mcp" }
 #   to your ~/.claude/settings.json mcpServers
 ```

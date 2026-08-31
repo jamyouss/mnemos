@@ -32,8 +32,13 @@ Components:
 - **LLM provider** — Ollama on the host, or a cloud API. Configurable
   per-tenant.
 - **Tenants config** — `config/tenants.yaml`, hot-reloaded.
-- **Hooks** — devs install `scripts/hooks/pre-push` locally (per-developer);
-  the server doesn't host them.
+- **Hooks** — devs run `scripts/install-hooks.sh` locally (per-developer);
+  the server doesn't host them. Four hooks: `pre-push` / `post-commit` for
+  memory extraction, `post-merge` / `post-checkout` for incremental indexing.
+- **Periodic reindex** — `scripts/nightly-reindex.sh` catches what the hooks
+  cannot see (rebase, reset, edits outside git, repos cloned while the server
+  was down). macOS: `scripts/install-nightly-reindex.sh` registers a launchd
+  agent. Elsewhere, wire the same script to cron or a systemd timer.
 
 ---
 

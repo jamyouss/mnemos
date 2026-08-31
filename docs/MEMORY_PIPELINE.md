@@ -54,7 +54,15 @@ This:
 1. Copies hooks to `~/.config/git/hooks/`.
 2. Sets `git config --global core.hooksPath` so every repo uses them.
 3. Adds your watched path to `~/.config/mnemos/repos` — only repos under
-   this path trigger the hook.
+   this path trigger memory extraction.
+
+> **`repos` is not the indexing list.** The same installer also lays down
+> `post-merge` / `post-checkout`, which index code on `git pull` and are gated
+> on a separate list (`~/.config/mnemos/index-repos`, populated by
+> `--watch-index`). Two lists because the costs differ by orders of magnitude:
+> indexing is an HTTP POST per changed file, extraction is an LLM call. Keep
+> `repos` to the repos where real decisions get made. See
+> [QUICKSTART](QUICKSTART.md#7-turn-on-the-git-hooks-recommended).
 
 ### Two trigger modes
 

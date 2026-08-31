@@ -40,6 +40,14 @@ for per-phase numbers.
   See [CONFIGURATION.md](CONFIGURATION.md) for the `projects.yaml` schema.
 - ✅ **Watcher** — `watchdog` with 2 s debounce, incremental push to the
   server.
+> ⚠️ The watcher only survives a large codebase thanks to the inotify prune
+> patch in `watcher/main.py` (`_install_inotify_prune`). Without it, the
+> recursive walk watches every directory — `node_modules` included — and the
+> process dies at startup with `OSError: [Errno 28] inotify watch limit
+> reached`. Published images up to `0.3.0` predate the patch: rebuild locally
+> (`docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+> --build watcher`) or publish a newer tag.
+
 - ✅ **`_should_skip` rules** — `.bak`, `_nuxt/*.js`, `.terraform/`, etc.
   filtered out at index time.
 
@@ -139,7 +147,7 @@ Aucun item ne ship si une métrique régresse.
 | 2A | Contextual chunking (wired, off-default) | ✅ shipped |
 | 2A | Hybrid BM25 + dense + RRF | ✅ shipped |
 | 2B | Cross-encoder reranker | ✅ shipped |
-| 2B | MMR diversification | 🔜 backlog |
+| 2B | MMR diversification | ✅ shipped wired, off-default |
 | 3 | Document Grader (CRAG) | ✅ shipped |
 | 3 | Query Rewriter (CRAG) | ✅ shipped wired, off-default |
 | 4D | Query Router | ✅ shipped |

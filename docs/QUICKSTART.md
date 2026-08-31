@@ -203,14 +203,32 @@ into your `~/.claude/CLAUDE.md`:
 Mnemos is indexed with language-aware chunking (AST for Go/Vue), semantic embeddings, and auto-extracted memories from git history. A single `mnemos_search_code` call often replaces 5-10 Grep invocations. Use it.
 ```
 
-## 7. Turn on memories from git (optional but recommended)
+## 7. Turn on the git hooks (recommended)
 
 ```bash
-./scripts/install-hooks.sh --global --watch ~/code/your-org
+./scripts/install-hooks.sh --global \
+    --codebase-root ~/code \
+    --watch-index ~/code \
+    --watch ~/code/your-org
 ```
 
-Now every `git push` from a repo under that path triggers an async LLM
-extraction. Memories land in `pending`; approve them with:
+Four hooks, two jobs, two lists:
+
+| Flag | List | Hooks | Effect |
+|---|---|---|---|
+| `--watch-index` | `~/.config/mnemos/index-repos` | `post-merge`, `post-checkout` | a `git pull` or branch switch reindexes just the files that changed |
+| `--watch` | `~/.config/mnemos/repos` | `pre-push`, `post-commit` | a push extracts memories from the diff via the LLM |
+
+Keep `--watch` narrower than `--watch-index`: indexing is a cheap HTTP POST
+per changed file, memory extraction is one LLM call per trigger, and memories
+stay useful only while they come from repos where real decisions get made.
+
+`--codebase-root` is the host directory bind-mounted at `/data/codebase`
+(it must match `MNEMOS_CODEBASE_HOST_PATH` in `.env`). It is persisted to
+`~/.config/mnemos/config`, so hooks fired from a GUI git client or an IDE —
+which never read your shell profile — still resolve container paths.
+
+Memories land in `pending`; approve them with:
 
 ```bash
 mnemos memory list                  # see what's queued

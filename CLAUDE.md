@@ -22,8 +22,10 @@ INDEXING (watcher / push API / CLI):
          all-MiniLM-L6-v2 (384 dims, cosine, normalized)
 
 RETRIEVAL (MCP / REST):
-  query → embed → query_points(N collections séquentiel) → sort by score → top-K
-         ⚠️ Pas de reranker, pas de hybrid, pas de query router
+  query → cache → router (trim collections) → hybrid dense+BM25 sparse (RRF)
+        → cross-encoder rerank → MMR → CRAG grader (+rewriter) → cache + query log
+         Tout est câblé (server/main.py + server/search.py). Sauf l'hybrid,
+         chaque étage est derrière un flag MNEMOS_*_ENABLED, off par défaut.
 
 MEMORY (git hook / API):
   git commit → Ollama extract decisions/patterns/lessons →
@@ -51,7 +53,7 @@ mnemos/
   watcher/                # File watcher (watchdog)
   cli/                    # Click CLI client
   config/                 # Tenant configuration
-  scripts/hooks/          # Global git hooks (post-commit, pre-push)
+  scripts/hooks/          # Global git hooks (memory extraction + incremental indexing)
   tests/                  # pytest suite
   eval/                   # Eval harness (Phase 1.2, en cours)
   docs/                   # ROADMAP.md, EVAL.md, ARCHITECTURE.md
@@ -82,7 +84,7 @@ Côté requête, deux filtres sont exposés partout (CLI, REST, MCP) :
 - `tags_all` (CLI `--tags-all`) — match si **tous** les tags sont présents (AND).
 
 ```bash
-mnemos search-code "auth"  --tags acme,moby           # OR
+mnemos search-code "auth"  --tags acme,webshop           # OR
 mnemos search-code "auth"  --tags-all acme,vue3       # AND
 ```
 
@@ -99,7 +101,12 @@ mnemos_search_code(query="auth", tags_all=["acme", "vue3"])
 
 Voir [`docs/ROADMAP.md`](docs/ROADMAP.md) pour le plan d'amélioration complet.
 
-**TL;DR — Mnemos est aujourd'hui dense-only.** Manquent : reranker (cross-encoder), hybrid retrieval (BM25 + RRF), contextual chunking (Anthropic), CRAG corrective loop (grader + rewriter), query router, semantic cache, eval harness.
+**TL;DR — l'essentiel du plan est implémenté**, pas seulement planifié :
+hybrid BM25+RRF (toujours actif), reranker cross-encoder, contextual chunking,
+CRAG (grader + rewriter), query router, cache sémantique, MMR, query log, et un
+harness d'eval (`packages/eval/`, `evals/`). Tous sauf l'hybrid sont **off par
+défaut** — un gain non mesuré reste un gain non acquis : activer d'abord
+`MNEMOS_QUERY_LOG_ENABLED`, mesurer, puis lever les flags un par un.
 
 **Différenciateurs solides à préserver** :
 - Memory pipeline from git (extraction + dedup + approval) — unique sur le marché
@@ -198,6 +205,46 @@ Conventions tests :
 4. Pour qu'un nouveau pattern s'applique aux chunks déjà indexés, lancer un
    `./scripts/reindex-all.py --recreate`.
 
+### Modifications des git hooks (`scripts/hooks/`)
+
+Quatre hooks, deux rôles, **deux listes de repos distinctes** :
+
+| Hook | Rôle | Gate | Coût |
+|---|---|---|---|
+| `post-commit` / `pre-push` | extraction mémoire | `mnemos_is_watched_repo` → `~/.config/mnemos/repos` | 1 appel LLM par déclenchement |
+| `post-merge` / `post-checkout` | indexation incrémentale | `mnemos_is_indexed_repo` → `~/.config/mnemos/index-repos` | 1 POST par fichier changé |
+
+`index-repos` retombe sur `repos` s'il n'existe pas — les installs existantes
+continuent de fonctionner sans changement.
+
+L'indexation incrémentale pousse **uniquement le diff** (`git diff --name-status
+--no-renames`) vers `POST /api/index`, et bascule sur un `POST /api/reindex`
+global au-delà de `MNEMOS_MAX_INCREMENTAL_FILES` (défaut 200) — au-delà, N
+allers-retours HTTP coûtent plus qu'un walk serveur. Un clone frais
+(`post-checkout` avec le sha nul) part directement en bulk.
+
+Règles :
+1. Les hooks sont **non bloquants et fail-safe** : `exit 0` systématique, curl
+   détaché, aucune dépendance au serveur (`/health` jamais requis).
+2. Ne **jamais** ré-implémenter `core.path_filter` en shell. Les hooks poussent,
+   le serveur filtre (`Indexer.index_file` est le chokepoint défensif). Seules
+   les limites de *transport* vivent côté hook (taille max, fichier binaire).
+3. Les tags ne sont **pas** envoyés par le hook : le serveur les résout depuis
+   `config/projects.yaml` via le chemin container.
+4. Tout changement se teste dans `tests/test_hooks_incremental.py` (vrai repo
+   git temporaire + stub HTTP, les hooks shell sont exécutés pour de vrai).
+
+### Réindexation périodique
+
+`scripts/nightly-reindex.sh` (agent launchd, voir
+`scripts/install-nightly-reindex.sh`) rattrape ce que les hooks ne voient pas :
+rebase, reset, stash, édition hors git, repo cloné serveur éteint. Lock via
+`mkdir`, skip silencieux si le serveur est injoignable.
+
+⚠️ `reindex-all.py` ne saute **pas** les fichiers inchangés — `Indexer.index_file`
+n'a aucun test de fraîcheur sur `file_mtime`. Un full reindex ré-embedde tout.
+C'est pour ça que le chemin nominal est l'incrémental, pas le cron.
+
 ### Modifications memory pipeline
 1. Toute extraction passe par `MemoryExtractor` (LLM provider injecté)
 2. Toute écriture passe par `Deduplicator` (jamais d'upsert direct sur `mnemos_memory`)
@@ -223,18 +270,21 @@ Switch via `MNEMOS_LLM_PROVIDER` env var (voir `.env.example`).
 
 ## Roadmap visible (résumé)
 
-| # | Composant | Phase | Statut |
-|---|---|---|---|
-| 1 | Reranker (cross-encoder) | 2B | TODO |
-| 2 | Hybrid retrieval (BM25 + RRF) | 2A | TODO |
-| 3 | Contextual chunking (Anthropic) | 2A | TODO |
-| 4 | Document Grader | 3 | TODO |
-| 5 | Query Router | 4D | TODO |
-| 6 | Query Rewriter | 3 | TODO |
-| 7 | MMR diversification | 2B | TODO |
-| 8 | Semantic Cache | 4E | TODO |
-| 9 | Observability / Query logging | 4 | TODO |
-| 10 | A/B Testing infra | 4 | TODO |
+| # | Composant | Phase | Statut | Flag |
+|---|---|---|---|---|
+| 1 | Reranker (cross-encoder) | 2B | fait | `MNEMOS_RERANKER_ENABLED` |
+| 2 | Hybrid retrieval (BM25 + RRF) | 2A | fait | toujours actif |
+| 3 | Contextual chunking (Anthropic) | 2A | fait | `MNEMOS_CONTEXTUAL_ENABLED` |
+| 4 | Document Grader | 3 | fait | `MNEMOS_GRADER_ENABLED` |
+| 5 | Query Router | 4D | fait | `MNEMOS_ROUTER_ENABLED` |
+| 6 | Query Rewriter | 3 | fait | `MNEMOS_REWRITER_ENABLED` |
+| 7 | MMR diversification | 2B | fait | `MNEMOS_MMR_ENABLED` |
+| 8 | Semantic Cache | 4E | fait | `MNEMOS_CACHE_ENABLED` |
+| 9 | Observability / Query logging | 4 | fait | `MNEMOS_QUERY_LOG_ENABLED` |
+| 10 | A/B Testing infra | 4 | TODO | — |
+
+⚠️ Ce tableau et `docs/ROADMAP.md` avaient dérivé du code : vérifier
+`server/main.py` avant de croire un statut.
 
 Détails : [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
