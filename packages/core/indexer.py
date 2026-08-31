@@ -35,6 +35,33 @@ from core.sparse import bm25_sparse
 
 _logger = logging.getLogger(__name__)
 
+
+def resolve_skip(
+    file_path: str,
+    codebase_root: str = "/data/codebase",
+    path_excludes: PathExcludes | None = None,
+    extra_exts: Iterable[str] = (),
+    extra_dirs: Iterable[str] = (),
+) -> bool:
+    """Should this file be left out of the index?
+
+    Unions the three sources: the built-in policy in :mod:`core.path_filter`,
+    the per-prefix rules loaded from ``config/projects.yaml``, and any caller
+    extras. They add up; none overrides another.
+
+    Kept module-level and stateless so callers without an ``Indexer`` — the
+    offline purge script, for one — get the same answer as the ingest path
+    instead of re-deriving the union and drifting from it.
+    """
+    root = codebase_root.rstrip("/")
+    rel = file_path[len(root) + 1:] if file_path.startswith(root + "/") else file_path
+    config = detect_excludes(rel, path_excludes or {})
+    return should_skip_path(
+        file_path,
+        extra_exts=[*config["exts"], *extra_exts],
+        extra_dirs=[*config["dirs"], *extra_dirs],
+    )
+
 # Collections whose payload is filtered by `tags` at query time. We
 # create the keyword payload index on those at startup so the filter scales.
 _TAGGED_COLLECTIONS = ("mnemos_code", "mnemos_memory")
@@ -141,11 +168,12 @@ class Indexer:
         resolution lives in one place. Re-deriving it at a call site is exactly
         the drift ``core.path_filter`` was created to end.
         """
-        config = self._resolve_excludes(file_path)
-        return should_skip_path(
+        return resolve_skip(
             file_path,
-            extra_exts=[*config["exts"], *extra_exts],
-            extra_dirs=[*config["dirs"], *extra_dirs],
+            codebase_root=self._codebase_root,
+            path_excludes=self._path_excludes,
+            extra_exts=extra_exts,
+            extra_dirs=extra_dirs,
         )
 
     def _resolve_tags(self, file_path: str, override: list[str] | None) -> list[str]:

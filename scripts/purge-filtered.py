@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """Drop already-indexed chunks that the current ignore policy would reject.
 
-`core.path_filter` only gates *new* indexing. When a rule is added, every
-chunk ingested before it stays in Qdrant and keeps competing in search
-results. `reindex-all.py --recreate` would clear them, but it re-embeds the
-entire corpus to do it. This walks the collection and deletes just the points
-whose `file_path` no longer passes `should_skip_path`.
+The ignore policy only gates *new* indexing. When a rule is added — a
+built-in in `core.path_filter`, or per-prefix `exclude_dirs` / `exclude_exts`
+in `config/projects.yaml` — every chunk ingested before it stays in Qdrant and
+keeps competing in search results. `reindex-all.py --recreate` would clear
+them, but it re-embeds the entire corpus to do it. This walks the collection
+and deletes just the points the current policy would now reject.
+
+It calls `core.indexer.resolve_skip`, the same function the ingest path uses,
+so the purge can never disagree with what indexing would do.
 
 Usage:
     ./scripts/purge-filtered.py --dry-run       # report only (default)
@@ -26,9 +30,12 @@ from urllib import error, request
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "packages"))
 
-from core.path_filter import should_skip_path  # noqa: E402
+from core.indexer import resolve_skip  # noqa: E402
+from core.projects import load_path_excludes  # noqa: E402
 
 DEFAULT_QDRANT = "http://localhost:6333"
+DEFAULT_PROJECTS_CONFIG = Path(__file__).resolve().parent.parent / "config" / "projects.yaml"
+DEFAULT_CODEBASE_ROOT = "/data/codebase"
 SCROLL_PAGE = 4000
 DELETE_BATCH = 1000
 
@@ -68,6 +75,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--qdrant", default=DEFAULT_QDRANT)
     parser.add_argument("--collection", default="mnemos_code")
+    parser.add_argument(
+        "--projects-config", default=str(DEFAULT_PROJECTS_CONFIG),
+        help="projects.yaml carrying the per-prefix exclude rules.",
+    )
+    parser.add_argument(
+        "--codebase-root", default=DEFAULT_CODEBASE_ROOT,
+        help="Container mount root that indexed paths are relative to.",
+    )
     parser.add_argument("--apply", action="store_true", help="Delete. Without it, report only.")
     parser.add_argument("--dry-run", action="store_true", help="Explicit no-op (the default).")
     args = parser.parse_args()
@@ -78,10 +93,15 @@ def main() -> int:
         print(f"Qdrant unreachable at {args.qdrant}: {exc}", file=sys.stderr)
         return 2
 
-    doomed = [(pid, fp) for pid, fp in rows if fp and should_skip_path(fp)]
+    excludes = load_path_excludes(args.projects_config)
+    doomed = [
+        (pid, fp) for pid, fp in rows
+        if fp and resolve_skip(fp, args.codebase_root, excludes)
+    ]
     orphans = [pid for pid, fp in rows if not fp]
 
     print(f"collection      : {args.collection}")
+    print(f"règles projet   : {len(excludes)} préfixe(s) depuis {args.projects_config}")
     print(f"chunks totaux   : {len(rows)}")
     print(f"à supprimer     : {len(doomed)}  ({100 * len(doomed) / max(len(rows), 1):.1f}%)")
     if orphans:
