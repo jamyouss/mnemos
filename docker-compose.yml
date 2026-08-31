@@ -73,6 +73,11 @@ services:
       # build time) so edits to config/projects.yaml apply on a restart,
       # without rebuilding or republishing the server image.
       - ./config:/app/config:ro
+      # projects.yaml is mounted as a file, not left to the directory mount
+      # above, so it can be a symlink into a dotfiles repo. Docker resolves a
+      # bind-mount source on the host; a symlink *inside* a mounted directory
+      # would dangle in the container.
+      - ./config/projects.yaml:/app/config/projects.yaml:ro
       - rag_state:/data/state
       # HuggingFace model cache. The embedding model is baked into the image
       # so this volume is only meaningful when MNEMOS_RERANKER_ENABLED=true:
