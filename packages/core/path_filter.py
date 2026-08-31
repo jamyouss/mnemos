@@ -36,8 +36,17 @@ IGNORE_DIRS: frozenset[str] = frozenset({
     ".terraform", "terraform.tfstate.d",
     # Local backup / data snapshots
     "backup", "backups",
+    # Retired projects parked out of the way — kept on disk, not worth
+    # retrieving: they answer questions about code that is no longer live.
+    "archived",
     # Caches & tooling
     "__pycache__", ".nx", ".cache", ".pytest_cache", ".storybook",
+    # Git worktrees — a second checkout of code that is already indexed at its
+    # main path. Near-identical duplicates are the worst case for retrieval:
+    # they compete with the original instead of adding anything.
+    "worktrees",
+    # Agent / tooling traces
+    ".playwright-mcp",
     # IDE & editors
     ".idea", ".vscode",
     # Virtualenvs
@@ -54,6 +63,23 @@ IGNORE_PATH_SUBSTRINGS: tuple[str, ...] = (
     "/webapp/ios/",                # Capacitor ios build artefacts
     "/app/src/main/assets/",       # Android packaged web assets
     "/App/App/public/",            # iOS packaged web assets
+    # Installed Python dependencies. Matched on the marker directory rather
+    # than the virtualenv name, because those are arbitrary: `venv/` and
+    # `.venv/` are in IGNORE_DIRS but `sam-env/`, `.direnv/`, `env311/` are
+    # not, and each one drags a whole stdlib mirror into the index.
+    "/site-packages/",
+    "/dist-packages/",
+    # Worktrees parked next to their repo as `<name>.worktrees/` — the segment
+    # is not literally "worktrees", so IGNORE_DIRS alone cannot catch it.
+    ".worktrees/",
+    # Container runtime volumes of a local dev stack. Databases rewrite these
+    # constantly (WAL segments, diagnostic dumps), so a watcher pointed at
+    # them never stops re-indexing. "data" alone is far too generic to ban,
+    # hence the anchored prefixes.
+    "/infrastructure/data/",
+    "/infra/local/data/",
+    ".minio.sys/",
+    "/diagnostic.data/",
 )
 
 # File extensions — matched via ``name.endswith(ext)`` so multi-part
@@ -92,6 +118,9 @@ IGNORE_BASENAME_SUBSTRINGS: tuple[str, ...] = (
     "report-tnr-",              # WebdriverIO/Gherkin TNR analysis report
     ".lighthouse-report.html",
     "lighthouse-report-",
+    # Vue CLI / webpack vendor bundle. Not caught by the ``.chunk.js`` and
+    # ``.bundle.js`` extensions: the marker is in the stem, not the suffix.
+    "chunk-vendors",
 )
 
 

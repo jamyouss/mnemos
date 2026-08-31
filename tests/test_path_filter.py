@@ -76,7 +76,7 @@ def test_existing_patterns_still_skipped(path: str) -> None:
     "path",
     [
         # Yarn Berry PnP cache (the case we observed in the wild)
-        "/data/codebase/acme-corp/acme/front/applications/colibri/.yarn/yarn-4.9.4.cjs",
+        "/data/codebase/acme-corp/acme/front/applications/widget/.yarn/yarn-4.9.4.cjs",
         "/data/codebase/x/.yarn/cache/some-pkg.zip",
         "/data/codebase/x/.yarn/releases/yarn-3.2.0.cjs",
     ],
@@ -163,3 +163,170 @@ def test_accepts_pathlib_and_str() -> None:
     """The function must accept both ``str`` and ``pathlib.Path``."""
     assert should_skip_path("/data/codebase/x/.yarn/foo.cjs") is True
     assert should_skip_path(Path("/data/codebase/x/.yarn/foo.cjs")) is True
+
+
+# ---------------------------------------------------------------------------
+# archived/ — retired projects parked on disk
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/data/codebase/Projects/archived/legacy-shop/src/main.ts",
+        "/data/codebase/Projects/archived/old-portal/pom.xml",
+        # Nested anywhere in the tree, not just directly under a project root
+        "/data/codebase/Projects/acme/archived/legacy-api/handler.go",
+    ],
+)
+def test_archived_dir_skipped(path: str) -> None:
+    assert should_skip_path(path) is True
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        # Non-regression: a directory whose name merely contains "archived"
+        # must stay indexed — only the exact path segment is banned.
+        "/data/codebase/Projects/acme/archived-docs/adr-001.md",
+        "/data/codebase/Projects/acme/src/unarchived/restore.go",
+        # Same for files named after the concept.
+        "/data/codebase/Projects/acme/src/archived.go",
+        "/data/codebase/Projects/acme/src/archive/keep.go",
+    ],
+)
+def test_archived_lookalikes_not_skipped(path: str) -> None:
+    assert should_skip_path(path) is False
+
+
+# ---------------------------------------------------------------------------
+# Installed Python dependencies, whatever the virtualenv is called
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        # The case observed in the wild: a virtualenv named `sam-env`, which
+        # no IGNORE_DIRS entry covers.
+        "/data/codebase/Projects/acme/app/sam-env/lib/python3.14/site-packages/pip/_vendor/x.py",
+        "/data/codebase/x/.direnv/python-3.12/lib/python3.12/site-packages/requests/api.py",
+        "/data/codebase/x/env311/lib/python3.11/site-packages/urllib3/util.py",
+        # Debian-style system install layout
+        "/data/codebase/x/usr/lib/python3/dist-packages/yaml/loader.py",
+    ],
+)
+def test_installed_python_packages_skipped(path: str) -> None:
+    assert should_skip_path(path) is True
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        # Non-regression: the project's own source must survive, including
+        # files and directories merely named after the concept.
+        "/data/codebase/Projects/acme/app/src/main.py",
+        "/data/codebase/Projects/acme/docs/site-packages.md",
+        "/data/codebase/Projects/acme/scripts/build_site_packages.py",
+    ],
+)
+def test_project_python_sources_not_skipped(path: str) -> None:
+    assert should_skip_path(path) is False
+
+
+# ---------------------------------------------------------------------------
+# Git worktrees — duplicate checkouts of already-indexed code
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        # Canonical segment, e.g. worktrees created under .claude/
+        "/data/codebase/Projects/acme/corelib/.claude/worktrees/feat-api/handler.go",
+        "/data/codebase/Projects/acme/worktrees/hotfix/main.go",
+        # Parked beside the repo as `<name>.worktrees/` — the path segment is
+        # `webapp.worktrees`, which no exact dir-name match would catch.
+        "/data/codebase/Projects/acme/webshop/webapp.worktrees/fix-sprint3/app/page.vue",
+        "/data/codebase/Projects/acme/api.worktrees/spike/server.go",
+        # Tooling traces
+        "/data/codebase/Projects/acme/webshop/.playwright-mcp/trace-001.md",
+    ],
+)
+def test_worktrees_and_tool_traces_skipped(path: str) -> None:
+    assert should_skip_path(path) is True
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        # Non-regression: source that merely talks about worktrees stays indexed.
+        "/data/codebase/Projects/acme/src/worktrees.go",
+        "/data/codebase/Projects/acme/docs/worktrees.md",
+        "/data/codebase/Projects/acme/internal/worktree/manager.go",
+        # A directory named after the concept but not a worktree root.
+        "/data/codebase/Projects/acme/worktrees-doc/guide.md",
+    ],
+)
+def test_worktree_lookalikes_not_skipped(path: str) -> None:
+    assert should_skip_path(path) is False
+
+
+# ---------------------------------------------------------------------------
+# Vendor bundles whose marker sits in the stem, not the extension
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/data/codebase/Projects/acme/app/public/legacy/scripts/chunk-vendors.js",
+        "/data/codebase/Projects/acme/app/dist/chunk-vendors.4f2a1b.js",
+    ],
+)
+def test_vendor_chunk_bundles_skipped(path: str) -> None:
+    assert should_skip_path(path) is True
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        # Non-regression: the app's own source about vendors stays indexed.
+        "/data/codebase/Projects/acme/app/src/stores/vendors.ts",
+        "/data/codebase/Projects/acme/app/src/chunk.ts",
+    ],
+)
+def test_vendor_lookalikes_not_skipped(path: str) -> None:
+    assert should_skip_path(path) is False
+
+
+# ---------------------------------------------------------------------------
+# Container runtime volumes of a local dev stack
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/data/codebase/Projects/acme/webshop/infra/local/infrastructure/data/consul/raft/wal/0001.wal",
+        "/data/codebase/Projects/acme/webshop/infra/local/infrastructure/data/mongo/diagnostic.data/metrics.interim",
+        "/data/codebase/Projects/acme/corelib/infra/local/data/minio/.minio.sys/tmp/abc-123",
+    ],
+)
+def test_runtime_volumes_skipped(path: str) -> None:
+    assert should_skip_path(path) is True
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        # Non-regression: "data" is far too generic to ban outright, so the
+        # project's own data-handling source and fixtures must survive.
+        "/data/codebase/Projects/acme/webshop/src/data/countries.ts",
+        "/data/codebase/Projects/acme/webshop/docs/data-model.md",
+        "/data/codebase/Projects/acme/webshop/infra/local/docker-compose.yml",
+        "/data/codebase/Projects/acme/webshop/infra/local/data-seed/seed.sql",
+    ],
+)
+def test_data_lookalikes_not_skipped(path: str) -> None:
+    assert should_skip_path(path) is False
