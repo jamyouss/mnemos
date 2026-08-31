@@ -188,6 +188,27 @@ Conventions tests :
 1. Toujours ajouter un test dans `tests/test_chunkers/`
 2. Préserver les métadonnées `chunk_type`, `symbol_name`, `language`, `chunk_index`
 3. Tester avec un fichier réel du codebase indexé
+4. Un chunker spécialisé doit **déléguer au `FallbackChunker`**, pas rendre
+   `[]`, quand le contenu ne correspond pas à ce qu'annonce l'extension —
+   `index_file` traite `[]` comme « rien à indexer », pas comme un repli.
+   Voir `TabularChunker._delegate`.
+
+### Modifications du filtrage par projet
+`core.path_filter` porte la politique **globale** — ce qui n'est jamais du
+source, nulle part. Le bruit propre à un projet (`exports/`, un `.csv` généré)
+va dans `config/projects.yaml`, en `exclude_dirs` / `exclude_exts` par préfixe.
+
+1. `should_skip_path` reste une **fonction pure**. Ne jamais y charger de
+   config : la résolution par préfixe vit dans `Indexer._resolve_excludes`,
+   calquée sur `_resolve_tags`.
+2. Tout call site qui décide « faut-il ignorer ce fichier ? » passe par
+   `Indexer.should_skip`, jamais par `should_skip_path` en direct — c'est le
+   seul endroit qui unit built-in + config + extras.
+3. Les trois sources **s'additionnent**. Rien ne peut ré-autoriser ce qu'une
+   règle built-in refuse.
+4. Le watcher pré-filtre sur les built-ins seuls : `config/` n'est pas monté
+   dans son conteneur. La correction est garantie côté serveur par
+   `index_file`, le coût est un aller-retour HTTP gâché.
 
 ### Modifications du filtre d'indexation (`core.path_filter`)
 1. **Single source of truth** : ajouter le pattern dans

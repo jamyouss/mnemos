@@ -86,12 +86,13 @@ For the active improvement plan, see [ROADMAP.md](ROADMAP.md).
 | `chunkers/go_chunker.py` | Tree-sitter Go: declarations, types, methods |
 | `chunkers/vue_chunker.py` | SFC sections: `<script>`, `<template>`, `<style>` |
 | `chunkers/markdown_chunker.py` | Header-based splits |
+| `chunkers/tabular_chunker.py` | CSV/TSV rows as `column: value` pairs, so column names ride along in every chunk; delegates to the fallback when the file is not really a table |
 | `chunkers/fallback_chunker.py` | Fixed-size sliding window |
-| `path_filter.py` | Single source of truth for "do not index" rules (vendored bundles, build outputs, generated reports). Enforced by the indexer; also consumed upstream by the watcher and the bulk reindex walker. |
+| `path_filter.py` | Single source of truth for the **built-in** "do not index" rules (vendored bundles, build outputs, generated reports). A pure function: per-project rules are layered on by the indexer, never loaded here. |
 | `embeddings.py` | sentence-transformers (`all-MiniLM-L6-v2`, 384d, normalised) |
 | `sparse.py` | BM25 encoder — camelCase/snake split, stable 31-bit hash |
 | `contextual.py` | LLM-generated preamble per chunk (Anthropic-style) |
-| `indexer.py` | Orchestrator: path_filter check → chunk → contextualise → embed → upsert |
+| `indexer.py` | Orchestrator: skip check → chunk → contextualise → embed → upsert. `should_skip()` unions the built-in policy, the per-prefix rules from `config/projects.yaml` and any caller extras — the one place that resolution happens. |
 | `collections.py` | Collection registry; named-vector schema constants |
 
 ### Retrieval (`server/search.py` + `packages/core/`)
@@ -244,6 +245,19 @@ What's filtered:
 To add a pattern, edit `packages/core/path_filter.py` and add a test in
 `tests/test_path_filter.py`. The rule applies to every ingestion path
 without further change.
+
+**Built-in vs configured.** The lists above are global policy: things that are
+never source anywhere. Noise that is specific to one project — an `exports/`
+directory, a generated `.csv` — belongs in `config/projects.yaml` instead, as
+per-prefix `exclude_dirs` / `exclude_exts`. See
+[CONFIGURATION](CONFIGURATION.md#per-project-ignore-rules). The two add up;
+neither can re-allow what the other denies.
+
+Note what is deliberately *not* denied globally: tabular data. Mnemos is not
+only a code RAG, and a default-deny loses data silently — nothing in the
+results says a file was never indexed. Noise, by contrast, is visible and
+fixable. `chunkers/tabular_chunker.py` makes an indexed CSV actually
+retrievable; `config/projects.yaml` turns it off where it is not wanted.
 
 ## Configuration model
 

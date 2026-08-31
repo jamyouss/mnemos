@@ -114,6 +114,15 @@ mnemos reindex --collection mnemos_code \
 | `--full` | Recursively walk `--path`. Without `--full`, only the path itself is indexed. |
 | `--recreate` | Drop + recreate the collection before indexing. Required to migrate to hybrid. |
 | `--workers` | Parallel worker threads (use 4 with contextual chunking on) |
+| `--exclude-ext` | Extra extension to skip **for this run**, repeatable, leading dot optional (`--exclude-ext .proto --exclude-ext csv`) |
+| `--exclude-dir` | Extra directory name to skip **for this run**, repeatable, matched anywhere in the path (`--exclude-dir mocks`) |
+
+Both exclude flags **add to** the built-in deny list and to whatever
+`config/projects.yaml` declares — they never replace either. They also last
+only for the run: the watcher and the push API do not see them, so a file
+excluded by a flag comes back on the next change. For a rule that sticks, put
+it in `config/projects.yaml` — see
+[`CONFIGURATION.md`](CONFIGURATION.md#per-project-ignore-rules).
 
 Without `--tags`, Mnemos resolves tags from `config/projects.yaml` (longest
 path-prefix wins). Without that file either, it falls back to cumulative

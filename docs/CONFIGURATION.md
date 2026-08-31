@@ -119,6 +119,48 @@ paths:
     - typescript
 ```
 
+### Per-project ignore rules
+
+An entry may use an extended form that carries ignore rules next to its tags.
+Use it when a directory holds files that are noise **for that project** —
+analytics exports, generated fixtures — without banning the pattern globally:
+
+```yaml
+paths:
+  myorg/services/billing/:        # shorthand — tags only
+    - billing
+    - myorg
+
+  myorg/reports/:                 # extended form
+    tags: [reports, myorg]
+    exclude_dirs: [exports, snapshots]
+    exclude_exts: [.csv, tsv]     # leading dot optional
+```
+
+Both forms may be mixed freely; the list shorthand stays valid and means
+"tags only", so an existing config needs no migration.
+
+**The three sources add up.** A file is skipped if the built-in policy
+(`core.path_filter`), the rules resolved from this file, or the per-run
+`--exclude-ext` / `--exclude-dir` flags reject it. None of them overrides
+another, and there is no way to re-allow something a built-in rule denies.
+
+Resolution is longest-matching-prefix, like tags. Unlike tags there is no
+convention-based fallback: a path with no matching entry simply has no extra
+rules.
+
+Because the rules are resolved inside `Indexer.index_file` — the chokepoint
+every ingestion path funnels through — they hold for the watcher, a bulk
+reindex and the push API alike. That is what makes them durable, where the
+CLI flags are not.
+
+> **One caveat.** The watcher pre-filters with the built-in list only, before
+> POSTing to the server: it runs in its own container, where `config/` is not
+> mounted, so it cannot read this file. A file excluded here is still rejected
+> server-side — correctness holds — but the watcher wastes a round-trip on it.
+
+### Search filters
+
 Search filters are exposed everywhere:
 
 ```bash

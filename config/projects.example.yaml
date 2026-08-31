@@ -48,3 +48,18 @@ paths:
   #   - dashboard
   #   - vue3                       # `mnemos search --tags vue3` matches it
   #   - typescript
+
+  # Example 4 — per-project ignore rules (extended entry form)
+  # A list entry means "tags only". Use the mapping form when a prefix also
+  # needs its own ignore rules: files that are noise for THIS project without
+  # being noise everywhere. They add to the built-in policy in
+  # core/path_filter.py and to any --exclude-ext / --exclude-dir flag; nothing
+  # here can re-allow what a built-in rule denies.
+  #
+  # Unlike the CLI flags, these hold for every ingestion path — watcher, bulk
+  # reindex and push API — so a git pull cannot undo them.
+  #
+  # myorg/analytics/:
+  #   tags: [analytics, myorg]
+  #   exclude_dirs: [exports, snapshots]
+  #   exclude_exts: [.csv, tsv]    # leading dot optional
