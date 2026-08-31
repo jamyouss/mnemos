@@ -1,0 +1,20 @@
+#!/bin/sh
+# Mnemos global post-merge hook.
+# Indexes the files a `git pull` / `git merge` just brought in.
+# Non-blocking and fail-safe — never blocks git operations.
+
+HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$HOOK_DIR/mnemos-common.sh"
+
+# 1. Chain to repo-local hook
+mnemos_chain_local "post-merge" "$@"
+
+# 2. Check if this repo is watched
+mnemos_is_indexed_repo || exit 0
+
+# 3. Index what the merge changed. ORIG_HEAD is set by merge/pull.
+ORIG="$(git rev-parse --verify ORIG_HEAD 2>/dev/null || echo "")"
+HEAD_SHA="$(git rev-parse --verify HEAD 2>/dev/null || echo "")"
+mnemos_index_range "$ORIG" "$HEAD_SHA"
+
+exit 0

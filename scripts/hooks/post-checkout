@@ -1,0 +1,38 @@
+#!/bin/sh
+# Mnemos global post-checkout hook.
+# Indexes the delta when switching branches (and on a fresh clone).
+# Non-blocking and fail-safe — never blocks git operations.
+#
+# Args: $1 = previous HEAD, $2 = new HEAD, $3 = 1 for a branch checkout,
+#       0 for a file checkout (which changes nothing repo-wide).
+
+HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$HOOK_DIR/mnemos-common.sh"
+
+# 1. Chain to repo-local hook
+mnemos_chain_local "post-checkout" "$@"
+
+# 2. File checkouts are no-ops for the index
+[ "$3" = "1" ] || exit 0
+
+# 3. Check if this repo is watched
+mnemos_is_indexed_repo || exit 0
+
+PREV="$1"
+NEW="$2"
+NULL_SHA="0000000000000000000000000000000000000000"
+
+# A clone reports the null sha as the previous HEAD: nothing is indexed yet,
+# so walk the whole repo once instead of diffing against an empty tree.
+if [ "$PREV" = "$NULL_SHA" ]; then
+    REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo "")"
+    if [ -n "$REPO_ROOT" ]; then
+        REPO_CONTAINER="$(mnemos_container_path "$REPO_ROOT")" || exit 0
+        mnemos_bulk_reindex "$REPO_CONTAINER" &
+    fi
+    exit 0
+fi
+
+mnemos_index_range "$PREV" "$NEW"
+
+exit 0

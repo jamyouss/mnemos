@@ -69,6 +69,10 @@ services:
       - ${MNEMOS_CODEBASE_HOST_PATH:-./data/codebase}:/data/codebase:ro
       # Optional: mount your Claude config (skills, docs) for agent indexing.
       - ${MNEMOS_CLAUDE_CONFIG_HOST_PATH:-./data/claude-config}:/data/claude-config:ro
+      # Path -> tags mapping. Bind-mounted (not only baked into the image at
+      # build time) so edits to config/projects.yaml apply on a restart,
+      # without rebuilding or republishing the server image.
+      - ./config:/app/config:ro
       - rag_state:/data/state
       # HuggingFace model cache. The embedding model is baked into the image
       # so this volume is only meaningful when MNEMOS_RERANKER_ENABLED=true:
