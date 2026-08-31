@@ -364,3 +364,32 @@ def test_extras_default_noop() -> None:
     """Empty extras must not change behaviour for legitimate source files."""
     assert should_skip_path("/data/codebase/x/services/cart.ts") is False
     assert should_skip_path("/data/codebase/x/services/cart.ts", extra_exts=[], extra_dirs=[]) is False
+
+
+# ---------------------------------------------------------------------------
+# Coverage profiles
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/data/codebase/Projects/acme/corelib/coverage.out",
+        "/data/codebase/Projects/acme/api/cover.out",
+    ],
+)
+def test_coverage_profiles_skipped(path: str) -> None:
+    assert should_skip_path(path) is True
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        # Non-regression: source and docs merely named after the concept stay.
+        "/data/codebase/Projects/acme/src/coverage.go",
+        "/data/codebase/Projects/acme/docs/coverage.md",
+        "/data/codebase/Projects/acme/src/output/handler.ts",
+    ],
+)
+def test_coverage_lookalikes_not_skipped(path: str) -> None:
+    assert should_skip_path(path) is False

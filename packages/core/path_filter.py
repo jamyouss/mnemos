@@ -94,6 +94,10 @@ IGNORE_EXTS: tuple[str, ...] = (
     ".cjs",
     # Lock / log
     ".lock", ".log",
+    # Go coverage profiles. Machine-generated line tables that match almost
+    # any query lexically — `coverage.out` was the single most-returned file
+    # across a sample of real searches.
+    ".out",
     # Compiled
     ".pyc", ".o", ".a",
     # Images & fonts
