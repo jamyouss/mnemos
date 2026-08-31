@@ -66,23 +66,48 @@ _OLLAMA_URL_CANDIDATES = (
 
 
 def _autodetect_ollama_url() -> str:
-    """Probe the common Ollama URLs and return the first reachable one.
+    """Probe the common Ollama URLs and return the first *usable* one.
 
-    Falls back to the bundled-service URL when nothing responds — that way
-    the caller still gets a deterministic, documented base_url to debug.
+    Usable means "answers /api/tags **and** has at least one model pulled".
+    Reachability alone is not enough: a bundled Ollama container that nobody
+    ever pulled a model into answers 200 with an empty list, wins the probe
+    by being first in the list, and then fails every real call with a 404 —
+    silently, since each LLM feature catches its own error. That is how a
+    memory pipeline can run for months without producing a single memory.
+
+    A reachable-but-empty instance is remembered as a last resort, so a setup
+    that genuinely has no models anywhere still gets a deterministic URL to
+    debug against rather than an arbitrary one.
     """
     import logging
     import httpx
 
     logger = logging.getLogger("mnemos.llm")
+    empty_but_reachable: str | None = None
+
     for url in _OLLAMA_URL_CANDIDATES:
         try:
             r = httpx.get(f"{url}/api/tags", timeout=1.5)
-            if r.status_code == 200:
-                logger.info("Auto-detected Ollama at %s", url)
-                return url
-        except httpx.HTTPError:
+            if r.status_code != 200:
+                continue
+            models = (r.json() or {}).get("models") or []
+        except (httpx.HTTPError, ValueError):
             continue
+        if models:
+            logger.info("Auto-detected Ollama at %s (%d model(s))", url, len(models))
+            return url
+        if empty_but_reachable is None:
+            empty_but_reachable = url
+            logger.warning("Ollama at %s answers but has no model pulled", url)
+
+    if empty_but_reachable:
+        logger.warning(
+            "No Ollama with a model pulled; falling back to %s — LLM features "
+            "will fail until a model is available there",
+            empty_but_reachable,
+        )
+        return empty_but_reachable
+
     logger.warning(
         "No reachable Ollama at any of %s — defaulting to %s",
         ", ".join(_OLLAMA_URL_CANDIDATES),

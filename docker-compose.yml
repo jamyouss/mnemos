@@ -34,7 +34,11 @@ services:
       MNEMOS_LLM_MODEL: "${MNEMOS_LLM_MODEL:-llama3.1:8b}"
       MNEMOS_LLM_API_KEY: "${MNEMOS_LLM_API_KEY:-}"
       MNEMOS_LLM_BASE_URL: "${MNEMOS_LLM_BASE_URL:-}"
-      MNEMOS_OLLAMA_URL: "${MNEMOS_OLLAMA_URL:-http://ollama:11434}"
+      # Left blank on purpose: core.llm.factory probes the bundled service,
+      # host.docker.internal and localhost, and picks the first one that has a
+      # model pulled. Hardcoding the bundled URL here defeated that and sent
+      # every LLM call to an empty container.
+      MNEMOS_OLLAMA_URL: "${MNEMOS_OLLAMA_URL:-}"
       MNEMOS_DEDUP_THRESHOLD: "0.85"
       MNEMOS_DEDUP_STRATEGY: merge
       # Contextual retrieval (Anthropic-style preamble per chunk via LLM)
