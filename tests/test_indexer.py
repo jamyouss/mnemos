@@ -232,3 +232,54 @@ def test_index_file_indexes_the_same_name_outside_the_prefix(indexer_with_exclud
 def test_no_config_means_builtin_policy_only(mock_qdrant, mock_embeddings):
     plain = Indexer(qdrant_client=mock_qdrant, embedding_service=mock_embeddings)
     assert plain.should_skip("/data/codebase/Projects/acme/reports/q1.csv") is False
+
+
+# ---------------------------------------------------------------------------
+# Allowlist mode: index only what projects.yaml declares
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def allowlisted_indexer(mock_qdrant, mock_embeddings):
+    return Indexer(
+        qdrant_client=mock_qdrant,
+        embedding_service=mock_embeddings,
+        path_tags={"Projects/acme/": ["acme"], "Infra/docker/": ["infra-docker"]},
+        only_declared_paths=True,
+        codebase_root="/data/codebase",
+    )
+
+
+def test_allowlist_rejects_undeclared_trees(allowlisted_indexer):
+    """The watcher walks the whole mount and knows nothing about which repos
+    were meant to be indexed. Without this the server accepts everything it
+    is handed — third-party clones included."""
+    assert allowlisted_indexer.should_skip("/data/codebase/OpenSource/lib/main.go") is True
+    assert allowlisted_indexer.should_skip("/data/codebase/Backup/old/app.ts") is True
+
+
+def test_allowlist_keeps_declared_trees(allowlisted_indexer):
+    assert allowlisted_indexer.should_skip("/data/codebase/Projects/acme/app/x.vue") is False
+    assert allowlisted_indexer.should_skip("/data/codebase/Infra/docker/php/Dockerfile") is False
+
+
+def test_allowlist_does_not_touch_skills_and_docs(allowlisted_indexer):
+    """Skills and docs live under a different mount root; the allowlist is
+    scoped to the codebase and must not silently swallow them."""
+    assert allowlisted_indexer.should_skip("/data/claude-config/skills/a/b.md") is False
+    assert allowlisted_indexer.should_skip("/data/claude-config/docs/arch.md") is False
+
+
+def test_allowlist_matches_on_a_path_boundary(allowlisted_indexer):
+    """`Projects/acme/` must not swallow a sibling `Projects/acme-legacy/`."""
+    assert allowlisted_indexer.should_skip("/data/codebase/Projects/acme-legacy/x.go") is True
+
+
+def test_allowlist_off_by_default(mock_qdrant, mock_embeddings):
+    plain = Indexer(
+        qdrant_client=mock_qdrant,
+        embedding_service=mock_embeddings,
+        path_tags={"Projects/acme/": ["acme"]},
+        codebase_root="/data/codebase",
+    )
+    assert plain.should_skip("/data/codebase/OpenSource/lib/main.go") is False

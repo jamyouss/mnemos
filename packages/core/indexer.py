@@ -42,6 +42,7 @@ def resolve_skip(
     path_excludes: PathExcludes | None = None,
     extra_exts: Iterable[str] = (),
     extra_dirs: Iterable[str] = (),
+    declared_prefixes: Iterable[str] | None = None,
 ) -> bool:
     """Should this file be left out of the index?
 
@@ -49,12 +50,29 @@ def resolve_skip(
     the per-prefix rules loaded from ``config/projects.yaml``, and any caller
     extras. They add up; none overrides another.
 
+    ``declared_prefixes`` turns on allowlist mode: anything under the codebase
+    mount that no declared prefix covers is skipped. The watcher walks the
+    whole mount and knows nothing of which repos you meant to index, so
+    without this it happily indexes trees you deliberately left out.
+
     Kept module-level and stateless so callers without an ``Indexer`` — the
     offline purge script, for one — get the same answer as the ingest path
     instead of re-deriving the union and drifting from it.
     """
     root = codebase_root.rstrip("/")
-    rel = file_path[len(root) + 1:] if file_path.startswith(root + "/") else file_path
+    under_codebase = file_path.startswith(root + "/")
+    rel = file_path[len(root) + 1:] if under_codebase else file_path
+
+    # Allowlist mode: only paths declared in config/projects.yaml are indexed.
+    # Scoped to the codebase mount on purpose — skills and docs live under a
+    # different root and must not be caught by it.
+    if declared_prefixes is not None and under_codebase:
+        if not any(
+            rel.startswith(pfx if pfx.endswith("/") else pfx + "/")
+            for pfx in declared_prefixes
+        ):
+            return True
+
     config = detect_excludes(rel, path_excludes or {})
     return should_skip_path(
         file_path,
@@ -75,6 +93,7 @@ class Indexer:
         contextual_enricher: ContextualEnricher | None = None,
         path_tags: PathTags | None = None,
         path_excludes: PathExcludes | None = None,
+        only_declared_paths: bool = False,
         codebase_root: str = "/data/codebase",
     ) -> None:
         self._qdrant = qdrant_client
@@ -82,6 +101,7 @@ class Indexer:
         self._contextual = contextual_enricher
         self._path_tags = path_tags or {}
         self._path_excludes = path_excludes or {}
+        self._only_declared_paths = only_declared_paths
         self._codebase_root = codebase_root.rstrip("/")
         self._go_chunker = GoChunker()
         self._vue_chunker = VueChunker()
@@ -174,6 +194,9 @@ class Indexer:
             path_excludes=self._path_excludes,
             extra_exts=extra_exts,
             extra_dirs=extra_dirs,
+            declared_prefixes=(
+                list(self._path_tags) if self._only_declared_paths else None
+            ),
         )
 
     def _resolve_tags(self, file_path: str, override: list[str] | None) -> list[str]:

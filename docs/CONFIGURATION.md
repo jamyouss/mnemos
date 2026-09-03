@@ -159,6 +159,28 @@ CLI flags are not.
 > mounted, so it cannot read this file. A file excluded here is still rejected
 > server-side — correctness holds — but the watcher wastes a round-trip on it.
 
+### Indexing only what is declared
+
+The watcher walks the **whole** codebase mount. It has no notion of which
+repos you meant to index, so on a mount that holds more than your own
+projects it will index all of it — vendored clones, model weights, whatever
+is on disk. `~/.config/mnemos/index-repos` gates the git hooks, not the
+watcher.
+
+`MNEMOS_INDEX_ONLY_DECLARED_PATHS=true` turns `paths:` into an allowlist:
+anything under the codebase mount that no declared prefix covers is skipped,
+whichever ingestion path offered it. Skills and docs live under a different
+mount root and are never affected.
+
+Off by default, so an absent or empty `projects.yaml` keeps indexing
+everything rather than silently indexing nothing.
+
+To clear what a mount indexed before you turned it on:
+
+```bash
+./scripts/purge-filtered.py --dry-run --only-declared   # then --apply
+```
+
 ### Search filters
 
 Search filters are exposed everywhere:

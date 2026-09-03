@@ -31,7 +31,7 @@ from urllib import error, request
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "packages"))
 
 from core.indexer import resolve_skip  # noqa: E402
-from core.projects import load_path_excludes  # noqa: E402
+from core.projects import load_path_excludes, load_path_tags  # noqa: E402
 
 DEFAULT_QDRANT = "http://localhost:6333"
 DEFAULT_PROJECTS_CONFIG = Path(__file__).resolve().parent.parent / "config" / "projects.yaml"
@@ -83,6 +83,11 @@ def main() -> int:
         "--codebase-root", default=DEFAULT_CODEBASE_ROOT,
         help="Container mount root that indexed paths are relative to.",
     )
+    parser.add_argument(
+        "--only-declared", action="store_true",
+        help="Also drop anything under the codebase mount that no prefix in "
+             "projects.yaml declares. Mirrors MNEMOS_INDEX_ONLY_DECLARED_PATHS.",
+    )
     parser.add_argument("--apply", action="store_true", help="Delete. Without it, report only.")
     parser.add_argument("--dry-run", action="store_true", help="Explicit no-op (the default).")
     args = parser.parse_args()
@@ -94,9 +99,10 @@ def main() -> int:
         return 2
 
     excludes = load_path_excludes(args.projects_config)
+    declared = list(load_path_tags(args.projects_config)) if args.only_declared else None
     doomed = [
         (pid, fp) for pid, fp in rows
-        if fp and resolve_skip(fp, args.codebase_root, excludes)
+        if fp and resolve_skip(fp, args.codebase_root, excludes, declared_prefixes=declared)
     ]
     orphans = [pid for pid, fp in rows if not fp]
 

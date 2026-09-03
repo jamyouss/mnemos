@@ -29,6 +29,10 @@ services:
       MNEMOS_MODE: local
       MNEMOS_AUTH_ENABLED: "false"
       MNEMOS_STATE_DIR: /data/state
+      # Index only what config/projects.yaml declares. The watcher walks the
+      # whole codebase mount and has no idea which repos you meant to index,
+      # so this is the only place that scope can be enforced.
+      MNEMOS_INDEX_ONLY_DECLARED_PATHS: "${MNEMOS_INDEX_ONLY_DECLARED_PATHS:-false}"
       # LLM (ollama | anthropic | openai). See .env.example for full reference.
       MNEMOS_LLM_PROVIDER: "${MNEMOS_LLM_PROVIDER:-ollama}"
       MNEMOS_LLM_MODEL: "${MNEMOS_LLM_MODEL:-llama3.1:8b}"

@@ -123,7 +123,15 @@ def reindex_one(
 
 
 def wait_for_count_growth(base_url: str, collection: str, *, min_seconds: int = 2) -> int:
-    """Poll /api/status briefly to surface the current chunk count."""
+    """Poll /api/status briefly to surface the current chunk count.
+
+    Cosmetic: every reindex has already been queued by the time this runs, so
+    a failure here says nothing about whether the work succeeded. It must
+    therefore never fail the script — and it used to, because a socket
+    timeout surfaces as a bare TimeoutError rather than a URLError, which the
+    original except clause missed. The nightly agent reported exit 1 for three
+    nights running while all 98 jobs had in fact been accepted.
+    """
     deadline = time.monotonic() + min_seconds
     last_count = -1
     while time.monotonic() < deadline:
@@ -135,7 +143,8 @@ def wait_for_count_growth(base_url: str, collection: str, *, min_seconds: int = 
                     .get(collection, {})
                     .get("points_count", 0)
             )
-        except (error.URLError, ValueError):
+        except (OSError, ValueError):
+            # OSError covers URLError, TimeoutError and every socket error.
             pass
         time.sleep(0.5)
     return last_count

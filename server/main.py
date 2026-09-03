@@ -75,6 +75,7 @@ def create_app() -> FastAPI:
             contextual_enricher=app.state.contextual,
             path_tags=app.state.path_tags,
             path_excludes=app.state.path_excludes,
+            only_declared_paths=settings.mnemos_index_only_declared_paths,
             codebase_root=settings.codebase_path,
         )
 

@@ -56,6 +56,9 @@ class Settings(BaseSettings):
 
     # Project detection (auto-detect + optional YAML override)
     mnemos_projects_config_path: str = "/app/config/projects.yaml"
+    # Index only what config/projects.yaml declares. Off by default so an
+    # empty or absent config keeps indexing everything, as before.
+    mnemos_index_only_declared_paths: bool = False
 
     class Config:
         env_prefix = ""
