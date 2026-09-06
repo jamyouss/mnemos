@@ -145,18 +145,35 @@ mnemos memory list --status rejected
 
 ### `mnemos memory add CONTENT`
 
-Insert a new memory directly (skips extraction, status defaults to `approved`).
+Insert a memory directly, skipping extraction. **Lands as `approved`**, so it is
+searchable immediately — you are the author, there is nothing to review.
 
 ```bash
-mnemos memory add "Always use flat resource paths in REST routes" \
+mnemos memory add "Chose flat REST paths over nested ones: nesting encoded a \
+hierarchy that changed twice in a year" \
        --project myproject \
-       --type convention \
+       --type decision \
        --tags routing,api
 ```
 
+`--type` is one of `decision`, `pattern`, `lesson`, `convention`, `note`.
+`--tags` is how a memory is found later from another project — an untagged
+entry is reachable by wording alone.
+
+Prefer recording the reasoning over the conclusion: "chose X over Y because Z"
+stays useful when the context shifts, "we use X" does not.
+
+> **The three write paths do not agree on status.** `mnemos memory add` writes
+> `approved`; the `mnemos_memory` MCP tool and the git-hook extraction both
+> write `pending`. Only `approved` entries come back from a search, so anything
+> an agent or a commit produced stays invisible until reviewed. That is
+> deliberate — a human authored the first, a model authored the others — but it
+> does mean an agent cannot read back what it just stored.
+
 ### `mnemos memory approve <id>` / `mnemos memory reject <id>`
 
-Move a pending memory to `approved` or `rejected`.
+Move a pending memory to `approved` or `rejected`. Run
+`mnemos memory list` (defaults to `status=pending`) to see what is waiting.
 
 ---
 

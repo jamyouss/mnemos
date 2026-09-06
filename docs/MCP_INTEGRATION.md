@@ -56,12 +56,15 @@ Drop this in your `~/.claude/CLAUDE.md`:
 
 2. **Fallback only if Mnemos returns no useful results**:
    - No results at all, OR
-   - Results have low relevance scores (< 0.5), OR
-   - `mnemos_status` shows collection is empty or Mnemos is down
+   - `mnemos_status` shows the collection is empty or Mnemos is down, OR
+   - The results are about something else entirely — judge the content, not the number
 
    Then use Grep / Glob / Read as usual.
 
-3. **Always store insights**: After resolving a non-trivial question, use `mnemos_memory` to store the decision, pattern, or lesson — so future sessions benefit.
+   **On scores:** hybrid fusion puts a normal top-1 around **0.5–0.8**. `0.54` is
+   typical, not weak. There is no absolute threshold that separates good from
+   bad, so do not treat one. Compare results against each other and read what
+   came back.
 
 ### When to skip Mnemos
 
@@ -70,9 +73,53 @@ Drop this in your `~/.claude/CLAUDE.md`:
 - Checking git state → use git commands directly
 - Searching in files just created in current session (not yet indexed)
 
+### Storing what you learn
+
+`mnemos_memory` writes an entry. Use it when a session produced something a
+future session would have to rediscover: a decision and its reasoning, a
+non-obvious constraint, the root cause of a bug that cost real time.
+
+- **`memory_type`**: `decision`, `pattern`, `lesson`, `convention`, `note`.
+- **`tags`**: the scoping mechanism, and the only one. An untagged memory is
+  findable by wording alone. Tag with the project plus any cross-cutting label
+  (`vue3`, `auth`, `ci`) that a future search might start from.
+- **Write the reasoning, not the conclusion.** "Chose X over Y because Z"
+  survives; "we use X" does not, because nobody can tell whether it still
+  applies.
+
+⚠️ **A stored memory is not immediately searchable.** `mnemos_memory` writes
+with status `pending`, and `mnemos_search_memory` only returns `approved`
+entries. It waits for human review — `mnemos memory list` then
+`mnemos memory approve <id>`. Do not store something and assume you can read it
+back in the same session.
+
+### Mnemos memory vs. built-in agent memory
+
+They are not interchangeable, and the split matters:
+
+| | Built-in memory | Mnemos |
+|---|---|---|
+| Scope | one working directory | global, sliced at query time by tags |
+| Cost | loaded into context every session | nothing until you search |
+| Retrieval | you read an index of titles | semantic search over full content |
+| Review | written directly | `pending` → `approved` |
+
+Built-in memory is **siloed per project directory**: what you learn in one repo
+is invisible from another. It also grows the context of every session, so it
+does not scale past a few dozen entries.
+
+- **Built-in memory** → what must be present without being asked: the user's
+  preferences, how they want you to work, standing constraints.
+- **Mnemos** → what must be findable when the need arises: technical decisions,
+  patterns, incident lessons — especially anything worth reaching for from a
+  *different* project.
+
 ### Rationale
 
-Mnemos is indexed with language-aware chunking (AST for Go/Vue), semantic embeddings, and auto-extracted memories from git history. A single `mnemos_search_code` call often replaces 5-10 Grep invocations. Use it.
+Mnemos is indexed with language-aware chunking (AST for Go/Vue, SFC for Vue,
+headings for Markdown, column-aware for CSV/TSV), hybrid dense + BM25
+retrieval, and memories auto-extracted from git history. A single
+`mnemos_search_code` call often replaces 5-10 Grep invocations. Use it.
 ```
 
 ## Claude Desktop
