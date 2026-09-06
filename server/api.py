@@ -18,7 +18,6 @@ from qdrant_client.models import (
 )
 
 from core.collections import COLLECTIONS
-from core.path_filter import should_skip_path
 from server.config import settings
 
 api_router = APIRouter()
@@ -347,17 +346,6 @@ async def eval_sample(body: EvalSampleRequest, request: Request):
 # ---------------------------------------------------------------------------
 # Reindex API (used by CLI)
 # ---------------------------------------------------------------------------
-
-
-def _should_skip(fp, extra_exts=(), extra_dirs=()) -> bool:
-    """Delegate to the built-in policy in :mod:`core.path_filter`.
-
-    Kept for ``test_should_skip.py`` and for callers with no indexer at hand.
-    Note this sees the built-in list plus whatever the caller passes, but NOT
-    the per-prefix rules from ``config/projects.yaml`` — those are resolved by
-    :meth:`core.indexer.Indexer.should_skip`, which the reindex walker uses.
-    """
-    return should_skip_path(fp, extra_exts=extra_exts, extra_dirs=extra_dirs)
 
 
 def _index_one_file(indexer, collection: str, fp, tags: list[str] | None = None) -> int:

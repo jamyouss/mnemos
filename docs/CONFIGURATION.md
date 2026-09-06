@@ -159,6 +159,35 @@ CLI flags are not.
 > mounted, so it cannot read this file. A file excluded here is still rejected
 > server-side — correctness holds — but the watcher wastes a round-trip on it.
 
+### Deriving the hook lists
+
+The git hooks read `~/.config/mnemos/{repos,index-repos}`: one path per line,
+because they are POSIX shell and must keep working with the server down.
+Maintaining them by hand meant two sources of truth for one decision — which
+of your projects mnemos cares about — free to drift apart.
+
+Generate them from `projects.yaml` instead:
+
+```bash
+./scripts/install-hooks.sh --global \
+    --codebase-root ~/code --from-projects
+```
+
+`paths:` declares path prefixes, often subdirectories; a hook fires at a
+repository root, so each prefix is walked up to its enclosing `.git`. Roots
+nested inside another are dropped — the hooks match on prefix, so the parent
+already covers them.
+
+The installer refuses to overwrite a list it did not generate; pass
+`--force-derive` to replace a hand-written one. `derive-hook-repos.py
+--print` shows the result without writing anything.
+
+`repos` and `index-repos` get the same content. They stay separate files
+because they answer different questions — memory extraction costs an LLM
+call per push, indexing costs an HTTP POST per file — so you can still narrow
+one without the other by editing it directly (which then opts it out of
+regeneration).
+
 ### Indexing only what is declared
 
 The watcher walks the **whole** codebase mount. It has no notion of which

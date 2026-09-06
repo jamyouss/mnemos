@@ -2,7 +2,7 @@
 
 This module is the single source of truth used by:
 - watcher/main.py (early-skip before POSTing /internal/reindex)
-- server/api.py (bulk reindex via _should_skip)
+- server/api.py (bulk reindex, via Indexer.should_skip)
 - packages/core/indexer.py (defensive chokepoint inside index_file)
 """
 
@@ -61,6 +61,10 @@ def test_legitimate_paths_kept(path: str) -> None:
         "/data/codebase/x/app.min.js",
         "/data/codebase/x/webapp/android/app/src/foo.java",
         "/data/codebase/x/webapp/ios/App/foo.swift",
+        # Web assets packaged into the mobile builds — a second copy of the
+        # app's own dist output, matched via IGNORE_PATH_SUBSTRINGS.
+        "/data/codebase/x/webapp/android/app/src/main/assets/public/_nuxt/a.js",
+        "/data/codebase/x/webapp/ios/App/App/public/_nuxt/a.js",
     ],
 )
 def test_existing_patterns_still_skipped(path: str) -> None:
