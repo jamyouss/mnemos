@@ -40,10 +40,6 @@ class Settings(BaseSettings):
     mnemos_rewriter_strategy: str = "expansion"     # expansion | decompose | hyde
     mnemos_rewriter_max_variants: int = 3
 
-    # Semantic router (Phase 4D)
-    mnemos_router_enabled: bool = False
-    mnemos_router_top_k: int = 2
-    mnemos_router_min_score: float = 0.4
 
     # Semantic cache (Phase 4E)
     mnemos_cache_enabled: bool = False

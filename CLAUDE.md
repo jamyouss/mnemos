@@ -22,7 +22,7 @@ INDEXING (watcher / push API / CLI):
          all-MiniLM-L6-v2 (384 dims, cosine, normalized)
 
 RETRIEVAL (MCP / REST):
-  query → cache → router (trim collections) → hybrid dense+BM25 sparse (RRF)
+  query → cache → hybrid dense+BM25 sparse (RRF)   [collections choisies par l'appelant]
         → cross-encoder rerank → MMR → CRAG grader (+rewriter) → cache + query log
          Tout est câblé (server/main.py + server/search.py). Sauf l'hybrid,
          chaque étage est derrière un flag MNEMOS_*_ENABLED, off par défaut.
@@ -103,7 +103,7 @@ Voir [`docs/ROADMAP.md`](docs/ROADMAP.md) pour le plan d'amélioration complet.
 
 **TL;DR — l'essentiel du plan est implémenté**, pas seulement planifié :
 hybrid BM25+RRF (toujours actif), reranker cross-encoder, contextual chunking,
-CRAG (grader + rewriter), query router, cache sémantique, MMR, query log, et un
+CRAG (grader + rewriter), cache sémantique, MMR, query log, et un
 harness d'eval (`packages/eval/`, `evals/`). Tous sauf l'hybrid sont **off par
 défaut** — un gain non mesuré reste un gain non acquis : activer d'abord
 `MNEMOS_QUERY_LOG_ENABLED`, mesurer, puis lever les flags un par un.
@@ -297,7 +297,7 @@ Switch via `MNEMOS_LLM_PROVIDER` env var (voir `.env.example`).
 | 2 | Hybrid retrieval (BM25 + RRF) | 2A | fait | toujours actif |
 | 3 | Contextual chunking (Anthropic) | 2A | fait | `MNEMOS_CONTEXTUAL_ENABLED` |
 | 4 | Document Grader | 3 | fait | `MNEMOS_GRADER_ENABLED` |
-| 5 | Query Router | 4D | fait | `MNEMOS_ROUTER_ENABLED` |
+| 5 | Query Router | 4D | **retiré** | mesuré inopérant, voir `docs/ROADMAP.md` |
 | 6 | Query Rewriter | 3 | fait | `MNEMOS_REWRITER_ENABLED` |
 | 7 | MMR diversification | 2B | fait | `MNEMOS_MMR_ENABLED` |
 | 8 | Semantic Cache | 4E | fait | `MNEMOS_CACHE_ENABLED` |

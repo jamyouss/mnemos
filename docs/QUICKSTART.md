@@ -297,8 +297,6 @@ MNEMOS_RERANKER_ENABLED=true docker compose up -d rag-server
 # Semantic cache (instant replies for repeated queries)
 MNEMOS_CACHE_ENABLED=true docker compose up -d rag-server
 
-# Semantic router (trim collections per query, faster)
-MNEMOS_ROUTER_ENABLED=true docker compose up -d rag-server
 ```
 
 Full reference: [`CONFIGURATION.md`](CONFIGURATION.md).

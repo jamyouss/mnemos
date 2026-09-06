@@ -15,10 +15,6 @@ query
 └────────┬─────────┘
          │ miss
          ▼
-┌──────────────────┐
-│ semantic router  │  → pick top-K relevant collections
-└────────┬─────────┘
-         ▼
 ┌──────────────────────────────────────────────────────┐
 │ hybrid query per collection                          │
 │  dense Prefetch (cosine, 20 cands)                   │
@@ -73,24 +69,23 @@ does is look up a previously-served result with a sufficiently close query.
 
 Cache hits also get logged (`cache_hit: true, cache_score: 0.97`) for analysis.
 
-## Stage 1 — Semantic router (optional)
+## Stage 1 — Choosing collections
 
-When `MNEMOS_ROUTER_ENABLED=true`, Mnemos uses cosine similarity between the
-query and each collection's `description` (declared in
-`core/collections.py`) to pick which collections to actually query.
+The caller decides. `mnemos_search` takes a `collections` list, and the
+dedicated tools (`mnemos_search_code`, `mnemos_search_skills`,
+`mnemos_search_memory`) each pin one. Omitting it fans out to code + docs +
+skills.
 
-- **Pre-computation**: at server startup, `QueryRouter` embeds every
-  collection description once and keeps the vectors in memory.
-- **Per-query cost**: 1 embedding + N cosine dot products. Cheap.
-- **Top-K**: returns the `MNEMOS_ROUTER_TOP_K` best collections (default 2).
-- **Fallback**: if the top score is below `MNEMOS_ROUTER_MIN_SCORE` (0.4),
-  the router gives up and returns ALL collections — protects recall on
-  ambiguous queries.
-- **Respect for explicit calls**: when the caller pins specific collections
-  (e.g. `mnemos search --collection mnemos_skills`), the router is skipped.
+There used to be a semantic router here, comparing the query against each
+collection's `description`. It was removed: measured against a real index it
+never once cleared its own confidence threshold, and forcing it to fire made
+things worse — a pure code query ranked the code collection *last*, so an
+active router would have excluded the very collection being asked about. The
+signal in a short category label is too weak to route on.
 
-Without a router enabled, every search fans out to all 5 code/doc/skill
-collections — fine for a small deployment, painful at 50+ collections.
+It was also solving a problem that does not exist here. Fanning out to every
+collection costs nothing measurable: outside the code collection, the others
+hold a few thousand points between them.
 
 ## Stage 2 — Hybrid retrieval per collection
 
@@ -213,7 +208,7 @@ When the cache is enabled, the final results are written back to
 
 When `MNEMOS_QUERY_LOG_ENABLED=true`, one JSONL line is appended per request
 to `MNEMOS_QUERY_LOG_PATH`. The entry includes which features were active
-(`reranker`, `grader`, `router`, `cache_hit`) so you can do replay analysis
+(`reranker`, `grader`, `rewriter`, `cache_hit`) so you can do replay analysis
 or A/B comparisons.
 
 ## Reading the scores you get back
@@ -234,7 +229,7 @@ stage. The internal pool can be much larger (20 × number of collections).
 |------|-------|
 | Better recall on niche terms | Enable hybrid (default), raise `HYBRID_TOP` (code change) |
 | Better precision | Enable reranker, then enable grader |
-| Lower latency | Enable router + cache, disable reranker (or use a small reranker + GPU) |
+| Lower latency | Enable the cache, narrow `collections` at the call site, disable the reranker (or use a small one on GPU) |
 | Better recall on vague queries | Enable rewriter (requires grader) |
 | Diverse top-K | Enable MMR |
 | Better recall on long files | Enable contextual chunking (indexing-side, expensive) |

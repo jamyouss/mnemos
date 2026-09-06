@@ -53,7 +53,7 @@ search.
   patterns, and lessons from every diff via an LLM, dedupes them, and queues
   them for your approval. The agent recalls them on demand.
 - 🔍 **Production-grade retrieval.** Hybrid BM25 + dense + RRF fusion,
-  cross-encoder reranker, CRAG corrective loop, semantic router & cache.
+  cross-encoder reranker, CRAG corrective loop, semantic cache.
   Every component is feature-flagged so you upgrade safely.
 - 🌳 **Code-aware chunking.** Tree-sitter for Go, SFC sections for Vue,
   heading splits for Markdown — your symbols stay intact across embeddings.
@@ -100,7 +100,7 @@ What's distinctive about the bundle Mnemos ships:
 
 - **Production-grade retrieval, all opt-in.** Hybrid BM25 + dense + RRF
   fusion, cross-encoder reranker, contextual chunking, CRAG corrective
-  loop (grader + rewriter), semantic router, semantic cache — every
+  loop (grader + rewriter), semantic cache — every
   component is feature-flagged so you upgrade behaviour without breaking
   reproducibility.
 
@@ -131,7 +131,8 @@ What's distinctive about the bundle Mnemos ships:
 - **MMR diversification** — Avoid near-duplicate results in your top-K
 - **CRAG corrective loop** — Document grader + query rewriter retry when
   retrieval fails
-- **Semantic router** — Trim collections per query to cut latency
+- **Caller-chosen collections** — narrow a search to `mnemos_code`, `mnemos_docs`,
+  `mnemos_skills` or `mnemos_memory`, or let it fan out
 - **Semantic cache** — Cosine-similarity cache with automatic invalidation
   on reindex
 
@@ -296,7 +297,7 @@ pytest tests/
 
 ## 🛣️ Next milestone
 
-The current default-on production setup (hybrid + reranker + router + cache)
+The current default-on production setup (hybrid + reranker + cache)
 delivers **+47 % MRR** over plain dense retrieval on our golden set. The next
 iteration tightens the corners:
 

@@ -27,7 +27,6 @@ from core.models import (
 from core.observability import QueryLogger
 from core.reranker import CrossEncoderReranker, mmr_select
 from core.rewriter import QueryRewriter
-from core.router import QueryRouter
 from core.sparse import bm25_sparse
 
 
@@ -112,7 +111,6 @@ class SearchService:
         mmr_lambda: float = 0.5,
         grader: DocumentGrader | None = None,
         rewriter: QueryRewriter | None = None,
-        router: QueryRouter | None = None,
         cache: SemanticCache | None = None,
         query_logger: QueryLogger | None = None,
     ) -> None:
@@ -123,7 +121,6 @@ class SearchService:
         self._mmr_lambda = mmr_lambda
         self._grader = grader
         self._rewriter = rewriter
-        self._router = router
         self._cache = cache
         self._query_logger = query_logger
 
@@ -261,8 +258,8 @@ class SearchService:
         """
         if not (self._query_logger and self._query_logger.enabled):
             return
-        # Only the reranker is shared by every entry point. The router, cache,
-        # grader and rewriter live in `search()` alone, so recording them here
+        # Only the reranker is shared by every entry point. The cache, grader
+        # and rewriter live in `search()` alone, so recording them here
         # for `search_code` would describe the service configuration rather
         # than the path the call actually took — and a log that overstates
         # what ran is worse than no log when judging a retrieval change.
@@ -319,14 +316,6 @@ class SearchService:
 
         default_pool = [c.name for c in COLLECTIONS if c.name != "mnemos_memory"]
         target_collections = collections or default_pool
-
-        # Semantic router (Phase 4D): trim the collection set to the most relevant
-        # ones. Only kicks in when the caller did NOT pin specific collections,
-        # so explicit calls to e.g. `mnemos search --collection x` are honoured.
-        if collections is None and self._router and self._router.enabled:
-            routed = self._router.route(query, allowed=target_collections)
-            if routed:
-                target_collections = [r.name for r in routed]
 
         must_conditions: list = []
         if file_types:
@@ -386,7 +375,6 @@ class SearchService:
                 "collections": target_collections,
                 "n_candidates": len(all_results),
                 "grader": bool(self._grader and self._grader.enabled),
-                "router": bool(self._router and self._router.enabled),
                 "rewriter": bool(self._rewriter and self._rewriter.enabled),
             },
         )

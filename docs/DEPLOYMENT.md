@@ -55,7 +55,6 @@ services:
       MNEMOS_MODE: local
       MNEMOS_RERANKER_ENABLED: "true"
       MNEMOS_CACHE_ENABLED: "true"
-      MNEMOS_ROUTER_ENABLED: "true"
       MNEMOS_QUERY_LOG_ENABLED: "true"
     ports:
       - "127.0.0.1:8100:8100"     # localhost only — let the reverse proxy expose it

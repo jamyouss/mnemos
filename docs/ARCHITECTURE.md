@@ -44,11 +44,6 @@ For the active improvement plan, see [ROADMAP.md](ROADMAP.md).
                               └──────┬────────────────┘
                                    miss
                                      ▼
-                              ┌───────────────────────┐
-                              │  semantic router      │
-                              │  top-K collections    │
-                              └──────┬────────────────┘
-                                     ▼
                   ┌──────────────────────────────────────┐
                   │     hybrid query per collection      │
                   │                                      │
@@ -101,7 +96,6 @@ For the active improvement plan, see [ROADMAP.md](ROADMAP.md).
 |------|------|
 | `server/search.py` | `SearchService` — entry point used by REST + MCP |
 | `core/cache.py` | Cosine-similarity cache (`mnemos_cache` Qdrant collection) |
-| `core/router.py` | Cosine route over per-collection description embeddings |
 | `core/reranker.py` | Cross-encoder rerank + MMR helper |
 | `core/grader.py` | LLM-based CRAG document grader |
 | `core/rewriter.py` | Query expansion / decomposition / HyDE |
@@ -111,11 +105,11 @@ The retrieval order is **fixed and feature-flag-driven**. Disabling a feature
 removes it from the chain without affecting the others:
 
 1. cache lookup
-2. router → trim collection set
-3. hybrid query per collection (dense + sparse → RRF)
-4. cross-encoder rerank
-5. MMR (only if reranker pulled more than `limit`)
-6. CRAG grader; on all-low + rewriter enabled → re-issue with variants
+2. hybrid query per collection (dense + sparse → RRF) — the caller picks the
+   collections; nothing infers them
+3. cross-encoder rerank
+4. MMR (only if reranker pulled more than `limit`)
+5. CRAG grader; on all-low + rewriter enabled → re-issue with variants
 7. cache store + query log
 
 ### Memory (`packages/core/memory_extractor.py` + `deduplicator.py`)
@@ -263,7 +257,7 @@ retrievable; `config/projects.yaml` turns it off where it is not wanted.
 
 All knobs are **environment variables**. Defaults are conservative:
 - Hybrid retrieval is **on** by default (it's just the new collection schema).
-- Every advanced feature (contextual, reranker, grader, rewriter, router, cache, query log) is **off** by default.
+- Every advanced feature (contextual, reranker, grader, rewriter, cache, query log) is **off** by default.
 
 To enable a feature, set the corresponding `MNEMOS_*_ENABLED=true` in your
 shell or in `docker-compose.yml`. No rebuild is needed for a flag flip —

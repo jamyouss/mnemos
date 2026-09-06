@@ -32,6 +32,18 @@ deltas within a campaign are.
 | + **CRAG grader (no rewriter)** | 0.404 | 0.441 | 0.516 | **0.133** | 3 211 ms | grader drops "low" chunks |
 | On cache hit (any of the above) | — | — | — | — | **100 ms** | |
 
+> **Reading the "+ Router" row.** The router was enabled during that run but
+> never actually fired: measured later against the same index, its confidence
+> never cleared its own threshold on any query, so it always fell back to all
+> collections. Its contribution to those numbers is zero — the gain over
+> hybrid-only belongs to the reranker and the cache. It has since been
+> removed; see [ROADMAP](ROADMAP.md).
+>
+> The grader row is worth a second look for the opposite reason: same MRR,
+> NDCG and recall, but **P@5 rises 0.103 → 0.133**. It is not free — on the
+> cross-collection path it dominates latency — but it does buy precision by
+> dropping low-graded chunks.
+
 **Reranker over plain hybrid:** MRR +50 %, NDCG@5 +55 %, R@5 +33 %.
 **Grader over reranker:** P@5 +29 % (and +117 % on `doc_lookup` alone) — same
 top-K but cleaner; the grader rejects irrelevant chunks before ranking.

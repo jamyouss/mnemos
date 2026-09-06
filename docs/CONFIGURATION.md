@@ -12,7 +12,6 @@ doc explains what each variable does and when to flip it.
 | Cross-encoder reranker | OFF |
 | Contextual chunking | OFF |
 | CRAG grader / rewriter | OFF |
-| Semantic router | OFF |
 | Semantic cache | OFF |
 | Query log (observability) | OFF |
 | Memory dedup | ON (threshold 0.85, strategy `merge`) |
@@ -265,16 +264,14 @@ The grader adds N parallel LLM calls per query (where N = number of retrieved
 chunks). It's expensive — combine with a fast LLM (Groq, Anthropic Haiku) for
 production use.
 
-### Semantic router (Phase 4D)
+### Choosing collections
 
-| Var | Default | Description |
-|-----|--------|------|
-| `MNEMOS_ROUTER_ENABLED` | `false` | Trim collection set per query |
-| `MNEMOS_ROUTER_TOP_K` | `2` | Number of collections to keep per query |
-| `MNEMOS_ROUTER_MIN_SCORE` | `0.4` | Fall back to ALL collections when top score below this |
-
-Cheap and pure-Python — no LLM call at query time. Useful when you have many
-collections.
+There is no automatic collection routing, by design — see
+[ROADMAP](ROADMAP.md#retrieval-quality). The caller knows the intent, so the
+caller narrows: pass `collections` to `mnemos_search`, or use the dedicated
+tool (`mnemos_search_code`, `mnemos_search_skills`, `mnemos_search_memory`).
+Searching all of them costs nothing measurable anyway — everything except the
+code collection is small.
 
 ### Semantic cache (Phase 4E)
 
@@ -334,7 +331,6 @@ Each line is a flat JSON object:
   "latency_ms": 1432.5,
   "cache_hit": false,
   "reranker": true,
-  "router": true,
   "grader": false
 }
 ```

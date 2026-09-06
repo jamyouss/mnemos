@@ -477,8 +477,8 @@ def test_every_search_entry_point_is_logged(
 
 
 def test_logged_stages_match_the_path_actually_taken(logging_search_service, mock_qdrant):
-    """`search_code` runs neither the router, the cache, the grader nor the
-    rewriter — those live in `search()` alone. Recording them anyway would
+    """`search_code` runs neither the cache, the grader nor the rewriter —
+    those live in `search()` alone. Recording them anyway would
     describe the service config, not the call, and make the log lie about
     what a latency number covers."""
     service, logger = logging_search_service
@@ -486,14 +486,14 @@ def test_logged_stages_match_the_path_actually_taken(logging_search_service, moc
 
     service.search("q")
     extra = logger.log.call_args.kwargs["extra"]
-    for stage in ("reranker", "grader", "router", "rewriter", "cache_hit"):
+    for stage in ("reranker", "grader", "rewriter", "cache_hit"):
         assert stage in extra, f"search lost the {stage} flag"
 
     logger.log.reset_mock()
     service.search_code("q")
     extra = logger.log.call_args.kwargs["extra"]
     assert "reranker" in extra, "the reranker does run on search_code"
-    for stage in ("grader", "router", "rewriter", "cache_hit"):
+    for stage in ("grader", "rewriter", "cache_hit"):
         assert stage not in extra, f"search_code does not run the {stage}"
 
 

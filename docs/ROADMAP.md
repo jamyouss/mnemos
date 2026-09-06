@@ -21,10 +21,9 @@ for per-phase numbers.
   per chunk, gated by `MNEMOS_CONTEXTUAL_ENABLED`.
 - ✅ **CRAG corrective loop** — Document grader (`MNEMOS_GRADER_ENABLED`) +
   query rewriter (`MNEMOS_REWRITER_ENABLED`), both feature-flagged.
-- ✅ **Semantic router** (`MNEMOS_ROUTER_ENABLED`) — Trim collections per
-  query based on cosine similarity to each collection's description.
+- ❌ **Semantic router** — built, measured, removed (2026-09-07).
 
-> **Measured and switched off (2026-09-07).** Routing compares the query
+> **Why it is gone.** Routing compared the query
 > against each collection's `description` — a short category label — and the
 > signal is too weak to act on. Across 10 real queries the top score peaked at
 > 0.33 against a 0.40 threshold, so it never once trimmed anything while
@@ -36,9 +35,18 @@ for per-phase numbers.
 > Rewriting the descriptions to read like their contents helps but does not
 > fix it — 4/6 correct, with code queries still landing near zero.
 >
-> The approach is the limit, not the tuning. A viable router needs a real
-> signal — a trained classifier or an LLM call — not cosine against a label.
-> Reopen with that, or leave it off.
+> The approach is the limit, not the tuning: a viable router needs a real
+> signal — a classifier or an LLM call — not cosine against a label.
+>
+> And it was solving a problem this deployment does not have. Fanning out to
+> every collection measures at ~100 ms; outside the code collection they hold
+> a few thousand points between them. Spending an LLM call to save nothing is
+> not a trade worth making.
+>
+> The caller already knows the intent. `mnemos_search` takes a `collections`
+> list and the dedicated tools each pin one — that is the routing, and it is
+> free. Removed rather than left off, so nobody rediscovers the flag and
+> turns it on.
 - ✅ **Semantic cache** (`MNEMOS_CACHE_ENABLED`) — Qdrant-backed,
   cosine ≥ `MNEMOS_CACHE_THRESHOLD`, TTL via `MNEMOS_CACHE_TTL_SECONDS`,
   invalidated on `reindex`.
@@ -166,7 +174,7 @@ Aucun item ne ship si une métrique régresse.
 | 2B | MMR diversification | ✅ shipped wired, off-default |
 | 3 | Document Grader (CRAG) | ✅ shipped |
 | 3 | Query Rewriter (CRAG) | ✅ shipped wired, off-default |
-| 4D | Query Router | ✅ shipped, off-default — see below |
+| 4D | Query Router | ❌ removed — see above |
 | 4E | Semantic Cache | ✅ shipped |
 | 4 | Observability (query log JSONL) | ✅ shipped |
 | 4 | A/B Testing infra | 🔜 backlog |

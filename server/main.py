@@ -94,14 +94,6 @@ def create_app() -> FastAPI:
             max_variants=settings.mnemos_rewriter_max_variants,
         )
 
-        # Semantic router (Phase 4D): pre-computes collection-description embeddings.
-        from core.router import QueryRouter
-        app.state.router = QueryRouter(
-            embedding_service=app.state.embeddings,
-            enabled=settings.mnemos_router_enabled,
-            top_k=settings.mnemos_router_top_k,
-            min_score=settings.mnemos_router_min_score,
-        )
 
         # Semantic cache (Phase 4E): cosine-similarity cache backed by Qdrant.
         from core.cache import SemanticCache
@@ -130,7 +122,6 @@ def create_app() -> FastAPI:
             mmr_lambda=settings.mnemos_mmr_lambda,
             grader=app.state.grader,
             rewriter=app.state.rewriter,
-            router=app.state.router,
             cache=app.state.cache,
             query_logger=app.state.query_logger,
         )
