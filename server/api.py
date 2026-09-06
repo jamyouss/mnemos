@@ -18,6 +18,7 @@ from qdrant_client.models import (
 )
 
 from core.collections import COLLECTIONS
+from core.llm import LLMError
 from server.config import settings
 
 api_router = APIRouter()
@@ -561,10 +562,19 @@ async def extract_memories(body: MemoryExtractRequest, request: Request):
     extractor = request.app.state.memory_extractor
     deduplicator = request.app.state.deduplicator
 
-    extracted = extractor.extract(
-        commit_message=body.commit_message,
-        diff=body.diff,
-    )
+    try:
+        extracted = extractor.extract(
+            commit_message=body.commit_message,
+            diff=body.diff,
+        )
+    except LLMError as exc:
+        # 502 rather than a 200 with `extracted: 0`: the git hook fires this
+        # and discards the response, so a silent success means nobody ever
+        # learns the LLM is unreachable.
+        raise HTTPException(
+            status_code=502,
+            detail=f"memory extraction unavailable: {exc}",
+        ) from exc
 
     results = []
     for memory in extracted:

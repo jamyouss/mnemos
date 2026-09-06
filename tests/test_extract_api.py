@@ -77,3 +77,43 @@ async def test_extract_no_memories(app):
     data = response.json()
     assert data["extracted"] == 0
     assert data["memories"] == []
+
+
+@pytest.mark.anyio
+async def test_llm_failure_is_not_reported_as_an_empty_result(app):
+    """A 200 with `extracted: 0` is indistinguishable from "this diff held
+    nothing worth keeping". That ambiguity hid an unreachable LLM endpoint for
+    months: mnemos_memory stayed empty and every caller saw success."""
+    from core.llm import LLMError
+
+    application, mock_extractor, _ = app
+    mock_extractor.extract.side_effect = LLMError("ollama request failed: name or service not known")
+
+    transport = ASGITransport(app=application)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/memory/extract",
+            json={"commit_message": "feat: x", "diff": "diff --git a/x.go ..."},
+        )
+
+    assert response.status_code == 502
+    assert "unavailable" in response.json()["detail"]
+    assert "name or service not known" in response.json()["detail"]
+
+
+@pytest.mark.anyio
+async def test_an_empty_result_still_means_nothing_to_extract(app):
+    """The other half of the distinction: a working LLM that found nothing
+    must still be a plain 200."""
+    application, mock_extractor, _ = app
+    mock_extractor.extract.return_value = []
+
+    transport = ASGITransport(app=application)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/memory/extract",
+            json={"commit_message": "chore: typo", "diff": "diff --git a/README.md ..."},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["extracted"] == 0

@@ -57,9 +57,14 @@ def test_extract_returns_empty_for_trivial_commit():
     assert extractor.extract(commit_message="fix: typo", diff="- helo\n+ hello") == []
 
 
-def test_extract_handles_llm_error():
+def test_extract_propagates_an_llm_error():
+    """Swallowing LLMError and returning [] makes an unreachable provider look
+    exactly like a commit holding nothing worth keeping. That ambiguity kept a
+    broken endpoint invisible for months. The caller decides what to do with
+    the failure — the git hook still discards it, on purpose."""
     extractor = MemoryExtractor(llm=FakeLLM(raise_error=True))
-    assert extractor.extract(commit_message="feat: something", diff="some diff") == []
+    with pytest.raises(LLMError):
+        extractor.extract(commit_message="feat: something", diff="some diff")
 
 
 def test_extract_handles_malformed_json():

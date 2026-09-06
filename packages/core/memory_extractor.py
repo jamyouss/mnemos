@@ -72,7 +72,12 @@ class MemoryExtractor:
             )
         except LLMError:
             logger.exception("Memory extraction failed (provider=%s)", self._llm.name)
-            return []
+            # Deliberately propagated. Returning [] here is indistinguishable
+            # from "this diff held no decision worth keeping", and that is how
+            # a broken LLM endpoint stayed invisible for months: every caller
+            # saw a cheerful empty result. Callers that want the old
+            # fire-and-forget behaviour can catch it themselves.
+            raise
 
         try:
             parsed = json.loads(raw)
