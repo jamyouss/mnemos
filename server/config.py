@@ -49,6 +49,9 @@ class Settings(BaseSettings):
     # Observability (Phase 4 / 9): query logging JSONL
     mnemos_query_log_enabled: bool = False
     mnemos_query_log_path: str = "/data/state/query-log.jsonl"
+    # Eval runs are local artefacts, never baked into the image — bind-mounted
+    # read-only so the dashboard can read them.
+    mnemos_eval_runs_path: str = "/app/evals/runs"
 
     # Project detection (auto-detect + optional YAML override)
     mnemos_projects_config_path: str = "/app/config/projects.yaml"

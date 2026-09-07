@@ -82,6 +82,9 @@ services:
       # bind-mount source on the host; a symlink *inside* a mounted directory
       # would dangle in the container.
       - ./config/projects.yaml:/app/config/projects.yaml:ro
+      # Eval runs, read-only: local artefacts the dashboard reads but the
+      # image must never carry.
+      - ./evals/runs:/app/evals/runs:ro
       - rag_state:/data/state
       # HuggingFace model cache. The embedding model is baked into the image
       # so this volume is only meaningful when MNEMOS_RERANKER_ENABLED=true:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -501,3 +502,172 @@ async def test_internal_reindex_deleted_event(app):
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "deleted"
+
+
+# ---------------------------------------------------------------------------
+# Observability endpoints (dashboard)
+# ---------------------------------------------------------------------------
+
+
+def _write_log(path, rows):
+    path.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+
+
+LOG_ROWS = [
+    {"ts": 1, "intent": "search", "query": "a", "n_results": 3, "latency_ms": 10},
+    {"ts": 2, "intent": "search_code", "query": "b", "n_results": 5, "latency_ms": 20},
+    {"ts": 3, "intent": "search_code", "query": "c", "n_results": 1, "latency_ms": 30},
+]
+
+
+@pytest.mark.anyio
+async def test_query_log_returns_entries_oldest_last(app, tmp_path, monkeypatch):
+    from server.api import settings
+
+    log = tmp_path / "query-log.jsonl"
+    _write_log(log, LOG_ROWS)
+    monkeypatch.setattr(settings, "mnemos_query_log_path", str(log))
+    monkeypatch.setattr(settings, "mnemos_query_log_enabled", True)
+
+    application = app[0] if isinstance(app, tuple) else app
+    transport = ASGITransport(app=application)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/api/query-log")
+
+    body = resp.json()
+    assert resp.status_code == 200
+    assert body["enabled"] is True
+    assert [e["query"] for e in body["entries"]] == ["a", "b", "c"]
+
+
+@pytest.mark.anyio
+async def test_query_log_distinguishes_off_from_empty(app, tmp_path, monkeypatch):
+    """An empty dashboard must be able to say whether nothing was searched or
+    nothing is being recorded. Conflating the two hid a logger that had been
+    off for a week."""
+    from server.api import settings
+
+    monkeypatch.setattr(settings, "mnemos_query_log_path", str(tmp_path / "absent.jsonl"))
+    monkeypatch.setattr(settings, "mnemos_query_log_enabled", False)
+
+    application = app[0] if isinstance(app, tuple) else app
+    transport = ASGITransport(app=application)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/api/query-log")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"enabled": False, "count": 0, "entries": []}
+
+
+@pytest.mark.anyio
+async def test_query_log_filters_by_intent_and_limit(app, tmp_path, monkeypatch):
+    from server.api import settings
+
+    log = tmp_path / "query-log.jsonl"
+    _write_log(log, LOG_ROWS)
+    monkeypatch.setattr(settings, "mnemos_query_log_path", str(log))
+    monkeypatch.setattr(settings, "mnemos_query_log_enabled", True)
+
+    application = app[0] if isinstance(app, tuple) else app
+    transport = ASGITransport(app=application)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        by_intent = (await client.get("/api/query-log", params={"intent": "search_code"})).json()
+        limited = (await client.get("/api/query-log", params={"limit": 1})).json()
+
+    assert [e["query"] for e in by_intent["entries"]] == ["b", "c"]
+    assert [e["query"] for e in limited["entries"]] == ["c"]
+
+
+@pytest.mark.anyio
+async def test_query_log_survives_a_torn_line(app, tmp_path, monkeypatch):
+    """The server appends while the dashboard reads; a half-written last line
+    is normal and must not fail the request."""
+    from server.api import settings
+
+    log = tmp_path / "query-log.jsonl"
+    log.write_text(json.dumps(LOG_ROWS[0]) + '\n{"ts": 2, "intent": "sea', encoding="utf-8")
+    monkeypatch.setattr(settings, "mnemos_query_log_path", str(log))
+    monkeypatch.setattr(settings, "mnemos_query_log_enabled", True)
+
+    application = app[0] if isinstance(app, tuple) else app
+    transport = ASGITransport(app=application)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/api/query-log")
+
+    assert resp.status_code == 200
+    assert [e["query"] for e in resp.json()["entries"]] == ["a"]
+
+
+@pytest.fixture
+def eval_runs_dir(tmp_path, monkeypatch):
+    """Two runs on disk. Pointed at a tmp dir so the suite does not depend on
+    whatever the developer happens to have evaluated."""
+    from server.api import settings
+
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    (runs / "a.json").write_text(json.dumps({
+        "tag": "run-a", "created_at": "2026-01-01T00:00:00+00:00",
+        "report": {"n_questions": 3, "overall": {"mrr": 0.5}},
+        "results": [{"query": "q", "retrieved_files": ["/data/codebase/x/main.go"]}],
+    }), encoding="utf-8")
+    (runs / "b.json").write_text(json.dumps({
+        "tag": "run-b", "created_at": "2026-02-01T00:00:00+00:00",
+        "report": {"n_questions": 4, "overall": {"mrr": 0.7}},
+        "results": [],
+    }), encoding="utf-8")
+    (runs / "broken.json").write_text("{ not json", encoding="utf-8")
+    monkeypatch.setattr(settings, "mnemos_eval_runs_path", str(runs))
+    return runs
+
+
+@pytest.mark.anyio
+async def test_eval_runs_lists_summaries_newest_first(app, eval_runs_dir):
+    """Per-question results carry indexed file paths, so the listing stays a
+    summary and only an explicit tag returns the detail."""
+    application = app[0] if isinstance(app, tuple) else app
+    transport = ASGITransport(app=application)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/api/eval/runs")
+
+    runs = resp.json()["runs"]
+    assert resp.status_code == 200
+    assert [r["tag"] for r in runs] == ["run-b", "run-a"]
+    for run in runs:
+        assert set(run) == {"tag", "created_at", "report"}
+        assert "results" not in run
+
+
+@pytest.mark.anyio
+async def test_a_malformed_run_does_not_break_the_listing(app, eval_runs_dir):
+    """A half-written or hand-edited run file must not take the page down."""
+    application = app[0] if isinstance(app, tuple) else app
+    transport = ASGITransport(app=application)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/api/eval/runs")
+
+    assert resp.status_code == 200
+    assert len(resp.json()["runs"]) == 2
+
+
+@pytest.mark.anyio
+async def test_eval_runs_returns_the_detail_for_a_tag(app, eval_runs_dir):
+    application = app[0] if isinstance(app, tuple) else app
+    transport = ASGITransport(app=application)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/api/eval/runs", params={"tag": "run-a"})
+
+    body = resp.json()
+    assert resp.status_code == 200
+    assert body["tag"] == "run-a"
+    assert body["results"], "the detail view is where per-question data lives"
+
+
+@pytest.mark.anyio
+async def test_eval_runs_unknown_tag_is_a_404(app, eval_runs_dir):
+    application = app[0] if isinstance(app, tuple) else app
+    transport = ASGITransport(app=application)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/api/eval/runs", params={"tag": "does-not-exist"})
+
+    assert resp.status_code == 404

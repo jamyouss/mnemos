@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -592,6 +593,101 @@ async def extract_memories(body: MemoryExtractRequest, request: Request):
 # ---------------------------------------------------------------------------
 # Status API
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Observability API (used by the dashboard)
+# ---------------------------------------------------------------------------
+
+
+def _tail_jsonl(path: Path, limit: int) -> list[dict]:
+    """Last `limit` well-formed JSON objects of a JSONL file, oldest first.
+
+    Read backwards in blocks: the query log only grows, and a dashboard that
+    parses the whole file gets slower every day it works.
+    """
+    if not path.exists():
+        return []
+
+    block = 64 * 1024
+    lines: list[bytes] = []
+    with path.open("rb") as fh:
+        fh.seek(0, 2)
+        pos = fh.tell()
+        buffer = b""
+        while pos > 0 and len(lines) <= limit:
+            step = min(block, pos)
+            pos -= step
+            fh.seek(pos)
+            buffer = fh.read(step) + buffer
+            lines = buffer.split(b"\n")
+        candidates = [ln for ln in lines if ln.strip()]
+
+    out: list[dict] = []
+    for raw in candidates[-limit:]:
+        try:
+            out.append(json.loads(raw))
+        except ValueError:
+            # A torn last line is normal while the server is appending.
+            continue
+    return out
+
+
+@api_router.get("/api/query-log")
+async def query_log(limit: int = 500, intent: Optional[str] = None):
+    """Recent retrieval calls, newest last.
+
+    `enabled` is reported separately from an empty list on purpose: a
+    dashboard showing nothing must be able to say whether that means "no
+    traffic" or "nothing is being recorded". Conflating the two is how a
+    logger that had been off for a week went unnoticed.
+    """
+    enabled = settings.mnemos_query_log_enabled
+    entries = _tail_jsonl(Path(settings.mnemos_query_log_path), max(1, min(limit, 5000)))
+    if intent:
+        entries = [e for e in entries if e.get("intent") == intent]
+    return {"enabled": enabled, "count": len(entries), "entries": entries}
+
+
+@api_router.get("/api/eval/runs")
+async def eval_runs(tag: Optional[str] = None):
+    """Eval runs on disk: summaries by default, one full run when `tag` is set.
+
+    Per-question `results` carry indexed file paths, so they are only returned
+    for an explicitly requested tag rather than in the listing.
+    """
+    runs_dir = Path(settings.mnemos_eval_runs_path)
+    if not runs_dir.is_dir():
+        # No runs yet is a normal state for a listing, but asking for a
+        # specific tag that cannot exist is still a miss.
+        if tag:
+            raise HTTPException(status_code=404, detail=f"No eval run tagged {tag!r}")
+        return {"runs": []}
+
+    if tag:
+        for path in sorted(runs_dir.glob("*.json")):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if data.get("tag") == tag:
+                return data
+        raise HTTPException(status_code=404, detail=f"No eval run tagged {tag!r}")
+
+    runs = []
+    for path in sorted(runs_dir.glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            # A half-written or hand-edited run must not break the listing.
+            continue
+        runs.append({
+            "tag": data.get("tag") or path.stem,
+            "created_at": data.get("created_at"),
+            "report": data.get("report", {}),
+        })
+    runs.sort(key=lambda r: r.get("created_at") or "", reverse=True)
+    return {"runs": runs}
 
 
 @api_router.get("/api/status")
