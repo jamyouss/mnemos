@@ -31,6 +31,7 @@ from core.contextual import ContextualEnricher
 from core.embeddings import EmbeddingService
 from core.path_filter import should_skip_path
 from core.projects import PathExcludes, PathTags, detect_excludes, detect_tags
+from core.skills import skill_payload
 from core.sparse import bm25_sparse
 
 _logger = logging.getLogger(__name__)
@@ -248,6 +249,15 @@ class Indexer:
             else []
         )
 
+        # Skill name + description, so a search result can say which skill it
+        # came from. Read at query time by SkillResult; nothing wrote them
+        # before, which left mnemos_search_skills returning unnamed hits.
+        skill_fields = (
+            skill_payload(content, file_path)
+            if collection == "mnemos_skills"
+            else {}
+        )
+
         texts = [c["content"] for c in chunks]
         dense_vectors = self._embeddings.embed_batch(texts)
         sparse_vectors = [bm25_sparse(t) for t in texts]
@@ -258,6 +268,7 @@ class Indexer:
             point_id = self._make_point_id(file_path, chunk.get("chunk_index", 0))
             payload = {
                 **chunk,
+                **skill_fields,
                 "last_indexed_at": now,
                 "file_mtime": file_mtime or time.time(),
             }

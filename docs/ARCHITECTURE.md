@@ -83,6 +83,7 @@ For the active improvement plan, see [ROADMAP.md](ROADMAP.md).
 | `chunkers/markdown_chunker.py` | Header-based splits |
 | `chunkers/tabular_chunker.py` | CSV/TSV rows as `column: value` pairs, so column names ride along in every chunk; delegates to the fallback when the file is not really a table |
 | `chunkers/fallback_chunker.py` | Fixed-size sliding window |
+| `skills.py` | Skill slug from the path + description from frontmatter, so a skill result can name itself |
 | `path_filter.py` | Single source of truth for the **built-in** "do not index" rules (vendored bundles, build outputs, generated reports). A pure function: per-project rules are layered on by the indexer, never loaded here. |
 | `embeddings.py` | sentence-transformers (`all-MiniLM-L6-v2`, 384d, normalised) |
 | `sparse.py` | BM25 encoder — camelCase/snake split, stable 31-bit hash |

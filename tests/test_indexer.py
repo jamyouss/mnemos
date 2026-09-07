@@ -283,3 +283,34 @@ def test_allowlist_off_by_default(mock_qdrant, mock_embeddings):
         codebase_root="/data/codebase",
     )
     assert plain.should_skip("/data/codebase/OpenSource/lib/main.go") is False
+
+
+# ---------------------------------------------------------------------------
+# Skill metadata reaches the payload
+# ---------------------------------------------------------------------------
+
+
+def test_skill_chunks_carry_their_skill_name(mock_qdrant, mock_embeddings):
+    """SkillResult reads skill_name at query time. Nothing wrote it, so
+    mnemos_search_skills returned the right content under an empty name."""
+    idx = Indexer(qdrant_client=mock_qdrant, embedding_service=mock_embeddings)
+    idx.index_file(
+        content="---\nname: docs-craft\ndescription: Write good docs.\n---\n\n# Docs\n",
+        file_path="/data/claude-config/skills/docs-craft/SKILL.md",
+        collection="mnemos_skills",
+    )
+    payload = mock_qdrant.upsert.call_args.kwargs["points"][0].payload
+    assert payload["skill_name"] == "docs-craft"
+    assert payload["description"] == "Write good docs."
+
+
+def test_code_chunks_get_no_skill_fields(mock_qdrant, mock_embeddings):
+    idx = Indexer(qdrant_client=mock_qdrant, embedding_service=mock_embeddings)
+    idx.index_file(
+        content="package main\n\nfunc main() {}\n",
+        file_path="/data/codebase/Projects/acme/main.go",
+        collection="mnemos_code",
+    )
+    payload = mock_qdrant.upsert.call_args.kwargs["points"][0].payload
+    assert "skill_name" not in payload
+    assert "description" not in payload
