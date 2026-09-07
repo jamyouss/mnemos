@@ -1,6 +1,18 @@
 # syntax=docker/dockerfile:1.7
 
 # -----------------------------------------------------------------------------
+# Stage 0 — dashboard: build the Nuxt SPA. Only the generated static files
+# reach the runtime image; node and node_modules stay here.
+# -----------------------------------------------------------------------------
+FROM node:24-alpine AS ui
+
+WORKDIR /build/ui
+COPY ui/package.json ui/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY ui/ ./
+RUN npm run generate
+
+# -----------------------------------------------------------------------------
 # Stage 1 — build: install all Python dependencies into a virtualenv that we
 # can copy into a slim runtime stage. This keeps the build toolchain out of
 # the final image (~1.2 GB saved on torch+transformers).
@@ -80,6 +92,8 @@ COPY packages/core /app/packages/core
 COPY server/ /app/server/
 COPY scripts/ /app/scripts/
 COPY config/ /app/config/
+# Dashboard, served at / by server.main. Optional: the server starts without it.
+COPY --from=ui /build/ui/.output/public /app/ui
 
 # Re-install editable in the runtime image too — fast because deps are cached.
 RUN pip install --no-deps -e /app/packages/core

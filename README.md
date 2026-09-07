@@ -224,6 +224,10 @@ mnemos search-code "JWT validation middleware" --tags-all myproject,go
 the image, but if you enable the optional cross-encoder reranker
 (`MNEMOS_RERANKER_ENABLED=true`) it pulls ~280 MB the first time it's used.
 
+Then open **http://localhost:8100/** for the dashboard — what is indexed, what
+is being searched, what has been remembered, and how retrieval scored. See
+**[docs/DASHBOARD.md](docs/DASHBOARD.md)**.
+
 → Full setup guide: **[docs/QUICKSTART.md](docs/QUICKSTART.md)**
 
 ---

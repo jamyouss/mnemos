@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from mcp.server import Server
@@ -8,8 +10,12 @@ from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from qdrant_client import QdrantClient
 from starlette.responses import Response
 
-from server.config import settings
+from fastapi.staticfiles import StaticFiles
+
 from server.api import api_router
+from server.config import settings
+
+logger = logging.getLogger("mnemos.server")
 from core.embeddings import EmbeddingService
 from core.indexer import Indexer
 
@@ -179,6 +185,19 @@ def create_app() -> FastAPI:
         return {"status": "healthy"}
 
     app.include_router(api_router)
+
+    # --- Dashboard ---
+    # Mounted last and at the root, so it only catches what /mcp, /health and
+    # /api did not. `html=True` serves index.html for unknown paths, which is
+    # what a client-side router needs on a hard refresh.
+    #
+    # Optional on purpose: a server built without the UI stage still starts,
+    # it just has no dashboard.
+    ui_dir = Path(settings.mnemos_ui_path)
+    if ui_dir.is_dir():
+        app.mount("/", StaticFiles(directory=str(ui_dir), html=True), name="ui")
+    else:
+        logger.info("No dashboard at %s — serving the API only", ui_dir)
 
     return app
 

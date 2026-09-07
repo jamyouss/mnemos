@@ -91,6 +91,10 @@ For the active improvement plan, see [ROADMAP.md](ROADMAP.md).
 | `indexer.py` | Orchestrator: skip check → chunk → contextualise → embed → upsert. `should_skip()` unions the built-in policy, the per-prefix rules from `config/projects.yaml` and any caller extras — the one place that resolution happens. |
 | `collections.py` | Collection registry; named-vector schema constants |
 
+The dashboard (`ui/`, Nuxt SPA) is built in a separate Docker stage and served
+by the same FastAPI app at `/`, mounted after the API so it only catches what
+`/api`, `/mcp` and `/health` did not. See [DASHBOARD](DASHBOARD.md).
+
 ### Retrieval (`server/search.py` + `packages/core/`)
 
 | File | Role |
