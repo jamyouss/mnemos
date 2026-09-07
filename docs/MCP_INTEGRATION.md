@@ -89,9 +89,8 @@ non-obvious constraint, the root cause of a bug that cost real time.
 
 ⚠️ **A stored memory is not immediately searchable.** `mnemos_memory` writes
 with status `pending`, and `mnemos_search_memory` only returns `approved`
-entries. It waits for human review — `mnemos memory list` then
-`mnemos memory approve <id>`. Do not store something and assume you can read it
-back in the same session.
+entries. It waits for human review — `mnemos memory review` walks the queue.
+Do not store something and assume you can read it back in the same session.
 
 ### Mnemos memory vs. built-in agent memory
 

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 from click.testing import CliRunner
 
@@ -461,3 +463,107 @@ def test_custom_mnemos_url():
     assert result.exit_code == 0
     called_url = mock_get.call_args[0][0]
     assert "9999" in called_url or "myserver" in called_url
+
+
+# ---------------------------------------------------------------------------
+# Batch memory review
+# ---------------------------------------------------------------------------
+
+
+PENDING = {
+    "entries": [
+        {"id": "id-1", "content": "First decision.", "memory_type": "decision",
+         "tags": ["a"], "status": "pending", "created_at": "2026-01-01"},
+        {"id": "id-2", "content": "Second lesson.", "memory_type": "lesson",
+         "tags": [], "status": "pending", "created_at": "2026-01-02"},
+        {"id": "id-3", "content": "Third note.", "memory_type": "note",
+         "tags": [], "status": "pending", "created_at": "2026-01-03"},
+    ]
+}
+
+
+def _review_transport(reviewed: list):
+    """httpx stub: GET returns the pending list, POST records the review."""
+    def handler(request):
+        if request.method == "GET":
+            return httpx.Response(200, json=PENDING)
+        reviewed.append((request.url.path, json.loads(request.content)["action"]))
+        mem_id = request.url.path.split("/")[-2]
+        action = json.loads(request.content)["action"]
+        return httpx.Response(200, json={"id": mem_id, "status": action + "d"})
+    return httpx.MockTransport(handler)
+
+
+def test_review_walks_every_pending_entry(monkeypatch):
+    """Reviewing used to mean copying a UUID out of a truncated table and
+    running one command per entry, so nothing ever got approved."""
+    reviewed: list = []
+    transport = _review_transport(reviewed)
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: httpx.Client(transport=transport).get(*a, **k))
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: httpx.Client(transport=transport).post(*a, **k))
+
+    result = CliRunner().invoke(cli, ["memory", "review"], input="a\nr\ns\n")
+
+    assert result.exit_code == 0
+    assert [a for _, a in reviewed] == ["approve", "reject"]
+    assert "1 approved" in result.output
+    assert "1 rejected" in result.output
+
+
+def test_review_shows_the_full_content_not_a_truncation(monkeypatch):
+    reviewed: list = []
+    transport = _review_transport(reviewed)
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: httpx.Client(transport=transport).get(*a, **k))
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: httpx.Client(transport=transport).post(*a, **k))
+
+    result = CliRunner().invoke(cli, ["memory", "review"], input="q\n")
+
+    assert "First decision." in result.output
+    assert "decision" in result.output
+
+
+def test_review_quits_without_touching_the_rest(monkeypatch):
+    reviewed: list = []
+    transport = _review_transport(reviewed)
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: httpx.Client(transport=transport).get(*a, **k))
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: httpx.Client(transport=transport).post(*a, **k))
+
+    CliRunner().invoke(cli, ["memory", "review"], input="a\nq\n")
+
+    assert [a for _, a in reviewed] == ["approve"]
+
+
+def test_review_warns_about_what_stays_pending(monkeypatch):
+    """Only approved entries are searchable, so a half-done review has to say
+    what is still invisible."""
+    transport = _review_transport([])
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: httpx.Client(transport=transport).get(*a, **k))
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: httpx.Client(transport=transport).post(*a, **k))
+
+    result = CliRunner().invoke(cli, ["memory", "review"], input="s\ns\ns\n")
+
+    assert "3 still pending" in result.output
+
+
+def test_approve_all_requires_confirmation(monkeypatch):
+    reviewed: list = []
+    transport = _review_transport(reviewed)
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: httpx.Client(transport=transport).get(*a, **k))
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: httpx.Client(transport=transport).post(*a, **k))
+
+    declined = CliRunner().invoke(cli, ["memory", "review", "--approve-all"], input="n\n")
+    assert reviewed == []
+    assert "Aborted" in declined.output
+
+    CliRunner().invoke(cli, ["memory", "review", "--approve-all"], input="y\n")
+    assert [a for _, a in reviewed] == ["approve"] * 3
+
+
+def test_review_with_nothing_pending(monkeypatch):
+    def handler(request):
+        return httpx.Response(200, json={"entries": []})
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: httpx.Client(transport=transport).get(*a, **k))
+
+    result = CliRunner().invoke(cli, ["memory", "review"])
+    assert "Nothing pending" in result.output

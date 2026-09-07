@@ -170,10 +170,26 @@ stays useful when the context shifts, "we use X" does not.
 > deliberate — a human authored the first, a model authored the others — but it
 > does mean an agent cannot read back what it just stored.
 
+### `mnemos memory review`
+
+Walk the pending queue one entry at a time — full content, then approve,
+reject, skip or quit.
+
+```bash
+mnemos memory review
+mnemos memory review --approve-all    # bulk, asks for confirmation first
+```
+
+This exists because reviewing was the bottleneck, not extracting. Approving by
+hand meant reading a table that truncates the content, copying a UUID out of
+it and running one command per entry — so in practice nothing got approved,
+and since search only returns `approved` entries, nothing extracted was ever
+searchable.
+
 ### `mnemos memory approve <id>` / `mnemos memory reject <id>`
 
-Move a pending memory to `approved` or `rejected`. Run
-`mnemos memory list` (defaults to `status=pending`) to see what is waiting.
+Act on a single entry when you already have its id. `mnemos memory list`
+(defaults to `status=pending`) shows what is waiting.
 
 ---
 

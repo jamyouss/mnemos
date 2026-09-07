@@ -551,6 +551,84 @@ def memory_add(content: str, project: str | None, memory_type: str, tags: tuple)
     )
 
 
+def _fetch_pending() -> list[dict]:
+    """Pending entries, oldest first — review in the order they arrived."""
+    try:
+        resp = httpx.get(f"{_base_url()}/api/memory", params={"status": "pending"}, timeout=10)
+        resp.raise_for_status()
+        entries = resp.json().get("entries", [])
+    except Exception as exc:
+        _handle_http_error(exc)
+        return []
+    return sorted(entries, key=lambda e: e.get("created_at") or "")
+
+
+def _render_memory(entry: dict, position: str) -> None:
+    """One entry, in full. The table view truncates, which is precisely why
+    nobody reviews: you cannot judge what you cannot read."""
+    tags = ", ".join(entry.get("tags") or []) or "—"
+    console.print()
+    console.print(f"[dim]{position}[/dim]  [bold]{entry.get('memory_type', '?')}[/bold]  [dim]tags:[/dim] {tags}")
+    console.print(f"[dim]{entry.get('id')}[/dim]")
+    console.print()
+    console.print(entry.get("content", ""))
+    console.print()
+
+
+@memory.command("review")
+@click.option("--approve-all", is_flag=True, help="Approve every pending entry without prompting.")
+def memory_review(approve_all: bool) -> None:
+    """Walk pending memories one by one and approve or reject each.
+
+    Extraction is not the bottleneck — reviewing is. Approving by hand meant
+    reading a truncated table, copying a UUID and running one command per
+    entry, so nothing ever got approved and nothing became searchable.
+    """
+    entries = _fetch_pending()
+    if not entries:
+        console.print("[green]Nothing pending.[/green]")
+        return
+
+    if approve_all:
+        console.print(f"About to approve [bold]{len(entries)}[/bold] entries without reading them.")
+        if not click.confirm("Continue?", default=False):
+            console.print("Aborted.")
+            return
+        for entry in entries:
+            _review_memory(entry["id"], "approve")
+        return
+
+    counts = {"approve": 0, "reject": 0, "skip": 0}
+    for index, entry in enumerate(entries, start=1):
+        _render_memory(entry, f"{index}/{len(entries)}")
+        choice = click.prompt(
+            "[a]pprove / [r]eject / [s]kip / [q]uit",
+            type=click.Choice(["a", "r", "s", "q"], case_sensitive=False),
+            default="s",
+            show_choices=False,
+        ).lower()
+
+        if choice == "q":
+            break
+        if choice == "a":
+            _review_memory(entry["id"], "approve")
+            counts["approve"] += 1
+        elif choice == "r":
+            _review_memory(entry["id"], "reject")
+            counts["reject"] += 1
+        else:
+            counts["skip"] += 1
+
+    console.print(
+        f"\n[green]{counts['approve']} approved[/green], "
+        f"[red]{counts['reject']} rejected[/red], "
+        f"{counts['skip']} skipped."
+    )
+    remaining = len(entries) - counts["approve"] - counts["reject"]
+    if remaining:
+        console.print(f"[dim]{remaining} still pending — only approved entries are searchable.[/dim]")
+
+
 @memory.command("approve")
 @click.argument("mem_id")
 def memory_approve(mem_id: str) -> None:
