@@ -34,7 +34,19 @@ class Deduplicator:
         self._threshold = threshold
         self._strategy = strategy
 
-    def deduplicate_and_store(self, memory: ExtractedMemory, status: str = "pending") -> DeduplicationResult:
+    def deduplicate_and_store(
+        self, memory: ExtractedMemory, status: str = "approved"
+    ) -> DeduplicationResult:
+        """Store a memory, merging it into a near-duplicate when one exists.
+
+        Writes are searchable by default. Gating them behind a human review
+        made the empty state the default one: six days of extraction produced
+        fifteen entries and zero approvals, so nothing the pipeline learned
+        was ever retrievable. No comparable system gates writes this way —
+        Mem0 dropped its write-time reconciliation pass in v3 for the same
+        reason, and lets retrieval ranking sort conflicting facts out at read
+        time. `status` remains, for taking a bad memory back out.
+        """
         vector = self._embeddings.embed(memory.content)
 
         try:
@@ -96,7 +108,7 @@ class Deduplicator:
                 )
             ],
         )
-        return DeduplicationResult(action="inserted", memory_id=mem_id)
+        return DeduplicationResult(action="inserted", memory_id=mem_id, status=status)
 
     def _merge(self, existing, memory: ExtractedMemory, vector: list[float], status: str) -> DeduplicationResult:
         existing_id = existing.payload.get("id", "")
@@ -124,7 +136,7 @@ class Deduplicator:
                 )
             ],
         )
-        return DeduplicationResult(action="merged", memory_id=existing_id, merged_with=existing_id)
+        return DeduplicationResult(action="merged", memory_id=existing_id, merged_with=existing_id, status=status)
 
     def _replace(self, existing, memory: ExtractedMemory, vector: list[float], status: str) -> DeduplicationResult:
         existing_id = existing.payload.get("id", "")
@@ -139,4 +151,5 @@ class Deduplicator:
             action="replaced",
             memory_id=result.memory_id,
             merged_with=existing_id,
+            status=status,
         )

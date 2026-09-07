@@ -87,7 +87,7 @@ class MemoryCreateRequest(BaseModel):
     project: Optional[str] = None
     memory_type: str = "general"
     tags: List[str] = []
-    status: str = "pending"
+    status: str = "approved"
 
 
 class MemoryReviewRequest(BaseModel):
@@ -583,7 +583,7 @@ async def extract_memories(body: MemoryExtractRequest, request: Request):
             "id": dedup_result.memory_id,
             "content": memory.content,
             "action": dedup_result.action,
-            "status": "pending",
+            "status": dedup_result.status,
         })
 
     return {"extracted": len(results), "memories": results}

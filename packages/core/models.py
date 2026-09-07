@@ -32,7 +32,7 @@ class MemoryEntry(BaseModel):
     topic: str | None = None
     memory_type: str
     tags: list[str] = []
-    status: str = "pending"
+    status: str = "approved"
     created_at: str
 
 
@@ -81,3 +81,7 @@ class DeduplicationResult(BaseModel):
     action: str  # "inserted", "merged", "replaced"
     memory_id: str
     merged_with: str | None = None
+    # What was actually written, so a caller reports the truth rather than
+    # assuming the default.
+    status: str = "approved"
+

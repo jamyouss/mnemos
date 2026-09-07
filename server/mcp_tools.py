@@ -440,7 +440,7 @@ async def _dispatch_tool(
             tags=args.get("tags", []),
         )
         result = deduplicator.deduplicate_and_store(memory)
-        return {"id": result.memory_id, "status": "pending", "action": result.action}
+        return {"id": result.memory_id, "status": "approved", "action": result.action}
 
     if name == "mnemos_memory_list":
         if qdrant_client is None:

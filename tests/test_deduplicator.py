@@ -108,3 +108,30 @@ def test_no_merge_below_threshold(deduplicator, mock_qdrant):
     result = deduplicator.deduplicate_and_store(memory)
     assert result.action == "inserted"
     assert result.merged_with is None
+
+
+def test_new_memories_are_searchable_by_default(deduplicator, mock_qdrant):
+    """Writes land approved. Holding them for review made the empty state the
+    default one: six days of extraction, fifteen entries, zero approvals, and
+    nothing retrievable — search only returns approved."""
+    mock_qdrant.query_points.return_value.points = []
+
+    result = deduplicator.deduplicate_and_store(
+        ExtractedMemory(content="A decision.", memory_type="decision", project=None, tags=[])
+    )
+
+    assert result.status == "approved"
+    assert mock_qdrant.upsert.call_args.kwargs["points"][0].payload["status"] == "approved"
+
+
+def test_an_explicit_status_still_wins(deduplicator, mock_qdrant):
+    """A caller that wants review can still ask for it."""
+    mock_qdrant.query_points.return_value.points = []
+
+    result = deduplicator.deduplicate_and_store(
+        ExtractedMemory(content="Unsure.", memory_type="note", project=None, tags=[]),
+        status="pending",
+    )
+
+    assert result.status == "pending"
+    assert mock_qdrant.upsert.call_args.kwargs["points"][0].payload["status"] == "pending"

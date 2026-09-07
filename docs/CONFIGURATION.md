@@ -288,9 +288,22 @@ on every reindex (`POST /api/reindex`).
 
 | Var | Default | Description |
 |-----|--------|------|
-| `MNEMOS_DEDUP_THRESHOLD` | `0.85` | Cosine threshold above which memories are deduped |
+| `MNEMOS_DEDUP_THRESHOLD` | `0.80` | Cosine threshold above which a new memory merges into an existing one. Calibrated against a real corpus, not a constant — see below |
 | `MNEMOS_DEDUP_STRATEGY` | `merge` | `merge` (LLM consolidates) or `replace` (newer wins) |
 | `MNEMOS_HOOK_TRIGGER` | `pre-push` | Git hook trigger mode (used by `scripts/install-hooks.sh`) |
+
+Memories are written **searchable** — `status: approved` — rather than held for
+review. Gating them made the empty state the default: six days of extraction
+produced fifteen entries and zero approvals, so nothing the pipeline learned
+could be retrieved. No comparable system gates writes this way; Mem0 dropped
+its write-time reconciliation pass in v3 and lets retrieval ranking sort
+conflicting facts out at read time. `status` remains for taking a bad memory
+back out, and `mnemos memory review` walks the queue for pruning.
+
+On the dedup threshold: 0.85 was a guess. On a real 15-memory corpus the one
+genuine near-duplicate pair scored 0.844 and the next closest 0.646, so the
+old value missed the duplicate by six thousandths while 0.80 sits in the
+middle of that gap. Re-measure as the corpus grows.
 | `MAX_DOCUMENTS` | `0` | Per-tenant max document count (`0` = unlimited) |
 
 ## Git hooks (host side)

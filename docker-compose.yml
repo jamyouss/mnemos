@@ -43,7 +43,7 @@ services:
       # model pulled. Hardcoding the bundled URL here defeated that and sent
       # every LLM call to an empty container.
       MNEMOS_OLLAMA_URL: "${MNEMOS_OLLAMA_URL:-}"
-      MNEMOS_DEDUP_THRESHOLD: "0.85"
+      MNEMOS_DEDUP_THRESHOLD: "${MNEMOS_DEDUP_THRESHOLD:-0.80}"
       MNEMOS_DEDUP_STRATEGY: merge
       # Contextual retrieval (Anthropic-style preamble per chunk via LLM)
       MNEMOS_CONTEXTUAL_ENABLED: "${MNEMOS_CONTEXTUAL_ENABLED:-false}"
