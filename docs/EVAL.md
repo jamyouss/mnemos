@@ -44,6 +44,36 @@ deltas within a campaign are.
 > cross-collection path it dominates latency — but it does buy precision by
 > dropping low-graded chunks.
 
+### 2026-09-07 — grader A/B on the current index
+
+Re-measured after the index changed substantially (30 % of it purged, tabular
+chunker added, allowlist enforced). 24 generated questions, `/api/search`,
+limit 5, reranker off, everything else equal:
+
+| | grader OFF | grader ON |
+|---|---|---|
+| latency p50 | **42 ms** | **16 114 ms** |
+| latency max | 150 ms | 32 372 ms |
+| results returned | 89 | 86 |
+| top-5 unchanged | — | 21 / 24 queries |
+
+**384× the latency to prune 3 chunks out of 89.** Whether those three were the
+right ones to drop is not knowable from this run, but at 16 s per query the
+answer does not change the verdict: off.
+
+⚠️ **The harness cannot measure the grader on its own.** `EvalRunner` routes
+`code_search` to `/api/search-code`, which never runs the grader — and a
+generated golden set is ~75 % code_search. A first attempt at this A/B
+returned byte-identical tables for both configurations, which reads as "the
+grader does nothing" when it simply never ran. Measuring it needs
+`/api/search` directly, as above, or a golden set weighted to cross-collection
+intents.
+
+Also visible in that run, and unrelated to the grader: **`skill_discovery`
+scored 0.000 across every metric**, in both configurations. Four skill
+questions, zero hits, against a `mnemos_skills` collection holding ~2 000
+points. That is a retrieval failure worth its own investigation.
+
 **Reranker over plain hybrid:** MRR +50 %, NDCG@5 +55 %, R@5 +33 %.
 **Grader over reranker:** P@5 +29 % (and +117 % on `doc_lookup` alone) — same
 top-K but cleaner; the grader rejects irrelevant chunks before ranking.
