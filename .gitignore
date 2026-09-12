@@ -31,3 +31,7 @@ config/tenants.yaml
 ui/node_modules/
 ui/.nuxt/
 ui/.output/
+# `nuxt generate` leaves this as a symlink to an absolute path on the build
+# machine — the `dist/` rule above only matches directories, so it needs its
+# own line or it gets committed with someone's home path in it.
+ui/dist
