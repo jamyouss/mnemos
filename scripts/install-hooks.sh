@@ -61,7 +61,7 @@ fi
 
 # 1. Copy hooks to global hooks directory
 mkdir -p "$GLOBAL_HOOKS_DIR"
-for hook in post-commit pre-push post-merge post-checkout mnemos-common.sh; do
+for hook in pre-commit post-commit pre-push post-merge post-checkout mnemos-common.sh; do
     cp "$HOOKS_SRC/$hook" "$GLOBAL_HOOKS_DIR/$hook"
     chmod +x "$GLOBAL_HOOKS_DIR/$hook"
 done

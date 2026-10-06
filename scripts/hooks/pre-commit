@@ -1,0 +1,11 @@
+#!/bin/sh
+# Global pre-commit hook. Mnemos does nothing here: it only exists so the
+# repository's own pre-commit runs, which the global core.hooksPath otherwise
+# disables. Unlike the mnemos hooks, a failing repo hook blocks the commit.
+
+HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$HOOK_DIR/mnemos-common.sh"
+
+mnemos_chain_local "pre-commit" "$@"
+
+exit 0

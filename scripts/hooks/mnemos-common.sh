@@ -72,12 +72,18 @@ mnemos_is_indexed_repo() {
     fi
 }
 
-# Chain to repo-local hook if it exists.
+# Chain to the repository's own hook: the versioned `.githooks/<name>` if the
+# repo ships one, else the untracked `.git/hooks/<name>`. core.hooksPath being
+# global, git itself never runs either. The common dir, not the git dir, so a
+# linked worktree finds the main checkout's hooks.
 # Usage: mnemos_chain_local "pre-push" "$@"
 mnemos_chain_local() {
     HOOK_NAME="$1"
     shift
-    REPO_HOOK="$(git rev-parse --git-dir)/hooks/$HOOK_NAME"
+    REPO_HOOK="$(git rev-parse --show-toplevel 2>/dev/null)/.githooks/$HOOK_NAME"
+    if [ ! -x "$REPO_HOOK" ]; then
+        REPO_HOOK="$(git rev-parse --git-common-dir)/hooks/$HOOK_NAME"
+    fi
     if [ -x "$REPO_HOOK" ]; then
         "$REPO_HOOK" "$@" || exit $?
     fi
