@@ -168,6 +168,15 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="Mnemos MCP Server", lifespan=lifespan)
 
+    if settings.mnemos_auth_enabled:
+        from server.auth import BearerAuthMiddleware, load_api_keys
+        # Loaded here, not in the lifespan: a broken tenants file must stop the
+        # boot instead of leaving an open server behind.
+        app.add_middleware(
+            BearerAuthMiddleware,
+            api_keys=load_api_keys(settings.mnemos_tenants_path),
+        )
+
     # --- MCP Streamable HTTP transport ---
     async def mcp_http_handler(scope, receive, send):
         mgr = _session_manager_holder.get("mgr")

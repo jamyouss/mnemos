@@ -9,8 +9,10 @@ class Settings(BaseSettings):
     embedding_model: str = "all-MiniLM-L6-v2"
     codebase_path: str = "/data/codebase"
     claude_config_path: str = "/data/claude-config"
-    mnemos_mode: str = "local"
+    # Require `Authorization: Bearer <key>` on /api, /internal and /mcp; keys
+    # come from the tenants file. The server refuses to start if it is unusable.
     mnemos_auth_enabled: bool = False
+    mnemos_tenants_path: str = "/data/config/tenants.yaml"
     mnemos_state_dir: str = "/data/state"
     # LLM configuration (ollama | anthropic | openai)
     mnemos_llm_provider: str = "ollama"
