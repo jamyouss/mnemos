@@ -54,6 +54,9 @@ IGNORE_DIRS: frozenset[str] = frozenset({
     ".venv", "venv",
     # Test artifacts
     "test-results", "coverage",
+    # Trash folders keep copies of deleted files (skills land in `.trash/`
+    # when removed), which then compete with the live ones.
+    ".trash",
 })
 
 # Full-path substrings — used when a directory name alone is too generic
@@ -104,7 +107,11 @@ IGNORE_EXTS: tuple[str, ...] = (
     ".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg",
     ".woff", ".woff2", ".ttf", ".eot",
     # Archives & binaries
-    ".pdf", ".zip", ".tar", ".gz", ".exe", ".bin", ".so", ".dylib",
+    ".pdf", ".zip", ".tar", ".gz", ".tgz", ".exe", ".bin", ".so", ".dylib",
+    # Generated or copied, never authored: Jest snapshots, editor/tool
+    # backups (`SKILL.md.bak` duplicated every skill it sat next to), and XML
+    # Schemas, which only show up vendored (OOXML schemas shipped in skills).
+    ".snap", ".bak", ".xsd",
 )
 
 # Exact basenames.
@@ -123,6 +130,10 @@ IGNORE_BASENAME_SUBSTRINGS: tuple[str, ...] = (
     "report-tnr-",              # WebdriverIO/Gherkin TNR analysis report
     ".lighthouse-report.html",
     "lighthouse-report-",
+    # Lighthouse CLI output: `<page>-<timestamp>.report.html|json`, 0.5-0.7 MB
+    # each. The `lighthouse-report-` marker is often on the directory instead.
+    ".report.html",
+    ".report.json",
     # Vue CLI / webpack vendor bundle. Not caught by the ``.chunk.js`` and
     # ``.bundle.js`` extensions: the marker is in the stem, not the suffix.
     "chunk-vendors",

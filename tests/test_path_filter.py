@@ -397,3 +397,40 @@ def test_coverage_profiles_skipped(path: str) -> None:
 )
 def test_coverage_lookalikes_not_skipped(path: str) -> None:
     assert should_skip_path(path) is False
+
+
+# ---------------------------------------------------------------------------
+# Trash, backups, snapshots, archives, vendored schemas, Lighthouse output
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/data/claude-config/skills/.trash/1795301497554-15178-abc/xlsx/SKILL.md",
+        "/data/claude-config/skills/find-skills/SKILL.md.bak",
+        "/data/claude-config/skills/docx/scripts/office/schemas/ISO-IEC29500/dml-main.xsd",
+        "/data/codebase/Projects/acme/web/src/__snapshots__/Button.test.tsx.snap",
+        "/data/codebase/Projects/acme/libs/acme-auth-1.2.0.tgz",
+        "/data/codebase/Projects/acme/reports/lighthouse/localhost-_booking-2024_05_06.report.json",
+        "/data/codebase/Projects/acme/reports/lighthouse/localhost-_booking-2024_05_06.report.html",
+    ],
+)
+def test_generated_and_copied_files_skipped(path: str) -> None:
+    assert should_skip_path(path) is True
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        # Non-regression: names that merely contain the markers stay.
+        "/data/codebase/Projects/acme/src/trash/TrashBin.vue",
+        "/data/codebase/Projects/acme/src/backup_view/restore.go",
+        "/data/codebase/Projects/acme/src/snapshot.ts",
+        "/data/codebase/Projects/acme/src/reports/report.ts",
+        "/data/codebase/Projects/acme/src/reports/monthly.report.ts",
+        "/data/claude-config/skills/docx/SKILL.md",
+    ],
+)
+def test_lookalikes_of_new_markers_not_skipped(path: str) -> None:
+    assert should_skip_path(path) is False
