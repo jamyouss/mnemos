@@ -63,14 +63,17 @@ TOOL_DEFINITIONS: list[types.Tool] = [
     types.Tool(
         name="mnemos_search",
         description=(
-            "Broad semantic search across docs + skills + code. Use when the question "
+            "Broad semantic search across docs + skills + code + external knowledge "
+            "(wiki pages, tickets, web sites). Use when the question "
             "spans multiple sources or you're not sure where the answer lives. "
             "When you DO know where the answer lives, say so rather than searching "
             "everything: pass `collections` (mnemos_code, mnemos_docs, "
-            "mnemos_skills, mnemos_memory), or call the dedicated tool — "
+            "mnemos_skills, mnemos_memory, mnemos_knowledge), or call the dedicated tool — "
             "mnemos_search_code for implementations, mnemos_search_skills for "
             "agent skills, mnemos_search_memory for past decisions. Nothing infers "
             "the right source for you; you are the one who knows the intent. "
+            "mnemos_knowledge hits carry metadata.source_url and tags such as "
+            "`confluence:<SPACE>`, `jira:<PROJECT>` or `web:<host>`. "
             "Workflow: start with the default mode=preview and limit=5; if the "
             "right hit appears, re-call with mode=full and a path_filter to fetch "
             "the whole chunk. Use tags_any/tags_all to scope to a project. "
@@ -85,8 +88,8 @@ TOOL_DEFINITIONS: list[types.Tool] = [
                     "items": {"type": "string"},
                     "description": (
                         "Collections to search: mnemos_code, mnemos_docs, "
-                        "mnemos_skills, mnemos_memory. Omit to search code + docs "
-                        "+ skills. Narrow it whenever the question names its own "
+                        "mnemos_skills, mnemos_memory, mnemos_knowledge. Omit to search "
+                        "everything but memory. Narrow it whenever the question names its own "
                         "source — it costs nothing and keeps unrelated hits out."
                     ),
                 },

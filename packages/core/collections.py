@@ -21,9 +21,10 @@ class CollectionConfig:
     description: str = ""
 
 
-# Four collections — fixed, immutable. New projects are NOT new collections;
-# they are tagged via the `tags` payload field on `mnemos_code` (or
-# `mnemos_memory`) and filtered at query time. See docs/RETRIEVAL_PIPELINE.md.
+# One collection per kind of content — fixed. New projects or new sources are
+# NOT new collections; they are tagged via the `tags` payload field on
+# `mnemos_code`, `mnemos_knowledge` or `mnemos_memory` and filtered at query
+# time. See docs/RETRIEVAL_PIPELINE.md.
 COLLECTIONS = [
     CollectionConfig(
         name="mnemos_skills",
@@ -44,6 +45,11 @@ COLLECTIONS = [
         name="mnemos_memory",
         path_prefixes=None,
         description="Memories extracted from commits and conversations",
+    ),
+    CollectionConfig(
+        name="mnemos_knowledge",
+        path_prefixes=None,
+        description="External knowledge pushed by connectors: wiki pages, tickets, web sites (scope with tags filter)",
     ),
 ]
 

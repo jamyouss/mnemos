@@ -8,6 +8,7 @@ def test_all_collections_defined():
         "mnemos_docs",
         "mnemos_code",      # single, project-scoped via payload
         "mnemos_memory",
+        "mnemos_knowledge",  # external sources, scoped via payload
     }
 
 

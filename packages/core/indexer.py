@@ -83,7 +83,7 @@ def resolve_skip(
 
 # Collections whose payload is filtered by `tags` at query time. We
 # create the keyword payload index on those at startup so the filter scales.
-_TAGGED_COLLECTIONS = ("mnemos_code", "mnemos_memory")
+_TAGGED_COLLECTIONS = ("mnemos_code", "mnemos_memory", "mnemos_knowledge")
 
 
 class Indexer:
@@ -219,6 +219,7 @@ class Indexer:
         collection: str,
         file_mtime: float | None = None,
         tags: list[str] | None = None,
+        source_url: str | None = None,
     ) -> int:
         # Defense-in-depth: even if a caller (push API, hook) forgot to
         # pre-filter, vendored bundles / build outputs never reach the
@@ -274,6 +275,8 @@ class Indexer:
             }
             if resolved_tags:
                 payload[TAGS_PAYLOAD_FIELD] = resolved_tags
+            if source_url:
+                payload["source_url"] = source_url
             points.append(
                 PointStruct(
                     id=point_id,
@@ -300,6 +303,32 @@ class Indexer:
                 )
             ),
         )
+
+    def list_files(self, collection: str, tag: str) -> dict[str, float | None]:
+        """Every file indexed under `tag`, mapped to its stored `file_mtime`.
+
+        Lets a connector skip pages that did not change and delete the ones
+        that disappeared at the source, without keeping state of its own.
+        """
+        files: dict[str, float | None] = {}
+        offset = None
+        while True:
+            points, offset = self._qdrant.scroll(
+                collection_name=collection,
+                scroll_filter=Filter(
+                    must=[FieldCondition(key=TAGS_PAYLOAD_FIELD, match=MatchValue(value=tag))]
+                ),
+                with_payload=["file_path", "file_mtime"],
+                with_vectors=False,
+                limit=256,
+                offset=offset,
+            )
+            for point in points:
+                payload = point.payload or {}
+                if payload.get("file_path"):
+                    files[payload["file_path"]] = payload.get("file_mtime")
+            if offset is None:
+                return files
 
     def _select_chunker(self, file_path: str):
         if file_path.endswith(".go"):

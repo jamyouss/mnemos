@@ -671,3 +671,53 @@ async def test_eval_runs_unknown_tag_is_a_404(app, eval_runs_dir):
         resp = await client.get("/api/eval/runs", params={"tag": "does-not-exist"})
 
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# External sources: push metadata + file listing
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_api_push_index_forwards_source_metadata(app):
+    app.state.indexer = MagicMock()
+    app.state.indexer.index_file.return_value = 1
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/index",
+            json={
+                "file_path": "jira/OPS/OPS-12.md",
+                "collection": "mnemos_knowledge",
+                "content": "# OPS-12\n",
+                "tags": ["jira", "jira:OPS"],
+                "source_url": "https://tracker.example.com/browse/OPS-12",
+                "file_mtime": 1700000000.0,
+            },
+        )
+    assert response.status_code == 200
+    kwargs = app.state.indexer.index_file.call_args.kwargs
+    assert kwargs["source_url"] == "https://tracker.example.com/browse/OPS-12"
+    assert kwargs["file_mtime"] == 1700000000.0
+
+
+@pytest.mark.anyio
+async def test_api_list_files_by_tag(app):
+    app.state.indexer = MagicMock()
+    app.state.indexer.list_files.return_value = {"jira/OPS/OPS-12.md": 1700000000.0}
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get(
+            "/api/index/mnemos_knowledge/files", params={"tag": "jira:OPS"}
+        )
+    assert response.status_code == 200
+    assert response.json()["files"] == {"jira/OPS/OPS-12.md": 1700000000.0}
+    app.state.indexer.list_files.assert_called_once_with("mnemos_knowledge", tag="jira:OPS")
+
+
+@pytest.mark.anyio
+async def test_api_list_files_rejects_an_unknown_collection(app):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/api/index/nope/files", params={"tag": "x"})
+    assert response.status_code == 400

@@ -47,6 +47,7 @@ _METADATA_KEEP: tuple[str, ...] = (
     "section",
     "doc_title",
     "preamble",
+    "source_url",
 )
 
 

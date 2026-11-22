@@ -43,6 +43,8 @@ class IndexPushRequest(BaseModel):
     collection: str
     content: str
     tags: Optional[List[str]] = None  # Override the auto-detected tag list for this file.
+    source_url: Optional[str] = None  # Where the original lives (wiki page, ticket, web page).
+    file_mtime: Optional[float] = None  # Source last-modified (epoch seconds); defaults to now.
 
 
 class SearchRequest(BaseModel):
@@ -170,6 +172,8 @@ async def push_index(body: IndexPushRequest, request: Request):
         file_path=body.file_path,
         collection=body.collection,
         tags=body.tags,
+        source_url=body.source_url,
+        file_mtime=body.file_mtime,
     )
     return {"status": "indexed", "file_path": body.file_path, "chunks": count}
 
@@ -181,6 +185,15 @@ async def delete_index(collection: str, file_path: str, request: Request):
         collection=collection,
     )
     return {"status": "deleted", "collection": collection, "file_path": file_path}
+
+
+@api_router.get("/api/index/{collection}/files")
+async def list_indexed_files(collection: str, tag: str, request: Request):
+    """Files indexed under one tag, with their `file_mtime` — the sync state of a connector."""
+    if collection not in _VALID_COLLECTIONS:
+        raise HTTPException(status_code=400, detail=f"Unknown collection: {collection}")
+    files = request.app.state.indexer.list_files(collection, tag=tag)
+    return {"collection": collection, "tag": tag, "files": files}
 
 
 # ---------------------------------------------------------------------------

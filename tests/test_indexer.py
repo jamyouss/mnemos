@@ -314,3 +314,44 @@ def test_code_chunks_get_no_skill_fields(mock_qdrant, mock_embeddings):
     payload = mock_qdrant.upsert.call_args.kwargs["points"][0].payload
     assert "skill_name" not in payload
     assert "description" not in payload
+
+
+def test_knowledge_collection_is_tagged_and_keeps_the_source_url(mock_qdrant, mock_embeddings):
+    """External sources (wiki, tickets, sites) are scoped by tags and must
+    point back to where the page lives."""
+    indexer = Indexer(qdrant_client=mock_qdrant, embedding_service=mock_embeddings)
+    indexer.index_file(
+        content="# Onboarding\n\nRead this first.\n",
+        file_path="confluence/ENG/12345.md",
+        collection="mnemos_knowledge",
+        tags=["confluence", "confluence:ENG"],
+        source_url="https://wiki.example.com/pages/12345",
+        file_mtime=1700000000.0,
+    )
+    points = mock_qdrant.upsert.call_args.kwargs["points"]
+    assert points
+    for p in points:
+        assert p.payload["tags"] == ["confluence", "confluence:ENG"]
+        assert p.payload["source_url"] == "https://wiki.example.com/pages/12345"
+        assert p.payload["file_mtime"] == 1700000000.0
+
+
+def test_list_files_returns_each_file_once_with_its_mtime(mock_qdrant, mock_embeddings):
+    def point(path, mtime):
+        p = MagicMock()
+        p.payload = {"file_path": path, "file_mtime": mtime}
+        return p
+
+    # Two scroll pages; a.md has two chunks.
+    mock_qdrant.scroll.side_effect = [
+        ([point("a.md", 1.0), point("a.md", 1.0)], "next"),
+        ([point("b.md", 2.0)], None),
+    ]
+    indexer = Indexer(qdrant_client=mock_qdrant, embedding_service=mock_embeddings)
+
+    files = indexer.list_files("mnemos_knowledge", tag="confluence:ENG")
+
+    assert files == {"a.md": 1.0, "b.md": 2.0}
+    first_filter = mock_qdrant.scroll.call_args_list[0].kwargs["scroll_filter"]
+    assert first_filter.must[0].key == "tags"
+    assert mock_qdrant.scroll.call_args_list[1].kwargs["offset"] == "next"
