@@ -534,42 +534,73 @@ def _scroll_all(
     collection: str,
     scroll_filter: Filter | None = None,
     with_payload: bool | list[str] = True,
-    limit: int | None = None,
 ):
-    """Every point of `collection` (up to `limit`), page by page, no vectors."""
+    """Every point of `collection`, page by page, no vectors."""
     offset = None
-    fetched = 0
     while True:
-        page_size = _SCROLL_PAGE if limit is None else min(_SCROLL_PAGE, limit - fetched)
         records, offset = qdrant.scroll(
             collection_name=collection,
             scroll_filter=scroll_filter,
-            limit=page_size,
+            limit=_SCROLL_PAGE,
             offset=offset,
             with_payload=with_payload,
             with_vectors=False,
         )
         yield from records
-        fetched += len(records)
-        if offset is None or not records or (limit is not None and fetched >= limit):
+        if offset is None or not records:
             return
+
+
+def _created_sort_key(payload: dict) -> datetime:
+    """Newest-first key; entries without a usable `created_at` sort last."""
+    try:
+        moment = datetime.fromisoformat(payload.get("created_at") or "")
+    except (TypeError, ValueError):
+        return datetime.min.replace(tzinfo=timezone.utc)
+    return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
 
 
 @api_router.get("/api/memory")
 def list_memory(
     request: Request,
     status: Optional[str] = None,
+    memory_type: Optional[str] = Query(None, alias="type"),
+    q: Optional[str] = None,
+    offset: int = Query(0, ge=0),
     limit: int = Query(1000, ge=1, le=10000),
 ):
-    scroll_filter = None
+    """One page of memories, newest first, with the total that matches.
+
+    Filtered and sorted over the whole collection, then sliced: a page is a
+    window on every match, not on whatever Qdrant happened to return first.
+    The memory collection is small (thousands), so reading its payloads is
+    milliseconds.
+    """
+    must = []
     if status:
-        scroll_filter = Filter(
-            must=[FieldCondition(key="status", match=MatchValue(value=status))]
+        must.append(FieldCondition(key="status", match=MatchValue(value=status)))
+    if memory_type:
+        must.append(FieldCondition(key="memory_type", match=MatchValue(value=memory_type)))
+    payloads = [
+        r.payload
+        for r in _scroll_all(
+            request.app.state.qdrant, _MEMORY_COLLECTION, Filter(must=must) if must else None
         )
-    records = _scroll_all(
-        request.app.state.qdrant, _MEMORY_COLLECTION, scroll_filter, limit=limit
-    )
-    return {"entries": [r.payload for r in records]}
+    ]
+    needle = (q or "").strip().lower()
+    if needle:
+        payloads = [
+            p for p in payloads
+            if needle in (p.get("content") or "").lower()
+            or any(needle in str(t).lower() for t in p.get("tags") or [])
+        ]
+    payloads.sort(key=_created_sort_key, reverse=True)
+    return {
+        "entries": payloads[offset:offset + limit],
+        "total": len(payloads),
+        "offset": offset,
+        "limit": limit,
+    }
 
 
 def _utc_day(created_at) -> str | None:

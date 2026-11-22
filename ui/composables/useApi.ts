@@ -50,6 +50,22 @@ export interface MemoryEntry {
   created_at?: string
 }
 
+export interface MemoryQuery {
+  status?: string
+  type?: string
+  q?: string
+  offset?: number
+  limit?: number
+}
+
+export interface MemoryPage {
+  entries: MemoryEntry[]
+  /** Matches across every page, not the length of `entries`. */
+  total: number
+  offset: number
+  limit: number
+}
+
 export interface EvalRunSummary {
   tag: string
   created_at?: string
@@ -158,9 +174,13 @@ export function useApi() {
       return request<QueryLogResponse>(`/api/query-log${qs ? `?${qs}` : ''}`)
     },
 
-    memories: (status?: string) => {
-      const qs = status ? `?status=${encodeURIComponent(status)}` : ''
-      return request<{ entries: MemoryEntry[] }>(`/api/memory${qs}`)
+    memories: (query: MemoryQuery = {}) => {
+      const params = new URLSearchParams()
+      for (const [key, value] of Object.entries(query)) {
+        if (value !== undefined && value !== '') params.set(key, String(value))
+      }
+      const qs = params.toString()
+      return request<MemoryPage>(`/api/memory${qs ? `?${qs}` : ''}`)
     },
 
     reviewMemory: (id: string, action: 'approve' | 'reject') =>

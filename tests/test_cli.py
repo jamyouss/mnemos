@@ -383,6 +383,22 @@ def test_memory_list_with_status_filter():
     assert params.get("status") == "pending"
 
 
+def test_memory_list_follows_every_page():
+    """Past the server's page size, nothing may be dropped from the list."""
+    entries = [{"id": f"m{i}", "status": "pending", "memory_type": "lesson", "content": "x"} for i in range(1500)]
+
+    def get(url, params, **_):
+        start, size = params["offset"], params["limit"]
+        return _mock_response({"entries": entries[start:start + size], "total": len(entries)})
+
+    runner = CliRunner()
+    with patch("httpx.get", side_effect=get) as mock_get:
+        result = runner.invoke(cli, ["memory", "list"])
+    assert result.exit_code == 0
+    assert [c[1]["params"]["offset"] for c in mock_get.call_args_list] == [0, 1000]
+    assert "m1499" in result.output
+
+
 # ---------------------------------------------------------------------------
 # rag memory add
 # ---------------------------------------------------------------------------

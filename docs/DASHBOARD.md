@@ -43,6 +43,11 @@ and Unovis charts. Generated primitives live in `ui/components/ui/`; add more
 with `npx shadcn-vue@latest add <name>` from `ui/` — `components.json` holds
 the aliases.
 
+> The CLI runs `npm install`, and on macOS that drops two packages Tailwind's
+> WASM fallback needs from `package-lock.json`; the image build then fails at
+> `npm ci`. Regenerate the lock on Linux afterwards:
+> `docker run --rm -v "$PWD":/app -w /app node:24-alpine npm install --package-lock-only`.
+
 > The server starts fine without a dashboard. If `/app/ui` is absent — a build
 > without the UI stage — it logs the fact and serves the API alone.
 
@@ -72,7 +77,8 @@ the window opens, the screen says the totals undercount.
 
 Reads `/api/query-log`: p50/p95, empty-result share, intents, the top-1 score
 distribution, the files returned most often, and the last searches with their
-top file, score, latency and the stages that ran.
+top file, score, latency and the stages that ran — paged, over the same 1,000
+searches the figures describe.
 
 Two things are deliberate:
 
@@ -88,7 +94,11 @@ recorded. Those are different problems.
 
 ### Memories
 
-Browse, filter by type, tag and status, and reject in one click.
+Browse, filter by type, tag, text and status, and reject in one click.
+Filtering, newest-first sorting and paging run on the server over every
+memory (`GET /api/memory?status=&type=&q=&offset=&limit=` returns the page and
+the `total`), so no entry hides past a page boundary; tab counts come from
+`/api/memory/stats`.
 
 Memories are written **searchable**; this screen takes a wrong one back out
 rather than letting good ones in. Search returns `approved` entries only, so

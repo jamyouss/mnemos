@@ -491,15 +491,8 @@ def memory() -> None:
 @click.option("--status", default="pending", show_default=True, help="Filter by status (pending, approved, rejected).")
 def memory_list(status: str | None) -> None:
     """List memory entries (defaults to pending)."""
-    url = f"{_base_url()}/api/memory"
-    params: dict = {}
-    if status:
-        params["status"] = status
-
     try:
-        resp = httpx.get(url, params=params, timeout=10, headers=_headers())
-        resp.raise_for_status()
-        entries = resp.json().get("entries", [])
+        entries = _fetch_memories(status)
     except Exception as exc:
         _handle_http_error(exc)
         return
@@ -558,12 +551,27 @@ def memory_add(content: str, project: str | None, memory_type: str, tags: tuple)
     )
 
 
+def _fetch_memories(status: str | None) -> list[dict]:
+    """Every memory with `status`, following the server's pages: one call
+    stops at its `limit`, which silently hid entries past the first 1,000."""
+    entries: list[dict] = []
+    while True:
+        params: dict = {"offset": len(entries), "limit": 1000}
+        if status:
+            params["status"] = status
+        resp = httpx.get(f"{_base_url()}/api/memory", params=params, timeout=10, headers=_headers())
+        resp.raise_for_status()
+        body = resp.json()
+        page = body.get("entries", [])
+        entries.extend(page)
+        if not page or len(entries) >= body.get("total", 0):
+            return entries
+
+
 def _fetch_pending() -> list[dict]:
     """Pending entries, oldest first — review in the order they arrived."""
     try:
-        resp = httpx.get(f"{_base_url()}/api/memory", params={"status": "pending"}, timeout=10, headers=_headers())
-        resp.raise_for_status()
-        entries = resp.json().get("entries", [])
+        entries = _fetch_memories("pending")
     except Exception as exc:
         _handle_http_error(exc)
         return []

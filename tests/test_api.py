@@ -820,26 +820,81 @@ async def test_memory_stats_aggregates_every_page(app):
     assert all(c["with_payload"] == ["status", "memory_type", "created_at"] for c in calls)
 
 
+def _dated(n: int) -> list[dict]:
+    """`n` memories created one minute apart, stored oldest first."""
+    return [
+        {
+            "id": f"m{i:04d}",
+            "status": "approved",
+            "memory_type": "lesson",
+            "content": f"memory number {i}",
+            "tags": ["mnemos"],
+            "created_at": f"2026-11-01T{i // 60:02d}:{i % 60:02d}:00+00:00",
+        }
+        for i in range(n)
+    ]
+
+
 @pytest.mark.anyio
-async def test_memory_list_paginates_beyond_100(app):
-    scroll, _ = _paged_scroll(_memories(1203))
+async def test_memory_pages_cover_every_match_newest_first(app):
+    scroll, _ = _paged_scroll(_dated(1203))
     app.state.qdrant.scroll.side_effect = scroll
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        default = (await client.get("/api/memory")).json()["entries"]
-        everything = (await client.get("/api/memory", params={"limit": 5000})).json()["entries"]
-        small = (await client.get("/api/memory", params={"limit": 150})).json()["entries"]
+        pages = [
+            (await client.get("/api/memory", params={"offset": o, "limit": 500})).json()
+            for o in (0, 500, 1000)
+        ]
         too_big = await client.get("/api/memory", params={"limit": 10001})
 
-    assert len(default) == 1000
-    assert len(everything) == 1203
-    assert [e["id"] for e in small] == [f"m{i}" for i in range(150)]
+    # Past the old 1,000 default nothing is lost, and the pages do not overlap.
+    ids = [e["id"] for page in pages for e in page["entries"]]
+    assert len(ids) == len(set(ids)) == 1203
+    assert all(page["total"] == 1203 for page in pages)
+    # Newest first across pages, not within each Qdrant batch.
+    assert ids[0] == "m1202" and ids[-1] == "m0000"
     assert too_big.status_code == 422
 
 
 @pytest.mark.anyio
-async def test_memory_list_keeps_the_status_filter_on_every_page(app):
+async def test_memory_sort_compares_instants_not_strings(app):
+    payloads = [
+        {"id": "utc", "created_at": "2026-11-01T10:00:00+00:00"},
+        # 09:30 in Paris is 08:30 UTC: older, although it sorts later as a string.
+        {"id": "paris", "created_at": "2026-11-01T09:30:00+01:00"},
+        {"id": "legacy"},
+    ]
+    scroll, _ = _paged_scroll(payloads)
+    app.state.qdrant.scroll.side_effect = scroll
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        body = (await client.get("/api/memory")).json()
+
+    assert [e["id"] for e in body["entries"]] == ["utc", "paris", "legacy"]
+
+
+@pytest.mark.anyio
+async def test_memory_text_filter_counts_matches_not_the_page(app):
+    payloads = _dated(120)
+    payloads[7]["tags"] = ["Auth"]
+    scroll, _ = _paged_scroll(payloads)
+    app.state.qdrant.scroll.side_effect = scroll
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        by_content = (await client.get("/api/memory", params={"q": "NUMBER 11", "limit": 5})).json()
+        by_tag = (await client.get("/api/memory", params={"q": "auth"})).json()
+
+    # "number 11" also matches 110-119: the total counts all of them.
+    assert by_content["total"] == 11
+    assert len(by_content["entries"]) == 5
+    assert [e["id"] for e in by_tag["entries"]] == ["m0007"]
+
+
+@pytest.mark.anyio
+async def test_memory_list_keeps_status_and_type_filters_on_every_page(app):
     filters = []
 
     def scroll(collection_name, scroll_filter=None, limit=10, offset=None, **_):
@@ -849,10 +904,11 @@ async def test_memory_list_keeps_the_status_filter_on_every_page(app):
     app.state.qdrant.scroll.side_effect = scroll
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        await client.get("/api/memory", params={"status": "pending"})
+        await client.get("/api/memory", params={"status": "pending", "type": "lesson"})
 
     assert len(filters) == 2
-    assert all(f.must[0].match.value == "pending" for f in filters)
+    for f in filters:
+        assert {(c.key, c.match.value) for c in f.must} == {("status", "pending"), ("memory_type", "lesson")}
 
 
 @pytest.mark.anyio

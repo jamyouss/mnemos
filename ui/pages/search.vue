@@ -22,13 +22,16 @@ const intents = computed(() => Object.entries(byIntent(entries.value)).map(([lab
 const files = computed(() => topFiles(entries.value, 10).map((r) => ({ label: r.file, count: r.count })))
 const scores = computed(() => scoreBuckets(entries.value).map((r) => ({ label: r.bucket, count: r.count })).filter((r) => r.count))
 
-const recent = computed(() => {
+// Paged over the loaded window, newest first: the same 1,000 searches the
+// figures above describe, so the table and the stats never disagree.
+const page = ref(1)
+const pageSize = ref(25)
+const matching = computed(() => {
   const q = filter.value.trim().toLowerCase()
-  return [...entries.value]
-    .reverse()
-    .filter((e) => !q || e.query.toLowerCase().includes(q))
-    .slice(0, 50)
+  return [...entries.value].reverse().filter((e) => !q || e.query.toLowerCase().includes(q))
 })
+const recent = computed(() => matching.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value))
+watch([filter, intent, pageSize], () => (page.value = 1))
 
 const fmtMs = (x: number) => (x >= 1000 ? `${(x / 1000).toFixed(1)} s` : `${Math.round(x)} ms`)
 const fmtTime = (ts: number) => new Date(ts * 1000).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
@@ -141,7 +144,8 @@ const shortFile = (f?: string) => f?.replace('/data/codebase/', '') ?? '—'
               </TableRow>
             </TableBody>
           </Table>
-          <p v-if="!recent.length" class="px-6 py-4 text-sm text-muted-foreground">No query matches “{{ filter }}”.</p>
+          <p v-if="!matching.length" class="px-6 py-4 text-sm text-muted-foreground">No query matches “{{ filter }}”.</p>
+          <ListPager v-model:page="page" v-model:page-size="pageSize" :total="matching.length" class="px-6 pt-4" />
         </CardContent>
       </Card>
     </template>

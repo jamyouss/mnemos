@@ -1,44 +1,56 @@
 <script setup lang="ts">
+import { refDebounced } from '@vueuse/core'
 import { toast } from 'vue-sonner'
 
 definePageMeta({ title: 'Memories' })
 useHead({ title: 'Memories' })
 
 const api = useApi()
-const { data, error, refresh } = await useAsyncData('memories', () => api.memories())
-
 const ALL = 'all'
-const search = ref('')
-const type = ref(ALL)
+
 const status = ref('approved')
+const type = ref(ALL)
+const search = ref('')
+const query = refDebounced(search, 300)
+const page = ref(1)
+const pageSize = ref<number>(50)
 const busy = ref<string | null>(null)
 
-const all = computed(() => data.value?.entries ?? [])
-const types = computed(() => [...new Set(all.value.map((m) => m.memory_type).filter(Boolean))].sort())
-const counts = computed(() => {
-  const out: Record<string, number> = { approved: 0, rejected: 0, pending: 0 }
-  for (const m of all.value) out[m.status] = (out[m.status] ?? 0) + 1
-  return out
-})
-
-const rows = computed(() =>
-  all.value
-    .filter((m) => status.value === ALL || m.status === status.value)
-    .filter((m) => type.value === ALL || m.memory_type === type.value)
-    .filter((m) => {
-      const q = search.value.trim().toLowerCase()
-      if (!q) return true
-      return m.content.toLowerCase().includes(q) || (m.tags ?? []).some((t) => t.toLowerCase().includes(q))
-    })
-    .sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? '')),
+// Filtering, sorting and slicing happen on the server, over every memory:
+// a page here is a window on all matches, never on what happened to load.
+const list = await useAsyncData(
+  'memories',
+  () =>
+    api.memories({
+      status: status.value === ALL ? undefined : status.value,
+      type: type.value === ALL ? undefined : type.value,
+      q: query.value.trim() || undefined,
+      offset: (page.value - 1) * pageSize.value,
+      limit: pageSize.value,
+    }),
+  { watch: [status, type, query, page, pageSize] },
 )
+// Tab counts and the type list come from the stats, which count everything.
+const stats = await useAsyncData('memory-stats', () => api.memoryStats())
+
+// A new filter starts over at page 1; otherwise page 7 of the old list
+// would silently become page 7 of a list with 2 pages.
+watch([status, type, query, pageSize], () => (page.value = 1))
+
+const rows = computed(() => list.data.value?.entries ?? [])
+const total = computed(() => list.data.value?.total ?? 0)
+const counts = computed(() => stats.data.value?.by_status ?? {})
+const types = computed(() => Object.keys(stats.data.value?.by_type ?? {}).sort())
 
 async function reject(id: string) {
   busy.value = id
   try {
     await api.reviewMemory(id, 'reject')
     toast.success('Memory rejected', { description: 'It no longer comes back in search.' })
-    await refresh()
+    await Promise.all([list.refresh(), stats.refresh()])
+    // Rejecting the last row of the last page empties it: step back.
+    const pages = Math.max(1, Math.ceil(total.value / pageSize.value))
+    if (page.value > pages) page.value = pages
   } catch (e) {
     toast.error('Could not reject the memory', { description: (e as Error).message })
   } finally {
@@ -56,16 +68,16 @@ async function reject(id: string) {
       </template>
     </PageHeader>
 
-    <EmptyState v-if="error" title="Could not load memories" detail="GET /api/memory failed." />
+    <EmptyState v-if="list.error.value" title="Could not load memories" :detail="list.error.value.message" />
 
     <template v-else>
       <div class="flex flex-wrap items-center gap-2">
         <Tabs v-model="status">
           <TabsList>
-            <TabsTrigger value="approved">Approved <Badge variant="secondary" class="ml-1">{{ counts.approved }}</Badge></TabsTrigger>
-            <TabsTrigger value="rejected">Rejected <Badge variant="secondary" class="ml-1">{{ counts.rejected }}</Badge></TabsTrigger>
-            <TabsTrigger value="pending">Pending <Badge variant="secondary" class="ml-1">{{ counts.pending }}</Badge></TabsTrigger>
-            <TabsTrigger :value="ALL">All</TabsTrigger>
+            <TabsTrigger value="approved">Approved <Badge variant="secondary" class="ml-1">{{ counts.approved ?? 0 }}</Badge></TabsTrigger>
+            <TabsTrigger value="rejected">Rejected <Badge variant="secondary" class="ml-1">{{ counts.rejected ?? 0 }}</Badge></TabsTrigger>
+            <TabsTrigger value="pending">Pending <Badge variant="secondary" class="ml-1">{{ counts.pending ?? 0 }}</Badge></TabsTrigger>
+            <TabsTrigger :value="ALL">All <Badge variant="secondary" class="ml-1">{{ stats.data.value?.total ?? 0 }}</Badge></TabsTrigger>
           </TabsList>
         </Tabs>
         <Input v-model="search" placeholder="Filter by content or tag…" class="h-9 min-w-56 flex-1" />
@@ -79,12 +91,12 @@ async function reject(id: string) {
       </div>
 
       <EmptyState
-        v-if="!rows.length"
+        v-if="!rows.length && !list.pending.value"
         title="Nothing matches"
         detail="Memories come from your commits, the MCP tool and `mnemos memory add`."
       />
 
-      <div v-else class="grid gap-3">
+      <div v-else class="grid gap-3" :class="list.pending.value && 'opacity-60 transition-opacity'">
         <Card v-for="m in rows" :key="m.id" class="gap-3 py-4">
           <CardContent class="flex items-start justify-between gap-4 px-4">
             <div class="min-w-0 flex-1 space-y-2">
@@ -111,6 +123,8 @@ async function reject(id: string) {
           </CardContent>
         </Card>
       </div>
+
+      <ListPager v-model:page="page" v-model:page-size="pageSize" :total="total" />
     </template>
   </div>
 </template>
