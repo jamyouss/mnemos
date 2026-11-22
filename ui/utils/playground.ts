@@ -39,14 +39,15 @@ const FILTERS: Record<SearchTarget, readonly string[]> = {
 /** Fields that only describe the Playground call, not the search itself. */
 const DIAGNOSTIC = ['trace', 'source', 'use_cache'] as const
 
-const list = (text: string) => text.split(',').map((s) => s.trim()).filter(Boolean)
+/** A comma-separated filter field as its values (spaces stay: a path or tag may hold one). */
+export const splitFilterList = (text: string) => text.split(',').map((s) => s.trim()).filter(Boolean)
 
 export function buildBody(form: PlaygroundForm): Record<string, unknown> {
   const candidates: Record<string, unknown> = {
     collections: form.collections.length ? form.collections : undefined,
-    tags_any: list(form.tagsAny),
-    tags_all: list(form.tagsAll),
-    file_types: list(form.fileTypes),
+    tags_any: splitFilterList(form.tagsAny),
+    tags_all: splitFilterList(form.tagsAll),
+    file_types: splitFilterList(form.fileTypes),
     path_filter: form.pathFilter.trim(),
     language: form.language.trim(),
     symbol_type: form.symbolType.trim(),

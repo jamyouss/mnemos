@@ -35,6 +35,11 @@ const langFacets = useAsyncData('pg-langs', () => api.facets('mnemos_code', 'lan
 const typeFacets = useAsyncData('pg-chunk-types', () => api.facets('mnemos_code', 'chunk_type', 30), { lazy: true })
 const memoryStats = useAsyncData('memory-stats', () => api.memoryStats(), { lazy: true })
 
+const facetOptions = (facets: { counts: Array<{ value: string; count: number }> } | null | undefined) => facets?.counts ?? []
+const memoryTypes = computed(() =>
+  Object.entries(memoryStats.data.value?.by_type ?? {}).map(([value, count]) => ({ value, count: Number(count) })),
+)
+
 const collections = computed(() =>
   Object.keys(status.data.value?.collections ?? {})
     .filter((n) => n !== 'mnemos_memory' && !n.endsWith('_cache') && !n.includes('_eval'))
@@ -138,26 +143,37 @@ const rank = (n: number | null | undefined) => (n == null ? '—' : `#${n}`)
                 <ToggleGroupItem v-for="c in collections" :key="c" :value="c" class="font-mono text-xs">{{ c.replace(/^mnemos_/, '') }}</ToggleGroupItem>
               </ToggleGroup>
             </div>
-            <div class="space-y-1.5"><Label for="pg-types">File types</Label><Input id="pg-types" v-model="form.fileTypes" placeholder="go, python" list="pg-langs" /></div>
+            <div class="space-y-1.5">
+              <Label for="pg-types">File types</Label>
+              <FacetCombobox id="pg-types" v-model="form.fileTypes" :options="facetOptions(langFacets.data.value)" multiple />
+            </div>
           </template>
-          <div class="space-y-1.5"><Label for="pg-any">Tags, any of</Label><Input id="pg-any" v-model="form.tagsAny" placeholder="comma-separated" list="pg-tags" /></div>
-          <div class="space-y-1.5"><Label for="pg-all">Tags, all of</Label><Input id="pg-all" v-model="form.tagsAll" placeholder="comma-separated" list="pg-tags" /></div>
+          <div class="space-y-1.5">
+            <Label for="pg-any">Tags, any of</Label>
+            <FacetCombobox id="pg-any" v-model="form.tagsAny" :options="facetOptions(tagFacets.data.value)" multiple />
+          </div>
+          <div class="space-y-1.5">
+            <Label for="pg-all">Tags, all of</Label>
+            <FacetCombobox id="pg-all" v-model="form.tagsAll" :options="facetOptions(tagFacets.data.value)" multiple />
+          </div>
           <template v-if="form.target === 'search-code'">
-            <div class="space-y-1.5"><Label for="pg-lang">Language</Label><Input id="pg-lang" v-model="form.language" list="pg-langs" /></div>
-            <div class="space-y-1.5"><Label for="pg-sym">Symbol type</Label><Input id="pg-sym" v-model="form.symbolType" list="pg-chunk-types" /></div>
+            <div class="space-y-1.5">
+              <Label for="pg-lang">Language</Label>
+              <FacetCombobox id="pg-lang" v-model="form.language" :options="facetOptions(langFacets.data.value)" />
+            </div>
+            <div class="space-y-1.5">
+              <Label for="pg-sym">Symbol type</Label>
+              <FacetCombobox id="pg-sym" v-model="form.symbolType" :options="facetOptions(typeFacets.data.value)" />
+            </div>
           </template>
           <div v-if="form.target === 'search' || form.target === 'search-code'" class="space-y-1.5">
             <Label for="pg-path">Exact file path</Label><Input id="pg-path" v-model="form.pathFilter" />
           </div>
           <div v-if="form.target === 'search-memory'" class="space-y-1.5">
-            <Label for="pg-mtype">Memory type</Label><Input id="pg-mtype" v-model="form.memoryType" list="pg-mtypes" />
+            <Label for="pg-mtype">Memory type</Label>
+            <FacetCombobox id="pg-mtype" v-model="form.memoryType" :options="memoryTypes" />
           </div>
         </div>
-
-        <datalist id="pg-tags"><option v-for="f in tagFacets.data.value?.counts ?? []" :key="f.value" :value="f.value" /></datalist>
-        <datalist id="pg-langs"><option v-for="f in langFacets.data.value?.counts ?? []" :key="f.value" :value="f.value" /></datalist>
-        <datalist id="pg-chunk-types"><option v-for="f in typeFacets.data.value?.counts ?? []" :key="f.value" :value="f.value" /></datalist>
-        <datalist id="pg-mtypes"><option v-for="t in Object.keys(memoryStats.data.value?.by_type ?? {})" :key="t" :value="t" /></datalist>
 
         <div v-if="history.length" class="flex flex-wrap items-center gap-1.5 text-xs">
           <HistoryIcon class="size-3.5 text-muted-foreground" />
