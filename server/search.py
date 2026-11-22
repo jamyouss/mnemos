@@ -9,6 +9,8 @@ from qdrant_client.models import (
     MatchAny,
     MatchValue,
     Prefetch,
+    Rrf,
+    RrfQuery,
     SparseVector,
 )
 
@@ -114,6 +116,7 @@ class SearchService:
         rewriter: QueryRewriter | None = None,
         cache: SemanticCache | None = None,
         query_logger: QueryLogger | None = None,
+        dense_weight: float = 3.0,
     ) -> None:
         self._qdrant = qdrant_client
         self._embeddings = embedding_service
@@ -124,6 +127,15 @@ class SearchService:
         self._rewriter = rewriter
         self._cache = cache
         self._query_logger = query_logger
+        # Equal-weight RRF let BM25 drag the ranking down: camelCase/snake
+        # splitting makes a symbol match every file sharing its words. Weighting
+        # the dense side 3:1 lifted code-search MRR 0.55 → 0.74 (docs/EVAL.md)
+        # while keeping BM25 for literal strings. 1.0 is the old plain RRF.
+        self._fusion = (
+            FusionQuery(fusion=Fusion.RRF)
+            if dense_weight == 1.0
+            else RrfQuery(rrf=Rrf(weights=[dense_weight, 1.0]))
+        )
 
     # ------------------------------------------------------------------
     # Core hybrid retrieval — used by every public search method.
@@ -155,7 +167,7 @@ class SearchService:
                         filter=query_filter,
                     ),
                 ],
-                query=FusionQuery(fusion=Fusion.RRF),
+                query=self._fusion,
                 limit=limit,
                 with_payload=True,
             ).points

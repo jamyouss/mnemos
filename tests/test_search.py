@@ -508,3 +508,24 @@ def test_nothing_is_logged_when_the_log_is_off(mock_qdrant, mock_embeddings):
     _mock_query_points(mock_qdrant, [_hit(content="c", file_path="a.go")])
     service.search_code("q")
     logger.log.assert_not_called()
+
+
+def test_fusion_weights_the_dense_side_by_default(mock_qdrant, mock_embeddings):
+    """Plain RRF let BM25 noise outrank the dense match; dense counts 3x by default."""
+    from qdrant_client.models import RrfQuery
+
+    _mock_query_points(mock_qdrant, [])
+    SearchService(qdrant_client=mock_qdrant, embedding_service=mock_embeddings).search_code("q")
+    query = mock_qdrant.query_points.call_args.kwargs["query"]
+    assert isinstance(query, RrfQuery)
+    # Prefetch order is dense then sparse; weights follow it.
+    assert [p.using for p in mock_qdrant.query_points.call_args.kwargs["prefetch"]] == ["dense", "sparse"]
+    assert query.rrf.weights == [3.0, 1.0]
+
+
+def test_fusion_weight_one_is_plain_rrf(mock_qdrant, mock_embeddings):
+    from qdrant_client.models import Fusion, FusionQuery
+
+    _mock_query_points(mock_qdrant, [])
+    SearchService(qdrant_client=mock_qdrant, embedding_service=mock_embeddings, dense_weight=1.0).search_code("q")
+    assert mock_qdrant.query_points.call_args.kwargs["query"] == FusionQuery(fusion=Fusion.RRF)

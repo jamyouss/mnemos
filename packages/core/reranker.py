@@ -35,11 +35,13 @@ class CrossEncoderReranker:
         model_type: str = "cross-encoder",
         enabled: bool = True,
         device: str | None = None,
+        max_length: int | None = None,
     ) -> None:
         self._model_name = model_name
         self._model_type = model_type
         self._enabled = enabled
         self._device = device
+        self._max_length = max_length
         self._model = None  # lazy-loaded on first use
         # Requests now run in parallel threads: without the lock, the first
         # burst of concurrent searches would each load the ~568MB model.
@@ -70,7 +72,13 @@ class CrossEncoderReranker:
         kwargs: dict = {"model_type": self._model_type}
         if self._device:
             kwargs["device"] = self._device
-        return Reranker(self._model_name, **kwargs)
+        model = Reranker(self._model_name, **kwargs)
+        # Pairs are truncated to the tokenizer's limit. bge-reranker-v2-m3
+        # accepts 8192 tokens and took 68 s per query on our longest chunks.
+        tokenizer = getattr(model, "tokenizer", None)
+        if self._max_length and tokenizer is not None:
+            tokenizer.model_max_length = self._max_length
+        return model
 
     def rerank(
         self,

@@ -37,6 +37,7 @@ def create_app() -> FastAPI:
             model_name=settings.mnemos_reranker_model,
             model_type=settings.mnemos_reranker_type,
             enabled=settings.mnemos_reranker_enabled,
+            max_length=settings.mnemos_reranker_max_length or None,
         )
 
         # Wait — search_service needs grader+rewriter which need the LLM provider,
@@ -130,6 +131,7 @@ def create_app() -> FastAPI:
             rewriter=app.state.rewriter,
             cache=app.state.cache,
             query_logger=app.state.query_logger,
+            dense_weight=settings.mnemos_fusion_dense_weight,
         )
         app.state.deduplicator = Deduplicator(
             qdrant_client=app.state.qdrant,

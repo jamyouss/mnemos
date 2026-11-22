@@ -32,6 +32,12 @@ class Settings(BaseSettings):
     mnemos_reranker_enabled: bool = False
     mnemos_reranker_model: str = "BAAI/bge-reranker-base"
     mnemos_reranker_type: str = "cross-encoder"
+    # Tokens per (query, chunk) pair. 256 halved bge-reranker-base latency with
+    # no measurable loss (docs/EVAL.md); 0 keeps the model's own limit.
+    mnemos_reranker_max_length: int = 256
+    # Dense weight in the dense/BM25 RRF fusion. 1.0 is plain RRF; 3.0 lifted
+    # code-search MRR from 0.55 to 0.74 (docs/EVAL.md).
+    mnemos_fusion_dense_weight: float = 3.0
     mnemos_mmr_enabled: bool = False
     mnemos_mmr_lambda: float = 0.5
 

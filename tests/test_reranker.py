@@ -58,3 +58,16 @@ def test_mmr_select_falls_back_when_embeddings_missing():
 
 def test_mmr_select_empty_input():
     assert mmr_select([], [], top_k=5) == []
+
+
+def test_max_length_caps_the_tokenizer(monkeypatch):
+    """Long chunks must be truncated: v2-m3 reads 8192 tokens per pair otherwise."""
+    import rerankers
+    from types import SimpleNamespace
+
+    built = SimpleNamespace(tokenizer=SimpleNamespace(model_max_length=8192))
+    monkeypatch.setattr(rerankers, "Reranker", lambda *a, **k: built)
+
+    assert CrossEncoderReranker(max_length=256)._load().tokenizer.model_max_length == 256
+    built.tokenizer.model_max_length = 8192
+    assert CrossEncoderReranker(max_length=None)._load().tokenizer.model_max_length == 8192
