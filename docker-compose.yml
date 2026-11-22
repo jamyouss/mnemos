@@ -1,6 +1,10 @@
 services:
   qdrant:
     image: qdrant/qdrant:latest
+    # Survive a daemon restart or a crash. Without this the stack stays
+    # down after a reboot and nothing says so — mnemos went dark for three
+    # days that way, dashboard included.
+    restart: unless-stopped
     volumes:
       - qdrant_data:/qdrant/storage
     ports:
@@ -17,6 +21,7 @@ services:
     # to build locally during development (`docker compose -f docker-compose.yml
     # -f docker-compose.dev.yml up -d --build rag-server`).
     image: ${MNEMOS_SERVER_IMAGE:-jamyouss/mnemos-server:latest}
+    restart: unless-stopped
     pull_policy: ${MNEMOS_PULL_POLICY:-missing}
     ports:
       - "8100:8100"
@@ -101,6 +106,7 @@ services:
 
   watcher:
     image: ${MNEMOS_WATCHER_IMAGE:-jamyouss/mnemos-watcher:latest}
+    restart: unless-stopped
     pull_policy: ${MNEMOS_PULL_POLICY:-missing}
     environment:
       MNEMOS_SERVER_URL: http://rag-server:8100
