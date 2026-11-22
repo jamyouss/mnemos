@@ -6,6 +6,8 @@
  * there is nothing to configure and no CORS to arrange.
  */
 
+import { createAuthedFetch, type AuthedFetch } from '../utils/auth'
+
 export interface CollectionInfo {
   points_count: number
   vectors_count?: number
@@ -54,8 +56,16 @@ export interface EvalRunSummary {
   report: Record<string, any>
 }
 
+let authedFetch: AuthedFetch | null = null
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
+  // Built on first use: storage and prompt only exist in the browser.
+  authedFetch ??= createAuthedFetch({
+    fetch: (input, options) => fetch(input, options),
+    storage: window.localStorage,
+    ask: () => window.prompt('This mnemos server requires an API key (MNEMOS_API_KEY):'),
+  })
+  const res = await authedFetch(path, {
     headers: { 'content-type': 'application/json' },
     ...init,
   })
