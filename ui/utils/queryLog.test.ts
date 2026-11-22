@@ -70,23 +70,36 @@ describe('topFiles', () => {
 })
 
 describe('scoreBuckets', () => {
-  it('buckets the top-1 score', () => {
-    const rows = scoreBuckets([
-      entry({ top_scores: [0.55] }),
-      entry({ top_scores: [0.52] }),
-      entry({ top_scores: [0.91] }),
-    ] as any)
-    expect(rows.find((r) => r.bucket === '0.5–0.6')!.count).toBe(2)
-    expect(rows.find((r) => r.bucket === '0.9–1.0')!.count).toBe(1)
+  const tops = (...scores: number[]) => scores.map((s) => entry({ top_scores: [s] }))
+
+  it('buckets on the range the scores span', () => {
+    const rows = scoreBuckets(tops(0.55, 0.52, 0.91))
+    expect(rows[0]).toEqual({ bucket: '0.50–0.55', count: 1 })
+    expect(rows.find((r) => r.bucket === '0.55–0.60')?.count).toBe(1)
+    expect(rows.at(-1)).toEqual({ bucket: '0.90–0.95', count: 1 })
   })
 
-  it('keeps a score of exactly 1 inside the last bucket', () => {
-    const rows = scoreBuckets([entry({ top_scores: [1] })] as any)
-    expect(rows.at(-1)?.count).toBe(1)
+  it('keeps scores above 1 in their own buckets instead of piling them into the last', () => {
+    // Weighted RRF (dense weight 3.0) puts a normal top-1 above 1.
+    const rows = scoreBuckets(tops(0.75, 1.08, 1.25, 1.25))
+    expect(rows.find((r) => r.bucket === '1.25–1.30')?.count).toBe(2)
+    expect(rows.find((r) => r.bucket === '1.05–1.10')?.count).toBe(1)
+    expect(rows.reduce((n, r) => n + r.count, 0)).toBe(4)
   })
 
-  it('always returns every bucket, so an empty chart still has an axis', () => {
-    expect(scoreBuckets([])).toHaveLength(10)
+  it('keeps empty buckets inside the range, so a gap reads as a gap', () => {
+    const rows = scoreBuckets(tops(0.1, 0.9))
+    expect(rows.map((r) => r.count)).toEqual([1, 0, 0, 0, 0, 0, 0, 0, 1])
+  })
+
+  it('puts a score on a bucket edge in the bucket that starts there', () => {
+    const rows = scoreBuckets(tops(0.1, 0.3, 1.1))
+    expect(rows.find((r) => r.bucket === '0.3–0.4')?.count).toBe(1)
+  })
+
+  it('gives one bucket when every score is equal, none when there is no score', () => {
+    expect(scoreBuckets(tops(0.7, 0.7))).toEqual([{ bucket: '0.7–0.8', count: 2 }])
+    expect(scoreBuckets([])).toEqual([])
   })
 })
 

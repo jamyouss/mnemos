@@ -73,26 +73,44 @@ export function topFiles(entries: QueryLogEntry[], limit = 10): Array<{ file: st
     .slice(0, limit)
 }
 
+/** Smallest of 1, 2, 2.5 or 5 × 10ⁿ at least `raw`: a step people read. */
+function niceStep(raw: number): number {
+  if (!(raw > 0)) return 0.1
+  const magnitude = 10 ** Math.floor(Math.log10(raw))
+  for (const s of [1, 2, 2.5, 5]) if (s * magnitude >= raw) return s * magnitude
+  return 10 * magnitude
+}
+
 /**
- * Distribution of the top-1 score, bucketed.
+ * Distribution of the top-1 score over the range the scores actually span.
  *
- * Hybrid fusion puts a normal top-1 between 0.5 and 0.8, so the shape matters
- * more than any single threshold — there is no absolute cutoff separating a
- * good result from a bad one.
+ * The scale is not fixed: it moves with the fusion weights and with the
+ * reranker (weighted RRF puts top-1 above 1). A fixed 0–1 axis piled every
+ * such score into its last bucket. Empty buckets inside the range are kept,
+ * so a gap reads as a gap. There is no cutoff separating a good result from
+ * a bad one — read the shape.
  */
-export function scoreBuckets(entries: QueryLogEntry[], buckets = 10): Array<{ bucket: string; count: number }> {
+export function scoreBuckets(entries: QueryLogEntry[], target = 10): Array<{ bucket: string; count: number }> {
   const tops = entries
     .map((e) => e.top_scores?.[0])
     .filter((v): v is number => typeof v === 'number' && Number.isFinite(v))
+  if (!tops.length) return []
 
-  const out = Array.from({ length: buckets }, (_, i) => ({
-    bucket: `${(i / buckets).toFixed(1)}–${((i + 1) / buckets).toFixed(1)}`,
+  const min = Math.min(...tops)
+  const max = Math.max(...tops)
+  const step = niceStep((max - min) / target)
+  // The epsilon absorbs float error (0.7 / 0.1 is 6.999…), so a score on an
+  // edge lands in the bucket that starts there: 0.3 in 0.30–0.35, not 0.25–0.30.
+  const start = Math.floor(min / step + 1e-9) * step
+  const index = (v: number) => Math.floor((v - start) / step + 1e-9)
+  // As many decimals as the step has: 0.25 → "0.75–1.00", 0.05 → "0.50–0.55".
+  const decimals = (String(Number(step.toPrecision(12))).split('.')[1] ?? '').length
+
+  const out = Array.from({ length: index(max) + 1 }, (_, i) => ({
+    bucket: `${(start + i * step).toFixed(decimals)}–${(start + (i + 1) * step).toFixed(decimals)}`,
     count: 0,
   }))
-  for (const score of tops) {
-    const clamped = Math.min(Math.max(score, 0), 0.999999)
-    out[Math.floor(clamped * buckets)]!.count += 1
-  }
+  for (const score of tops) out[index(score)]!.count += 1
   return out
 }
 

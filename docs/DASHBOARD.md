@@ -82,8 +82,9 @@ searches the figures describe.
 
 Two things are deliberate:
 
-- **No score threshold.** Hybrid fusion puts a normal top-1 between 0.5 and
-  0.8. The distribution is shown as a shape because no absolute cutoff
+- **No score threshold.** The top-1 scale moves with the fusion weights and
+  the reranker — weighted RRF puts it above 1 — so the buckets span the scores
+  actually seen, and the distribution is read as a shape: no absolute cutoff
   separates a good result from a bad one.
 - **Most-returned files.** A file topping that list across unrelated queries is
   usually noise. This is the view that exposed `coverage.out` — a Go coverage

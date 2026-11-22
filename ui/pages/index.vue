@@ -54,7 +54,7 @@ const intents = computed(() =>
 const trafficSeries = computed(() => intents.value.map((key) => ({ key, label: key })))
 const trafficData = computed(() => buckets.value.map((b) => ({ t: b.t, ...Object.fromEntries(intents.value.map((k) => [k, b.byIntent[k] ?? 0])) })))
 const latencyData = computed(() => buckets.value.map((b) => ({ t: b.t, p50: Math.round(b.p50), p95: Math.round(b.p95) })))
-const scores = computed(() => scoreBuckets(entries.value).map((r) => ({ label: r.bucket, count: r.count })).filter((r) => r.count))
+const scores = computed(() => scoreBuckets(entries.value).map((r) => ({ label: r.bucket, count: r.count })))
 const files = computed(() => topFiles(entries.value, 8).map((r) => ({ label: r.file, count: r.count })))
 
 // ---- Index & memory ------------------------------------------------------
@@ -207,7 +207,7 @@ const fmtMs = (x: number) => (x >= 1000 ? `${(x / 1000).toFixed(1)} s` : `${Math
       <Card>
         <CardHeader>
           <CardTitle>Top-1 score</CardTitle>
-          <CardDescription>Hybrid fusion puts a normal top-1 between 0.5 and 0.8. Read the shape, not a threshold.</CardDescription>
+          <CardDescription>The scale follows the fusion weights and the reranker, so buckets follow the data. Read the shape, not a threshold.</CardDescription>
         </CardHeader>
         <CardContent>
           <BarList :rows="scores" empty="No scored searches in this window." />

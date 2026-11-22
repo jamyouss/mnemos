@@ -20,7 +20,7 @@ const stats = computed(() => latencyStats(entries.value))
 const shares = computed(() => rates(entries.value))
 const intents = computed(() => Object.entries(byIntent(entries.value)).map(([label, count]) => ({ label, count })))
 const files = computed(() => topFiles(entries.value, 10).map((r) => ({ label: r.file, count: r.count })))
-const scores = computed(() => scoreBuckets(entries.value).map((r) => ({ label: r.bucket, count: r.count })).filter((r) => r.count))
+const scores = computed(() => scoreBuckets(entries.value).map((r) => ({ label: r.bucket, count: r.count })))
 
 // Paged over the loaded window, newest first: the same 1,000 searches the
 // figures above describe, so the table and the stats never disagree.
