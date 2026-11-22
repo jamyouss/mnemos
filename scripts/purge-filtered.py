@@ -15,13 +15,14 @@ Usage:
     ./scripts/purge-filtered.py --dry-run       # report only (default)
     ./scripts/purge-filtered.py --apply         # actually delete
 
-Take a snapshot first:
-    curl -X POST http://localhost:6333/collections/mnemos_code/snapshots
+Take a snapshot first (drop the header when Qdrant runs without a key):
+    curl -X POST -H "api-key: $QDRANT_API_KEY" http://localhost:6333/collections/mnemos_code/snapshots
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from collections import Counter
@@ -41,11 +42,14 @@ DELETE_BATCH = 1000
 
 
 def post(url: str, body: dict, timeout: int = 120) -> dict:
+    headers = {"content-type": "application/json"}
+    if os.environ.get("QDRANT_API_KEY"):
+        headers["api-key"] = os.environ["QDRANT_API_KEY"]
     req = request.Request(
         url,
         data=json.dumps(body).encode("utf-8"),
         method="POST",
-        headers={"content-type": "application/json"},
+        headers=headers,
     )
     with request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))

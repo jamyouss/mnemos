@@ -45,7 +45,8 @@ def test_editable_fields_match_the_contract():
 
 @pytest.mark.parametrize("key", [
     "mnemos_llm_api_key", "mnemos_llm_base_url", "mnemos_ollama_url", "qdrant_host",
-    "qdrant_port", "embedding_model", "mnemos_auth_enabled", "mnemos_tenants_path",
+    "qdrant_port", "qdrant_api_key", "qdrant_https", "embedding_model", "mnemos_auth_enabled",
+    "mnemos_tenants_path",
     "mnemos_state_dir", "mnemos_ui_config_writable", "mnemos_ui_theme_path",
 ])
 def test_sensitive_fields_are_read_only(key):
@@ -54,6 +55,7 @@ def test_sensitive_fields_are_read_only(key):
 
 def test_api_key_is_a_secret_and_embedding_model_needs_a_reindex():
     assert FIELDS_BY_KEY["mnemos_llm_api_key"].type == "secret"
+    assert FIELDS_BY_KEY["qdrant_api_key"].type == "secret"
     assert FIELDS_BY_KEY["embedding_model"].apply == "reindex"
 
 

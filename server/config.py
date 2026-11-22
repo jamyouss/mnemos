@@ -6,6 +6,12 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     qdrant_host: str = "localhost"
     qdrant_port: int = 6333
+    # Sent as `api-key` to a Qdrant started with QDRANT__SERVICE__API_KEY.
+    # Required when MNEMOS_AUTH_ENABLED: an open Qdrant bypasses the API keys.
+    qdrant_api_key: str = ""
+    # qdrant-client switches to TLS whenever a key is set; the bundled Qdrant
+    # speaks plain HTTP on the private network, so TLS stays opt-in.
+    qdrant_https: bool = False
     embedding_model: str = "all-MiniLM-L6-v2"
     codebase_path: str = "/data/codebase"
     claude_config_path: str = "/data/claude-config"

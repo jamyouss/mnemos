@@ -1,7 +1,14 @@
 services:
+  # Same key on both sides, from .env. An empty QDRANT__SERVICE__API_KEY would
+  # lock Qdrant for everyone, hence `:?` rather than a default.
+  qdrant:
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:?set QDRANT_API_KEY in .env}
+
   rag-server:
     environment:
       MNEMOS_AUTH_ENABLED: "true"
+      QDRANT_API_KEY: ${QDRANT_API_KEY:?set QDRANT_API_KEY in .env}
     volumes:
       # Bring your own API keys — the file stays out of git on purpose.
       # Start from the template:  cp config/tenants.example.yaml config/tenants.yaml

@@ -155,6 +155,11 @@ FIELDS: tuple[FieldSpec, ...] = (
     # --- infrastructure ----------------------------------------------------
     FieldSpec("qdrant_host", "infrastructure", "Qdrant host", "Qdrant hostname.", "str"),
     FieldSpec("qdrant_port", "infrastructure", "Qdrant port", "Qdrant HTTP port.", "int"),
+    FieldSpec("qdrant_api_key", "infrastructure", "Qdrant API key",
+              "Sent to Qdrant; required when authentication is on. Never returned by the API.",
+              "secret"),
+    FieldSpec("qdrant_https", "infrastructure", "Qdrant over TLS",
+              "Connect to Qdrant with https.", "bool"),
     FieldSpec("mnemos_state_dir", "infrastructure", "State directory",
               "Persistent state: query log, settings overrides.", "path"),
     FieldSpec("mnemos_ui_path", "infrastructure", "Dashboard path",

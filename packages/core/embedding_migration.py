@@ -311,6 +311,8 @@ def main(argv: list[str] | None = None) -> None:
     qdrant = QdrantClient(
         host=os.environ.get("QDRANT_HOST", "localhost"),
         port=int(os.environ.get("QDRANT_PORT", "6333")),
+        api_key=os.environ.get("QDRANT_API_KEY") or None,
+        https=os.environ.get("QDRANT_HTTPS", "").lower() in ("1", "true", "yes"),
         timeout=300,
     )
     if args.command == "sync":

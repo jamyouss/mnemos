@@ -32,7 +32,10 @@ def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.qdrant = QdrantClient(
-            host=settings.qdrant_host, port=settings.qdrant_port
+            host=settings.qdrant_host,
+            port=settings.qdrant_port,
+            api_key=settings.qdrant_api_key or None,
+            https=settings.qdrant_https,
         )
         app.state.embeddings = EmbeddingService(model_name=settings.embedding_model)
 
@@ -192,6 +195,13 @@ def create_app() -> FastAPI:
 
     if settings.mnemos_auth_enabled:
         from server.auth import BearerAuthMiddleware, load_api_keys
+        # Whoever reaches an open Qdrant reads and rewrites every collection,
+        # API keys or not: refuse to pretend the instance is protected.
+        if not settings.qdrant_api_key:
+            raise RuntimeError(
+                "MNEMOS_AUTH_ENABLED=true needs QDRANT_API_KEY: start Qdrant with "
+                "QDRANT__SERVICE__API_KEY and give the server the same key"
+            )
         # Loaded here, not in the lifespan: a broken tenants file must stop the
         # boot instead of leaving an open server behind.
         app.add_middleware(

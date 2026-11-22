@@ -72,6 +72,7 @@ def auth_app(tmp_path, monkeypatch):
     tenants = _write_tenants(tmp_path, "tenants:\n  team_a:\n    api_key: \"secret-a\"\n")
     monkeypatch.setattr(settings, "mnemos_auth_enabled", True)
     monkeypatch.setattr(settings, "mnemos_tenants_path", str(tenants))
+    monkeypatch.setattr(settings, "qdrant_api_key", "qdrant-key")
     with patch("server.main.QdrantClient") as qdrant_cls:
         qdrant = MagicMock()
         qdrant.get_collections.return_value.collections = []
@@ -129,7 +130,17 @@ async def test_prefix_lookalike_paths_are_not_mistaken_for_api(auth_app):
 def test_create_app_fails_closed_when_tenants_are_missing(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "mnemos_auth_enabled", True)
     monkeypatch.setattr(settings, "mnemos_tenants_path", str(tmp_path / "absent.yaml"))
+    monkeypatch.setattr(settings, "qdrant_api_key", "qdrant-key")
     with pytest.raises(TenantsConfigError):
+        create_app()
+
+
+def test_create_app_refuses_auth_in_front_of_an_open_qdrant(tmp_path, monkeypatch):
+    tenants = _write_tenants(tmp_path, "tenants:\n  team_a:\n    api_key: \"secret-a\"\n")
+    monkeypatch.setattr(settings, "mnemos_auth_enabled", True)
+    monkeypatch.setattr(settings, "mnemos_tenants_path", str(tenants))
+    monkeypatch.setattr(settings, "qdrant_api_key", "")
+    with pytest.raises(RuntimeError, match="QDRANT_API_KEY"):
         create_app()
 
 

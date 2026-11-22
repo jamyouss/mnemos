@@ -78,6 +78,7 @@ docker run --rm -p 8100:8100 \
 |----------|---------|--------------|
 | `QDRANT_HOST` | `qdrant` | Qdrant service hostname |
 | `QDRANT_PORT` | `6333` | Qdrant HTTP port |
+| `QDRANT_API_KEY` | _(unset)_ | Qdrant's `QDRANT__SERVICE__API_KEY`; required when `MNEMOS_AUTH_ENABLED=true` |
 | `EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | Pre-baked in the image, instant cold start |
 | `CODEBASE_PATH` | `/data/codebase` | Where the watcher reads source code |
 | `MNEMOS_LLM_PROVIDER` | `ollama` | `ollama` / `anthropic` / `openai` |

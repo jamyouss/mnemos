@@ -27,7 +27,9 @@ service serving multiple teams.
 
 Components:
 - **rag-server** — FastAPI + MCP. The only public-facing service.
-- **Qdrant** — internal, never expose port `6333` publicly.
+- **Qdrant** — internal, never expose port `6333` publicly, and protected by
+  an API key (`QDRANT_API_KEY`): whoever reaches an open Qdrant reads and
+  rewrites every collection without going through the server's API keys.
 - **LLM provider** — Ollama on the host, or a cloud API.
 - **API keys** — `config/tenants.yaml`, read once at startup (restart
   `rag-server` to apply changes).
@@ -79,9 +81,16 @@ keys file:
 
 ```bash
 cp config/tenants.example.yaml config/tenants.yaml   # then replace CHANGE_ME
+echo "QDRANT_API_KEY=$(openssl rand -hex 32)" >> .env
 cp docker-compose.prod.yml docker-compose.override.yml
 docker compose up -d
 ```
+
+The prod file gives the same `QDRANT_API_KEY` to Qdrant
+(`QDRANT__SERVICE__API_KEY`) and to `rag-server`, and refuses to render
+without it. The server also refuses to start with auth on and no Qdrant key.
+On Kubernetes, put the key in a Secret read by both pods, and add a
+NetworkPolicy that only lets the Mnemos pods reach Qdrant.
 
 `config/tenants.yaml` is gitignored on purpose — it holds your real API
 keys. The template at `config/tenants.example.yaml` is what ships with
@@ -297,7 +306,8 @@ jq -c '. | select(.cache_hit != null)' /data/state/query-log.jsonl \
 ## Security checklist
 
 - [ ] `MNEMOS_AUTH_ENABLED=true` in production.
-- [ ] Qdrant port `6333` not exposed publicly (only via the rag-server).
+- [ ] Qdrant port `6333` not exposed publicly (only via the rag-server), and
+      `QDRANT_API_KEY` set on both Qdrant and the server.
 - [ ] API keys stored in a secret manager (HashiCorp Vault, GitHub Secrets,
       AWS Secrets Manager), **never** committed to git (`config/tenants.yaml`
       is gitignored); no `CHANGE_ME` key left (the server refuses to start).

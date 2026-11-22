@@ -29,6 +29,8 @@ fast, predictable. Every "advanced" feature is opt-in.
 |-----|--------|------|
 | `QDRANT_HOST` | `qdrant` | Hostname inside the compose network |
 | `QDRANT_PORT` | `6333` | |
+| `QDRANT_API_KEY` | _(unset)_ | Sent to Qdrant as `api-key`. Must equal Qdrant's `QDRANT__SERVICE__API_KEY`. **Required when `MNEMOS_AUTH_ENABLED=true`**: the server refuses to start without it. Also read by `core.embedding_migration` and `scripts/purge-filtered.py` |
+| `QDRANT_HTTPS` | `false` | Connect to Qdrant over TLS (Qdrant Cloud, a TLS-terminated Qdrant). qdrant-client would otherwise switch to TLS as soon as a key is set |
 | `EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | Any sentence-transformers model; vector size is read from the model. `google/embeddinggemma-2` is profiled (query prompts, `title: <path>` document framing, 512 tokens). **Change on an existing index → migrate**, see [Changing the embedding model](#changing-the-embedding-model). |
 | `CODEBASE_PATH` | `/data/codebase` | Root for code. Override the bind mount, not this var. |
 | `CLAUDE_CONFIG_PATH` | `/data/claude-config` | Root for skills + docs. |
@@ -362,6 +364,7 @@ Each line is a flat JSON object:
 |-----|--------|------|
 | `MNEMOS_AUTH_ENABLED` | `false` | Require `Authorization: Bearer <api-key>` on every `/api`, `/internal` and `/mcp` path. `/health` and the dashboard files stay open |
 | `MNEMOS_TENANTS_PATH` | `/data/config/tenants.yaml` | API keys, read once at startup (restart to apply changes) |
+| `QDRANT_API_KEY` | _(unset)_ | Required with auth on, see [Storage](#storage-and-embeddings): API keys protect nothing if Qdrant itself is open |
 | `MNEMOS_API_KEY` | _(unset)_ | Client side: the key sent by the CLI, watcher, `scripts/reindex-all.py` and git hooks |
 
 Keys live in `config/tenants.yaml` (gitignored — copy
@@ -482,7 +485,7 @@ Apple Silicon, run `sync` on the host instead, against the same Qdrant, with
 `packages/core` and `sentence-transformers[image]>=6.1` installed:
 
 ```bash
-QDRANT_HOST=localhost CODEBASE_PATH=/data/codebase \
+QDRANT_HOST=localhost QDRANT_API_KEY=$QDRANT_API_KEY CODEBASE_PATH=/data/codebase \
   python -m core.embedding_migration sync --model $M --device mps
 ```
 
