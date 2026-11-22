@@ -155,6 +155,15 @@ that gained, mostly from rank 1 to 2: twice the chunks give twice the chances
 for another file's window to look closer, and a window cut from the middle of
 a function loses its signature. `MNEMOS_MAX_CHUNK_CHARS` stays at 0.
 
+Live server, `EvalRunner`, 92 q, index cleaned, semantic cache dropped before
+each run. Memory questions expect the API's `memory://<id>`, not the payload's
+`memory/<id>`, or they score 0 whatever the ranking.
+
+| Live server (92 q) | MRR | NDCG@5 | R@1 | R@5 | R@10 | p50 | p95 |
+|---|---|---|---|---|---|---|---|
+| RRF 1:1 | 0.686 | 0.715 | 0.457 | 0.859 | 0.911 | 143 ms | 407 ms |
+| **RRF dense 3:1** | **0.834** | **0.836** | **0.685** | **0.875** | **0.928** | 151 ms | 464 ms |
+
 ### Legacy golden set (25 q, historical)
 
 | Run | MRR | NDCG@5 | R@5 |
