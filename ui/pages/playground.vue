@@ -201,7 +201,8 @@ const rank = (n: number | null | undefined) => (n == null ? '—' : `#${n}`)
           title="Nothing came back"
           detail="Loosen a filter, or open the trace: it shows whether any candidate was retrieved at all."
         />
-        <div v-else class="grid gap-3">
+        <!-- grid-cols-1 is minmax(0, 1fr): an implicit track would widen to the longest path. -->
+        <div v-else class="grid grid-cols-1 gap-3">
           <Card v-for="(r, i) in response.results" :key="i" class="gap-2 py-4">
             <CardContent class="space-y-2 px-4">
               <div class="flex items-start gap-3">
@@ -220,7 +221,7 @@ const rank = (n: number | null | undefined) => (n == null ? '—' : `#${n}`)
                 <template v-if="traceOf(i)!.rerank_rank != null"> · rerank {{ rank(traceOf(i)!.rerank_rank) }}</template>
                 <template v-if="traceOf(i)!.grade"> · grade {{ traceOf(i)!.grade }}</template>
               </p>
-              <pre class="max-h-80 overflow-auto rounded-md bg-muted/60 p-3 font-mono text-xs whitespace-pre-wrap">{{ text(r) }}</pre>
+              <pre class="max-h-80 overflow-auto rounded-md bg-muted/60 p-3 font-mono text-xs whitespace-pre-wrap [overflow-wrap:anywhere]">{{ text(r) }}</pre>
             </CardContent>
           </Card>
         </div>
