@@ -27,6 +27,12 @@ class Settings(BaseSettings):
     # Contextual retrieval (Anthropic-style preamble per chunk)
     mnemos_contextual_enabled: bool = False
     mnemos_contextual_workers: int = 4
+    # Upper bound on a chunk, in characters; 0 keeps the chunkers' own
+    # boundaries. Off on purpose: splitting at 1 500 (what the embedder reads)
+    # lowered MRR 0.835 → 0.789, more chunks meaning more near-misses
+    # (docs/EVAL.md). Changing it needs a rebuild: core.embedding_migration
+    # --max-chunk-chars.
+    mnemos_max_chunk_chars: int = 0
 
     # Cross-encoder reranker (Phase 2B)
     mnemos_reranker_enabled: bool = False

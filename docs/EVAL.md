@@ -122,6 +122,39 @@ truncating pairs to 256 tokens halves that with no measurable loss;
 pair and took 68 s per query, `mnemos_code` holding chunks of up to 163 k
 characters.
 
+### 2026-11-22 (evening) — fusion weight, index cleanup, chunk size
+
+Golden set grown to 92 questions: 30 agent-written `skill_discovery`,
+`doc_lookup` and `memory_recall` questions added (seed 20261122). In-process,
+EmbeddingGemma 2, routing as the server does, top 10 deduplicated by file.
+
+**Fusion.** Plain RRF gave BM25 the same say as the dense side, and BM25 is
+noisy here: the camelCase/snake tokenizer makes a symbol match every file that
+shares its words. Dense-only beat it on every slice, including 40 exact-symbol
+queries where BM25 should have helped. Weighting dense 3:1 keeps BM25 as a
+tie-breaker for literal strings at no measurable cost (`MNEMOS_FUSION_DENSE_WEIGHT`).
+
+| Fusion (92 q) | MRR | NDCG@5 | R@1 | R@5 | code MRR | skills MRR |
+|---|---|---|---|---|---|---|
+| RRF 1:1 (before) | 0.698 | 0.724 | 0.478 | 0.859 | 0.596 | 0.767 |
+| dense only | 0.838 | 0.845 | 0.685 | 0.902 | 0.776 | 0.944 |
+| **RRF dense 3:1** | **0.836** | 0.838 | **0.685** | 0.891 | 0.772 | 0.903 |
+
+Exact-symbol queries (40, symbol name alone): MRR 0.661 (1:1) → 0.853 (dense
+only) → 0.859 (3:1).
+
+**Cleanup.** `.trash/`, `.bak`, `.xsd`, `.snap`, `.tgz` and Lighthouse
+`*.report.*` were indexed: 2 600 of 4 525 skill chunks (57 %) and 1 028 code
+chunks, purged with `scripts/purge-filtered.py`.
+
+**Chunk size — rejected.** 36 % of code chunks exceed 2 000 characters (up to
+173 k) while the embedder reads ~512 tokens. Splitting them at 1 500 characters
+(37 k → 71 k code chunks) made retrieval worse: MRR 0.835 → 0.789 (code
+0.771 → 0.708, skills 0.903 → 0.861). 11 code questions lost ground against 3
+that gained, mostly from rank 1 to 2: twice the chunks give twice the chances
+for another file's window to look closer, and a window cut from the middle of
+a function loses its signature. `MNEMOS_MAX_CHUNK_CHARS` stays at 0.
+
 ### Legacy golden set (25 q, historical)
 
 | Run | MRR | NDCG@5 | R@5 |

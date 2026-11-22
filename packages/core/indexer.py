@@ -28,6 +28,7 @@ from qdrant_client.models import (
 from core.chunkers.fallback_chunker import FallbackChunker
 from core.chunkers.go_chunker import GoChunker
 from core.chunkers.markdown_chunker import MarkdownChunker
+from core.chunkers.splitter import split_long_chunks
 from core.chunkers.tabular_chunker import TabularChunker
 from core.chunkers.vue_chunker import VueChunker
 from core.collections import DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME, TAGS_PAYLOAD_FIELD
@@ -157,6 +158,11 @@ def point_alias(qdrant: QdrantClient, alias: str, target: str) -> None:
     qdrant.update_collection_aliases(change_aliases_operations=ops)
 
 
+def chunk_point_id(file_path: str, chunk_index: int) -> str:
+    """Stable id of a file's n-th chunk, so re-indexing a file overwrites it."""
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"{file_path}::{chunk_index}"))
+
+
 class Indexer:
     def __init__(
         self,
@@ -167,6 +173,7 @@ class Indexer:
         path_excludes: PathExcludes | None = None,
         only_declared_paths: bool = False,
         codebase_root: str = "/data/codebase",
+        max_chunk_chars: int = 0,
     ) -> None:
         self._qdrant = qdrant_client
         self._embeddings = embedding_service
@@ -175,6 +182,7 @@ class Indexer:
         self._path_excludes = path_excludes or {}
         self._only_declared_paths = only_declared_paths
         self._codebase_root = codebase_root.rstrip("/")
+        self._max_chunk_chars = max_chunk_chars
         self._go_chunker = GoChunker()
         self._vue_chunker = VueChunker()
         self._md_chunker = MarkdownChunker()
@@ -291,7 +299,7 @@ class Indexer:
         self.delete_file(file_path, collection)
 
         chunker = self._select_chunker(file_path)
-        chunks = chunker.chunk(content, file_path)
+        chunks = split_long_chunks(chunker.chunk(content, file_path), self._max_chunk_chars)
 
         if not chunks:
             return 0
@@ -327,7 +335,7 @@ class Indexer:
         now = datetime.now(timezone.utc).isoformat()
         points = []
         for chunk, dense, sparse in zip(chunks, dense_vectors, sparse_vectors):
-            point_id = self._make_point_id(file_path, chunk.get("chunk_index", 0))
+            point_id = chunk_point_id(file_path, chunk.get("chunk_index", 0))
             payload = {
                 **chunk,
                 **skill_fields,
@@ -402,7 +410,3 @@ class Indexer:
             return self._md_chunker
         return self._fallback_chunker
 
-    @staticmethod
-    def _make_point_id(file_path: str, chunk_index: int) -> str:
-        raw = f"{file_path}::{chunk_index}"
-        return str(uuid.uuid5(uuid.NAMESPACE_URL, raw))

@@ -240,15 +240,20 @@ mnemos reindex --recreate --full --collection mnemos_code \
 | `MNEMOS_RERANKER_ENABLED` | `false` | Master switch |
 | `MNEMOS_RERANKER_MODEL` | `BAAI/bge-reranker-base` | Any rerankers-supported checkpoint |
 | `MNEMOS_RERANKER_TYPE` | `cross-encoder` | rerankers backend type |
+| `MNEMOS_RERANKER_MAX_LENGTH` | `256` | Tokens per (query, chunk) pair; `0` keeps the model's limit (8 192 for `bge-reranker-v2-m3`) |
 | `MNEMOS_MMR_ENABLED` | `false` | MMR post-rerank for diversity |
 | `MNEMOS_MMR_LAMBDA` | `0.5` | 0 = pure novelty, 1 = pure relevance |
 
-The reranker is the **largest quality lever** (+47 % MRR vs baseline) and the
-**largest latency cost** (~14 s/query on CPU). Recommended setups:
+With EmbeddingGemma 2 the reranker adds ~+0.10 MRR for ~0.8 s per query on a
+Mac CPU (more inside Docker), so it stays off by default. Without the length
+cap, `bge-reranker-v2-m3` reads whole chunks and took 68 s per query.
 
-- **Local dev, CPU-only**: disable, or use the lighter
-  `cross-encoder/ms-marco-MiniLM-L-6-v2`.
-- **Prod with GPU**: enable with `BAAI/bge-reranker-v2-m3` for max quality.
+### Fusion and chunk size
+
+| Var | Default | Description |
+|-----|--------|------|
+| `MNEMOS_FUSION_DENSE_WEIGHT` | `3.0` | Weight of the dense side in the dense/BM25 RRF fusion. `1.0` is plain RRF, which let BM25 noise outrank dense matches (MRR 0.70 vs 0.84, docs/EVAL.md) |
+| `MNEMOS_MAX_CHUNK_CHARS` | `0` (off) | Upper bound on a chunk; longer ones are split into overlapping windows on line boundaries. Off by default: at 1 500 (≈ what the embedder reads) MRR fell 0.835 → 0.789, the extra chunks crowding out the right file (docs/EVAL.md). Changing it on an existing index needs a rebuild: `core.embedding_migration sync --max-chunk-chars N`, then `switch` with the same flag |
 
 ### CRAG corrective loop (Phase 3)
 

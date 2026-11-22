@@ -84,6 +84,7 @@ def create_app() -> FastAPI:
             path_excludes=app.state.path_excludes,
             only_declared_paths=settings.mnemos_index_only_declared_paths,
             codebase_root=settings.codebase_path,
+            max_chunk_chars=settings.mnemos_max_chunk_chars,
         )
 
         # CRAG components (Phase 3): grader + rewriter

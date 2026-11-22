@@ -7,7 +7,7 @@ from qdrant_client.models import PointStruct
 
 from core.collections import DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME
 from core.embedding_migration import physical_name, switch, sync
-from core.indexer import Indexer, create_hybrid_collection, dense_vector_size
+from core.indexer import Indexer, chunk_point_id, create_hybrid_collection, dense_vector_size
 from core.sparse import bm25_sparse
 
 
@@ -130,3 +130,69 @@ def test_switching_between_two_copies_moves_the_alias(qdrant):
     assert dense_vector_size(qdrant, "mnemos_code") == 5
     switch(qdrant, "mnemos_code", "acme/new-model", snapshot=False)
     assert dense_vector_size(qdrant, "mnemos_code") == 3
+
+
+def _long_go(lines: int) -> str:
+    return "\n".join(f"\tstep{i}()" for i in range(lines))
+
+
+def test_rechunk_splits_long_chunks_with_indexer_ids_and_reuses_vectors(qdrant):
+    # The source already runs the model: whole chunks must not be re-embedded.
+    sync(qdrant, "mnemos_code", _Embedder())
+    switch(qdrant, "mnemos_code", "acme/new-model", snapshot=False)
+    qdrant.upsert("mnemos_code", points=[
+        PointStruct(id=chunk_point_id("/data/codebase/svc/c.go", 0),
+                    vector={DENSE_VECTOR_NAME: [0.0, 1.0, 0.0], SPARSE_VECTOR_NAME: bm25_sparse("x")},
+                    payload={"content": _long_go(40), "file_path": "/data/codebase/svc/c.go",
+                             "chunk_index": 0, "chunk_type": "function", "last_indexed_at": "t0"}),
+    ])
+
+    emb = _Embedder()
+    sync(qdrant, "mnemos_code", emb, max_chunk_chars=120)
+
+    target = physical_name("mnemos_code", "acme/new-model", 3, max_chunk_chars=120)
+    parts = sorted(
+        (p for p in qdrant.scroll(target, limit=100, with_payload=True)[0]
+         if p.payload["file_path"].endswith("c.go")),
+        key=lambda p: p.payload["chunk_index"],
+    )
+    assert len(parts) > 1
+    assert all(len(p.payload["content"]) <= 120 for p in parts)
+    assert [str(p.id) for p in parts] == [chunk_point_id("/data/codebase/svc/c.go", i) for i in range(len(parts))]
+    assert {p.payload["chunk_type"] for p in parts} == {"function"}
+    # Only c.go's new windows were embedded; a.go and b.go kept their vectors.
+    assert {title for _, title in emb.seen} == {"svc/c.go"}
+
+
+def test_rechunk_sync_follows_edited_added_and_removed_files(qdrant):
+    sync(qdrant, "mnemos_code", _Embedder(), max_chunk_chars=120)
+    qdrant.upsert("mnemos_code", points=[
+        _point(2, _long_go(30), "/data/codebase/svc/b.go", stamp="t1"),   # edited, now long
+        _point(3, "func C()", "/data/codebase/svc/c.go"),                  # added
+    ])
+    qdrant.delete("mnemos_code", points_selector=[1])                       # a.go removed
+
+    emb = _Embedder()
+    sync(qdrant, "mnemos_code", emb, max_chunk_chars=120)
+
+    target = physical_name("mnemos_code", "acme/new-model", 3, max_chunk_chars=120)
+    files = {p.payload["file_path"] for p in qdrant.scroll(target, limit=100, with_payload=True)[0]}
+    assert files == {"/data/codebase/svc/b.go", "/data/codebase/svc/c.go"}
+    assert {title for _, title in emb.seen} == {"svc/b.go", "svc/c.go"}
+
+
+def test_switch_picks_the_copy_with_the_requested_chunk_size(qdrant):
+    sync(qdrant, "mnemos_code", _Embedder())
+    sync(qdrant, "mnemos_code", _Embedder(), max_chunk_chars=120)
+
+    assert switch(qdrant, "mnemos_code", "acme/new-model", max_chunk_chars=120, snapshot=False) \
+        == "mnemos_code__new-model_3_c120"
+    assert switch(qdrant, "mnemos_code", "acme/new-model", snapshot=False) == "mnemos_code__new-model_3"
+
+
+def test_memories_are_never_resplit():
+    q = QdrantClient(":memory:")
+    create_hybrid_collection(q, "mnemos_memory", 2, tagged=True)
+    q.upsert("mnemos_memory", points=[_point(1, "x" * 500, "memory/abc")])
+    assert sync(q, "mnemos_memory", _Embedder(), max_chunk_chars=120) == {"reembedded": 0, "deleted": 0}
+    assert [c.name for c in q.get_collections().collections] == ["mnemos_memory"]
