@@ -171,7 +171,7 @@ constructor. They only know about `complete()` / `complete_prompt()`.
 
 ## Collection schemas
 
-Every code/docs/skills/memory collection now uses **named hybrid vectors**:
+Every code/docs/skills/knowledge/memory collection now uses **named hybrid vectors**:
 
 ```python
 vectors_config = {
@@ -210,8 +210,11 @@ Every chunk carries:
 
 Memory entries add: `id`, `memory_type`, `status`, `topic`, `created_at`.
 
-`tags` is the single scoping field across `mnemos_code` and `mnemos_memory`.
-The mapping `path → tags` comes from `config/projects.yaml`, with a default
+`tags` is the single scoping field across `mnemos_code`, `mnemos_knowledge`
+and `mnemos_memory`. `mnemos_knowledge` chunks also carry `source_url` (the
+wiki page, ticket or web page they came from) and use `<source>` /
+`<source>:<scope>` tags set by the connectors.
+For `mnemos_code`, the mapping `path → tags` comes from `config/projects.yaml`, with a default
 cumulative-segment fallback when the file is absent. See
 [`CONFIGURATION.md`](CONFIGURATION.md#tags--scoping-chunks-across-projects).
 

@@ -84,7 +84,7 @@ docker run --rm -p 8100:8100 \
 | `MNEMOS_LLM_MODEL` | `llama3.1:8b` | Model for memory extraction & dedup |
 | `MNEMOS_RERANKER_ENABLED` | `false` | Enable cross-encoder reranker (~280 MB downloaded on first use) |
 | `MNEMOS_CONTEXTUAL_ENABLED` | `false` | Anthropic-style contextual chunking |
-| `MNEMOS_AUTH_ENABLED` | `true` | Disable for local dev, enable in multi-tenant prod |
+| `MNEMOS_AUTH_ENABLED` | `false` | Require `Authorization: Bearer <api-key>` on `/api`, `/internal`, `/mcp`; keys from `MNEMOS_TENANTS_PATH` |
 
 Full reference: [.env.example](https://github.com/jamyouss/mnemos/blob/main/.env.example).
 

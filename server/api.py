@@ -158,7 +158,7 @@ async def internal_reindex(body: ReindexInternalRequest, request: Request):
 
 
 # ---------------------------------------------------------------------------
-# Push API (deployed mode)
+# Push API (CI, git hooks, connectors)
 # ---------------------------------------------------------------------------
 
 

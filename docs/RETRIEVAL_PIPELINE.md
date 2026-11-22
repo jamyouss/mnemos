@@ -73,8 +73,8 @@ Cache hits also get logged (`cache_hit: true, cache_score: 0.97`) for analysis.
 
 The caller decides. `mnemos_search` takes a `collections` list, and the
 dedicated tools (`mnemos_search_code`, `mnemos_search_skills`,
-`mnemos_search_memory`) each pin one. Omitting it fans out to code + docs +
-skills.
+`mnemos_search_memory`) each pin one. Omitting it fans out to every
+collection except `mnemos_memory`: code + docs + skills + knowledge.
 
 There used to be a semantic router here, comparing the query against each
 collection's `description`. It was removed: measured against a real index it

@@ -98,9 +98,9 @@ returns identical tables — that reads as "no effect" when it means "never ran"
 
 ## Not included
 
-**No authentication.** The server listens on localhost. `MNEMOS_AUTH_ENABLED`
-already exists for deployed mode and will have to cover the UI before this is
-exposed anywhere.
+**No login of its own.** With `MNEMOS_AUTH_ENABLED=true` the dashboard files
+load without a key; the first `401` from the API prompts for one, which is
+kept in the browser's localStorage (`mnemos.apiKey`).
 
 **No writing memories, no triggering a reindex.** The CLI and the MCP tools
 write; this screen prunes, which was the missing gesture. And a button that

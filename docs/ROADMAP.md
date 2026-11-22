@@ -90,8 +90,11 @@ for per-phase numbers.
   (vLLM, LM Studio, Groq, Together, OpenRouter). One interface, swap via
   `MNEMOS_LLM_PROVIDER`.
 - ✅ **MCP Streamable HTTP server** with 9 tools.
-- ✅ **Multi-tenant deployed mode** — `MNEMOS_AUTH_ENABLED=true`,
-  `config/tenants.yaml`, collection prefixing, quota field.
+- ✅ **API-key authentication** — `MNEMOS_AUTH_ENABLED=true` requires a
+  bearer key from `config/tenants.yaml` on `/api`, `/internal` and `/mcp`.
+  Tenants are identities only: no per-tenant isolation, no quotas.
+- ✅ **`mnemos_knowledge` collection + connectors** — Confluence, Jira and web
+  pushed through the API, tagged `<source>:<scope>`, with `source_url`.
 - ✅ **Observability** (`MNEMOS_QUERY_LOG_ENABLED`) — JSONL query log with
   top-K, scores, latencies, grader hits.
 - ✅ **Eval harness** — `mnemos eval generate|promote|run|compare`,
@@ -127,7 +130,9 @@ for per-phase numbers.
   conditions réelles.
 - **Authn richer than API key** — OAuth/OIDC, scoping fin par projet,
   rotation automatique.
-- **Helm chart** — Pour les déploiements Kubernetes multi-tenant.
+- **Isolation par tenant et quotas** — Aujourd'hui toutes les clés voient les
+  mêmes collections, sans limite de volume.
+- **Helm chart** — Pour les déploiements Kubernetes.
 
 ### 🔜 Écosystème
 - **Plus de chunkers** — TypeScript/TSX (AST), Python (AST), Rust, Java.

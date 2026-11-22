@@ -1,12 +1,12 @@
 services:
   rag-server:
     environment:
-      MNEMOS_MODE: deployed
       MNEMOS_AUTH_ENABLED: "true"
     volumes:
-      # Bring your own tenants config — it stays out of git on purpose.
+      # Bring your own API keys — the file stays out of git on purpose.
       # Start from the template:  cp config/tenants.example.yaml config/tenants.yaml
-      # then rotate the api_keys before the first push to production.
+      # then replace every CHANGE_ME key (the server refuses to start otherwise).
+      # Read once at startup: restart rag-server after editing it.
       - ./config/tenants.yaml:/data/config/tenants.yaml:ro
 
   watcher:

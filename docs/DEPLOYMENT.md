@@ -9,32 +9,33 @@ service serving multiple teams.
                       ┌─────────────────────┐
                       │  Reverse proxy      │   (Caddy / nginx / Traefik)
                       │  - TLS termination  │
-                      │  - Auth gateway     │  (optional, on top of MNEMOS_AUTH_ENABLED)
                       └──────────┬──────────┘
-                                 │
+                                 │  Authorization: Bearer <api-key>
                                  ▼
                        ┌─────────────────────┐
                        │ rag-server (FastAPI)│  exposes :8100
-                       │ MNEMOS_MODE=deployed│
+                       │ MNEMOS_AUTH_ENABLED │
                        └──────────┬──────────┘
                                   │
               ┌───────────────────┼─────────────────────┐
               ▼                   ▼                     ▼
          ┌─────────┐         ┌──────────┐         ┌──────────┐
-         │ Qdrant  │         │  Ollama   │         │  Tenants │
-         │ persist │         │ (or API) │         │ + Hooks  │
+         │ Qdrant  │         │  Ollama   │         │ API keys │
+         │ persist │         │ (or API) │         │   file   │
          └─────────┘         └──────────┘         └──────────┘
 ```
 
 Components:
 - **rag-server** — FastAPI + MCP. The only public-facing service.
 - **Qdrant** — internal, never expose port `6333` publicly.
-- **LLM provider** — Ollama on the host, or a cloud API. Configurable
-  per-tenant.
-- **Tenants config** — `config/tenants.yaml`, hot-reloaded.
+- **LLM provider** — Ollama on the host, or a cloud API.
+- **API keys** — `config/tenants.yaml`, read once at startup (restart
+  `rag-server` to apply changes).
 - **Hooks** — devs run `scripts/install-hooks.sh` locally (per-developer);
   the server doesn't host them. Four hooks: `pre-push` / `post-commit` for
   memory extraction, `post-merge` / `post-checkout` for incremental indexing.
+- **Connectors** — Confluence, Jira and web crawlers that push into
+  `mnemos_knowledge`. See [`CONNECTORS.md`](CONNECTORS.md).
 - **Periodic reindex** — `scripts/nightly-reindex.sh` catches what the hooks
   cannot see (rebase, reset, edits outside git, repos cloned while the server
   was down). macOS: `scripts/install-nightly-reindex.sh` registers a launchd
@@ -42,9 +43,9 @@ Components:
 
 ---
 
-## Single-tenant production
+## Single-team production
 
-For a personal or single-team box, the local-mode setup is fine.
+For a personal or single-team box, the default setup is fine.
 Just lock it down:
 
 ```yaml
@@ -52,7 +53,6 @@ Just lock it down:
 services:
   rag-server:
     environment:
-      MNEMOS_MODE: local
       MNEMOS_RERANKER_ENABLED: "true"
       MNEMOS_CACHE_ENABLED: "true"
       MNEMOS_QUERY_LOG_ENABLED: "true"
@@ -72,12 +72,13 @@ mnemos.internal {
 
 ---
 
-## Multi-tenant deployed mode
+## Authentication
 
-The bundled `docker-compose.prod.yml` flips Mnemos into deployed mode:
+The bundled `docker-compose.prod.yml` turns API-key auth on and mounts the
+keys file:
 
 ```bash
-cp config/tenants.example.yaml config/tenants.yaml   # then edit api_keys
+cp config/tenants.example.yaml config/tenants.yaml   # then replace CHANGE_ME
 cp docker-compose.prod.yml docker-compose.override.yml
 docker compose up -d
 ```
@@ -86,53 +87,113 @@ docker compose up -d
 keys. The template at `config/tenants.example.yaml` is what ships with
 the repo; you copy it once and keep your local copy out of source control.
 
-Deployed mode:
-- Requires an `Authorization: Bearer <api-key>` header on every request.
-- Looks up the tenant by API key in `config/tenants.yaml`.
-- Prefixes every collection with the tenant's namespace.
-- Skips filesystem reindexing — only the push API (`POST /api/index`) and
-  CI-driven sync are accepted (filesystem mounts are read-only or absent).
+With `MNEMOS_AUTH_ENABLED=true`:
+- Every path under `/api`, `/internal` and `/mcp` requires an
+  `Authorization: Bearer <api-key>` header. A missing or unknown key gets a
+  `401` with `WWW-Authenticate: Bearer`. `/health` and the dashboard's static
+  files stay open.
+- Keys are compared in constant time.
+- A tenant is an identity, nothing more: every tenant reads and writes the
+  same collections. There is no collection isolation and no quota.
+
+No codebase is mounted on a shared server, so content arrives through the
+push API (CI, git hooks, connectors) rather than filesystem reindexing.
 
 ### `config/tenants.yaml`
 
 ```yaml
 tenants:
-  tenant_acme:
-    api_key: "sk-acme-…"
-    collections_prefix: "acme_"          # → acme_code, acme_docs, …
-    max_documents: 0                     # 0 = unlimited
-  tenant_brand:
-    api_key: "sk-brand-…"
-    collections_prefix: "brand_"
-    max_documents: 100000
+  team_a:
+    api_key: "…"
+  ci:
+    api_key: "…"
 ```
 
-Rotate keys by editing the file; restart `rag-server` to pick up changes.
+The path is `MNEMOS_TENANTS_PATH` (default `/data/config/tenants.yaml`). The
+file is read once at startup: rotate a key by editing it and restarting
+`rag-server`. The server refuses to start when auth is enabled and the file
+is missing, lists no tenant, has an empty or `CHANGE_ME` key, or gives the
+same key to two tenants.
+
+### Client configuration
+
+| Client | Where the key goes |
+|--------|--------------------|
+| CLI (`mnemos …`, including `mnemos eval run`) | `MNEMOS_API_KEY` env var |
+| Watcher container | `MNEMOS_API_KEY` in its environment |
+| `scripts/reindex-all.py` | `MNEMOS_API_KEY` env var |
+| Git hooks | `MNEMOS_API_KEY` env var or `~/.config/mnemos/config` (env wins). Passed to curl through a config on fd 3, so it never shows up in `ps` |
+| Dashboard | Prompts for the key on the first `401` and keeps it in the browser's localStorage (`mnemos.apiKey`) |
+| MCP clients | Must send the header themselves (below) |
+
+Claude Code:
+
+```bash
+claude mcp add --transport http mnemos https://mnemos.example.com/mcp \
+  --header "Authorization: Bearer <api-key>"
+```
+
+Or in a JSON MCP config:
+
+```json
+{
+  "mcpServers": {
+    "mnemos": {
+      "type": "http",
+      "url": "https://mnemos.example.com/mcp",
+      "headers": { "Authorization": "Bearer <api-key>" }
+    }
+  }
+}
+```
+
+Keys travel in a plain header: keep TLS in front of `rag-server`, which only
+speaks HTTP.
 
 ### Push API
 
-CI jobs push files directly — no shared filesystem needed:
+CI jobs and connectors push files directly — no shared filesystem needed:
 
 ```bash
 curl -X POST https://mnemos.example.com/api/index \
-  -H "Authorization: Bearer sk-acme-…" \
+  -H "Authorization: Bearer $MNEMOS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "file_path": "services/core/handler.go",
-    "collection": "acme_code",
+    "collection": "mnemos_code",
     "content": "package core\nfunc Handle() { ... }",
     "tags": ["myproject", "go", "services"]
   }'
 
+# External knowledge: source_url comes back as metadata.source_url in search results
+curl -X POST https://mnemos.example.com/api/index \
+  -H "Authorization: Bearer $MNEMOS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "file_path": "confluence/ENG/12345.md",
+    "collection": "mnemos_knowledge",
+    "content": "# Release process\n…",
+    "tags": ["confluence", "confluence:ENG"],
+    "source_url": "https://wiki.example.com/pages/12345",
+    "file_mtime": 1767225600
+  }'
+
 # Delete a file from the index when it's removed from the repo
 curl -X DELETE \
-  https://mnemos.example.com/api/index/acme_code/services/core/handler.go \
-  -H "Authorization: Bearer sk-acme-…"
+  https://mnemos.example.com/api/index/mnemos_code/services/core/handler.go \
+  -H "Authorization: Bearer $MNEMOS_API_KEY"
+
+# List what is indexed under a tag, as {file_path: file_mtime} — a connector's sync state
+curl "https://mnemos.example.com/api/index/mnemos_knowledge/files?tag=confluence:ENG" \
+  -H "Authorization: Bearer $MNEMOS_API_KEY"
 ```
 
 The optional `tags` array overrides the auto-detected list from
 `config/projects.yaml`. When omitted, the server resolves tags from the
 file path. See [`CONFIGURATION.md`](CONFIGURATION.md#tags--scoping-chunks-across-projects).
+`mnemos_knowledge` uses `<source>` and `<source>:<scope>` tags
+(`confluence:ENG`, `jira:OPS`, `web:docs.example.com`); the connectors in
+[`CONNECTORS.md`](CONNECTORS.md) set them for you.
 
 ### GitHub Actions workflow
 
@@ -159,11 +220,11 @@ jobs:
           git diff --name-status HEAD~1 HEAD | while read status path; do
             if [ "$status" = "D" ]; then
               curl -X DELETE \
-                "$MNEMOS_URL/api/index/acme_code/$path" \
+                "$MNEMOS_URL/api/index/mnemos_code/$path" \
                 -H "Authorization: Bearer $MNEMOS_API_KEY"
             else
               jq -n --arg fp "$path" \
-                     --arg coll "acme_code" \
+                     --arg coll "mnemos_code" \
                      --rawfile content "$path" \
                      '{file_path:$fp, collection:$coll, content:$content}' \
               | curl -X POST "$MNEMOS_URL/api/index" \
@@ -199,7 +260,7 @@ Mnemos is not (yet) horizontally sharded. To scale up:
 | Embedding throughput | Pre-warm at startup (load model on lifespan), bump uvicorn workers. The model is shared across workers via `_model_cache`. |
 | Reranker latency | GPU host, or use a smaller checkpoint. Latency drops 10-100× on GPU. |
 | Qdrant size | Move to a dedicated Qdrant instance; mnemos-rag-server stays stateless apart from the LLM. |
-| Memory extraction load | Per-tenant: route `POST /api/memory/extract` to a faster LLM provider (Groq, Anthropic Haiku). |
+| Memory extraction load | Route `POST /api/memory/extract` to a faster LLM provider (Groq, Anthropic Haiku). |
 | LLM calls in CRAG | Disable grader / rewriter for low-stakes traffic; keep them on for `code_search` only via a thin wrapper. |
 
 ---
@@ -238,10 +299,12 @@ jq -c '. | select(.cache_hit != null)' /data/state/query-log.jsonl \
 - [ ] `MNEMOS_AUTH_ENABLED=true` in production.
 - [ ] Qdrant port `6333` not exposed publicly (only via the rag-server).
 - [ ] API keys stored in a secret manager (HashiCorp Vault, GitHub Secrets,
-      AWS Secrets Manager), **never** committed to `tenants.yaml` in git.
+      AWS Secrets Manager), **never** committed to git (`config/tenants.yaml`
+      is gitignored); no `CHANGE_ME` key left (the server refuses to start).
 - [ ] TLS in front (Caddy, nginx, ALB, …) — the rag-server only does
-      plain HTTP.
-- [ ] Per-tenant `max_documents` limit set to a sane value.
+      plain HTTP, and API keys travel in the `Authorization` header.
+- [ ] One key per client (team, CI, connector) so a leaked key can be
+      revoked alone; restart `rag-server` after editing the keys file.
 - [ ] `MNEMOS_LLM_API_KEY` rotated periodically.
 - [ ] Read-only mounts for `CODEBASE_PATH` and `CLAUDE_CONFIG_PATH` (already
       `:ro` in the default compose file).
@@ -267,7 +330,7 @@ jq -c '. | select(.cache_hit != null)' /data/state/query-log.jsonl \
 | Disaster | Recovery |
 |----------|---------|
 | Qdrant disk corruption | Restore `qdrant_data` from backup or wipe + reindex (full re-extraction from `mnemos_memory` won't recover — see "Memories" below). |
-| Lost tenant's collections | Re-trigger their CI sync, or re-run `mnemos reindex --recreate --full` for code/docs, then ask devs to push commits to re-populate memories. |
+| Lost collections | Re-trigger CI sync and connectors, or re-run `mnemos reindex --recreate --full` for code/docs, then ask devs to push commits to re-populate memories. |
 | **Memories** | This is the one corpus that **can't be regenerated** from sources, only from git diffs. Keep regular backups of `qdrant_data`. |
 | Lost LLM API key | Rotate; no data impact — only future calls fail. |
 

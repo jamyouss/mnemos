@@ -52,13 +52,14 @@ mnemos/
   server/                 # FastAPI + MCP server (port 8100)
   watcher/                # File watcher (watchdog)
   cli/                    # Click CLI client
-  config/                 # Tenant configuration
+  config/                 # projects.yaml, tenants.yaml (clés API)
+  packages/connectors/    # Connecteurs (Confluence, Jira, web) → push API
   scripts/hooks/          # Global git hooks (memory extraction + incremental indexing)
   tests/                  # pytest suite
   eval/                   # Eval harness (Phase 1.2, en cours)
   docs/                   # ROADMAP.md, EVAL.md, ARCHITECTURE.md
   docker-compose.yml      # Local dev stack
-  docker-compose.prod.yml # Production overrides multi-tenant
+  docker-compose.prod.yml # Production overrides (auth par clé API)
 ```
 
 ### Collections Qdrant
@@ -69,6 +70,7 @@ mnemos/
 | `mnemos_docs` | `~/.claude/docs/` | `docs/` | — |
 | `mnemos_memory` | API / git hooks | _(aucun)_ | via `tags` payload |
 | `mnemos_code` | codebase | _(tout le reste)_ | via `tags` payload (filtres `tags_any` / `tags_all`) |
+| `mnemos_knowledge` | connecteurs (Confluence, Jira, web) → push API | _(aucun)_ | via `tags` payload (`<source>`, `<source>:<scope>`, ex. `confluence:ENG`) |
 
 Une seule collection `mnemos_code` héberge **tous** les projets. Chaque chunk
 porte un champ `tags: list[str]` — le premier tag sert de label primaire
@@ -96,6 +98,8 @@ mnemos_search_code(query="auth", tags_all=["acme", "vue3"])
 ### MCP Tools exposés (9)
 
 `mnemos_search`, `mnemos_search_code`, `mnemos_search_skills`, `mnemos_search_memory`, `mnemos_memory`, `mnemos_memory_list`, `mnemos_memory_review`, `mnemos_reindex`, `mnemos_status`
+
+Sans `collections`, `mnemos_search` interroge toutes les collections sauf `mnemos_memory` (donc `mnemos_knowledge` incluse) ; les hits `mnemos_knowledge` portent `metadata.source_url`.
 
 ## Manques vs SOTA RAG 2026
 

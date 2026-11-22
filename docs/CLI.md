@@ -18,6 +18,7 @@ mnemos --help
 | Var | Default | Used by |
 |-----|--------|--------|
 | `MNEMOS_URL` | `http://localhost:8100` | Every command |
+| `MNEMOS_API_KEY` | _empty_ | Every command, when the server has `MNEMOS_AUTH_ENABLED=true` (sent as `Authorization: Bearer`) |
 | `MNEMOS_LLM_PROVIDER` | `ollama` | `eval generate` |
 | `MNEMOS_LLM_MODEL` | `llama3.1:8b` | `eval generate` |
 | `MNEMOS_LLM_API_KEY` | _empty_ | `eval generate` (anthropic / openai) |
@@ -264,7 +265,7 @@ Lists every run currently in `evals/runs/`.
 
 - **Test a flag toggle quickly**: `MNEMOS_RERANKER_ENABLED=true docker compose
   up -d rag-server` (no rebuild needed for env flips).
-- **One-shot search to a specific tenant**: set `MNEMOS_URL` to the tenant's
-  endpoint and add the API key in a `~/.mnemos/auth` file (deployed mode).
+- **One-shot search to another server**: set `MNEMOS_URL` to its endpoint and
+  `MNEMOS_API_KEY` to your key when it has auth enabled.
 - **Use `--collection` to avoid the router** when you know exactly which
   collection holds the answer — saves a routing decision.

@@ -1,9 +1,13 @@
-# Per-tenant configuration for deployed mode (MNEMOS_AUTH_ENABLED=true).
-# Each tenant's collections are prefixed so they cannot read each other.
-# Rotate api_key values out of band and never commit real keys.
+# API keys for MNEMOS_AUTH_ENABLED=true. Copy to config/tenants.yaml (gitignored).
+#
+# A tenant is an identity only: one name, one api_key. Every tenant reads and
+# writes the same collections — there is no per-tenant isolation or quota.
+# Clients send the key as `Authorization: Bearer <api_key>`.
+#
+# The file is read once at startup: restart rag-server to apply changes.
+# The server refuses to start with an empty or CHANGE_ME key, or one key
+# shared by two tenants. Never commit real keys.
 
 tenants:
-  tenant_acme:
+  team_a:
     api_key: "CHANGE_ME"
-    collections_prefix: "acme_"
-    max_documents: 0  # 0 = unlimited (no quota enforcement)

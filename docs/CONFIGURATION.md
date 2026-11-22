@@ -304,7 +304,6 @@ On the dedup threshold: 0.85 was a guess. On a real 15-memory corpus the one
 genuine near-duplicate pair scored 0.844 and the next closest 0.646, so the
 old value missed the duplicate by six thousandths while 0.80 sits in the
 middle of that gap. Re-measure as the corpus grows.
-| `MAX_DOCUMENTS` | `0` | Per-tenant max document count (`0` = unlimited) |
 
 ## Git hooks (host side)
 
@@ -350,16 +349,18 @@ Each line is a flat JSON object:
 }
 ```
 
-## Deployment-mode flags
+## Authentication
 
 | Var | Default | Description |
 |-----|--------|------|
-| `MNEMOS_MODE` | `local` | `local` (single-tenant, full read access) or `deployed` (multi-tenant, auth required) |
-| `MNEMOS_AUTH_ENABLED` | `false` | Toggle API-key auth for deployed mode |
+| `MNEMOS_AUTH_ENABLED` | `false` | Require `Authorization: Bearer <api-key>` on every `/api`, `/internal` and `/mcp` path. `/health` and the dashboard files stay open |
+| `MNEMOS_TENANTS_PATH` | `/data/config/tenants.yaml` | API keys, read once at startup (restart to apply changes) |
+| `MNEMOS_API_KEY` | _(unset)_ | Client side: the key sent by the CLI, watcher, `scripts/reindex-all.py` and git hooks |
 
-Multi-tenant config lives in `config/tenants.yaml` (gitignored — copy
-`config/tenants.example.yaml` and edit the api_keys). See
-[`DEPLOYMENT.md`](DEPLOYMENT.md).
+Keys live in `config/tenants.yaml` (gitignored — copy
+`config/tenants.example.yaml` and replace the `CHANGE_ME` keys). A tenant is
+an identity only: all tenants share the same collections. See
+[`DEPLOYMENT.md`](DEPLOYMENT.md#authentication).
 
 ## How to apply a config change
 

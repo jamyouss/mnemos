@@ -132,7 +132,7 @@ What's distinctive about the bundle Mnemos ships:
 - **CRAG corrective loop** — Document grader + query rewriter retry when
   retrieval fails
 - **Caller-chosen collections** — narrow a search to `mnemos_code`, `mnemos_docs`,
-  `mnemos_skills` or `mnemos_memory`, or let it fan out
+  `mnemos_skills`, `mnemos_knowledge` or `mnemos_memory`, or let it fan out
 - **Semantic cache** — Cosine-similarity cache with automatic invalidation
   on reindex
 
@@ -177,8 +177,8 @@ What's distinctive about the bundle Mnemos ships:
 - **MCP Streamable HTTP** — Native protocol, no shim
 - **9 MCP tools** — `mnemos_search`, `mnemos_search_code`, `mnemos_memory`,
   `mnemos_reindex`, …
-- **Multi-tenant ready** — Per-team API keys, push-only mode, GitHub
-  Actions workflow
+- **API-key auth** — Bearer keys (`MNEMOS_AUTH_ENABLED`), push API, GitHub
+  Actions workflow, connectors for Confluence, Jira and web pages
 - **Pluggable LLM** — Ollama, Anthropic API (prompt caching!), or any
   OpenAI-compatible endpoint (vLLM, LM Studio, Groq, Together, OpenRouter…)
 - **Observability** — Optional JSONL query log for debug + A/B analysis
@@ -246,7 +246,8 @@ is being searched, what has been remembered, and how retrieval scored. See
 | **Evaluation** | [`docs/EVALUATION.md`](docs/EVALUATION.md) | Run your own eval, interpret metrics |
 | **Results history** | [`docs/EVAL.md`](docs/EVAL.md) | Measured numbers per phase |
 | **Roadmap** | [`docs/ROADMAP.md`](docs/ROADMAP.md) | What's next, design decisions |
-| **Deployment** | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Multi-tenant prod setup, push API, CI/CD |
+| **Deployment** | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Authentication, push API, CI/CD |
+| **Connectors** | [`docs/CONNECTORS.md`](docs/CONNECTORS.md) | Confluence, Jira and web → `mnemos_knowledge` |
 | **Agent guide** | [`CLAUDE.md`](CLAUDE.md) | Instructions for Claude Code when touching this repo |
 
 ---

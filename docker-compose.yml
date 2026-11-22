@@ -26,7 +26,6 @@ services:
       EMBEDDING_MODEL: all-MiniLM-L6-v2
       CODEBASE_PATH: /data/codebase
       CLAUDE_CONFIG_PATH: /data/claude-config
-      MNEMOS_MODE: local
       MNEMOS_AUTH_ENABLED: "false"
       MNEMOS_STATE_DIR: /data/state
       # Index only what config/projects.yaml declares. The watcher walks the

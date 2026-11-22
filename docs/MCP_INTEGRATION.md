@@ -9,7 +9,7 @@ Once an MCP client is connected, the agent sees these 9 tools:
 
 | Tool | Use it for | Returns |
 |------|------------|---------|
-| `mnemos_search` | Semantic search across all collections (supports `tags_any` / `tags_all`) | List of `{file_path, score, content, collection}` |
+| `mnemos_search` | Semantic search across every collection except `mnemos_memory` unless `collections` says otherwise (supports `tags_any` / `tags_all`) | List of `{file_path, score, content, collection}`; `mnemos_knowledge` hits carry `metadata.source_url` |
 | `mnemos_search_code` | Code-only search with `language` / `symbol_type` / `tags_any` / `tags_all` filters | List of code chunks with `symbol_name`, `package` |
 | `mnemos_search_skills` | Find the most relevant skill by description | List of `{skill_name, description, instructions_preview}` |
 | `mnemos_search_memory` | Recall past decisions and patterns (supports `tags_any` / `tags_all`) | List of `{id, content, memory_type, tags}` |
@@ -49,7 +49,7 @@ Drop this in your `~/.claude/CLAUDE.md`:
 
 1. **First**: Use Mnemos MCP tools based on intent:
    - `mnemos_search_code` — looking for functions, types, patterns, implementations
-   - `mnemos_search` — general cross-collection search (docs + code + skills)
+   - `mnemos_search` — general cross-collection search (docs + code + skills + external knowledge)
    - `mnemos_search_skills` — finding relevant agent skills
    - `mnemos_search_memory` — past decisions, conventions, lessons learned
    - `mnemos_status` — check if Mnemos is available and collections are populated
@@ -194,13 +194,21 @@ curl -X POST http://localhost:8100/api/search \
 The REST endpoints mirror the MCP tools 1:1 — see [`CLI.md`](CLI.md) for the
 full list.
 
-## Multi-tenant deployments
+## Authenticated servers
 
 When `MNEMOS_AUTH_ENABLED=true`, every MCP request must carry an
-`Authorization: Bearer <api-key>` header. API keys are managed in
-`config/tenants.yaml` (copied from `config/tenants.example.yaml`); each
-tenant sees a prefixed view of the collections. See
-[`DEPLOYMENT.md`](DEPLOYMENT.md).
+`Authorization: Bearer <api-key>` header, which the MCP client sends itself.
+Claude Code:
+
+```bash
+claude mcp add --transport http mnemos https://mnemos.example.com/mcp \
+  --header "Authorization: Bearer <api-key>"
+```
+
+In a JSON config, add `"headers": {"Authorization": "Bearer <api-key>"}` to
+the server entry. Keys live in `config/tenants.yaml` (copied from
+`config/tenants.example.yaml`); every key sees the same collections. See
+[`DEPLOYMENT.md`](DEPLOYMENT.md#authentication).
 
 ## Debugging the MCP connection
 
