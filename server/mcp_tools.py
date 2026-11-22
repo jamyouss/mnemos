@@ -550,24 +550,21 @@ def _review_memory(
 
 
 def _get_status(qdrant_client: QdrantClient) -> dict:
-    from datetime import datetime, timezone
+    from core.indexer import dense_vector_size
 
     status: dict = {"collections": {}, "qdrant_healthy": False}
     try:
-        existing = {c.name: c for c in qdrant_client.get_collections().collections}
+        qdrant_client.get_collections()
         status["qdrant_healthy"] = True
         for config in COLLECTIONS:
-            if config.name in existing:
-                coll_info = qdrant_client.get_collection(config.name)
+            # collection_exists, not get_collections(): the latter skips aliases.
+            if qdrant_client.collection_exists(config.name):
                 status["collections"][config.name] = {
-                    "document_count": coll_info.points_count or 0,
-                    "vector_size": config.vector_size,
+                    "document_count": qdrant_client.get_collection(config.name).points_count or 0,
+                    "vector_size": dense_vector_size(qdrant_client, config.name),
                 }
             else:
-                status["collections"][config.name] = {
-                    "document_count": 0,
-                    "vector_size": config.vector_size,
-                }
+                status["collections"][config.name] = {"document_count": 0, "vector_size": None}
     except Exception as exc:
         status["error"] = str(exc)
     return status

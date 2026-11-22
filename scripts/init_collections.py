@@ -11,28 +11,24 @@ from qdrant_client import QdrantClient
 sys.path.insert(0, str(Path(__file__).parent.parent / "packages"))
 
 from core.collections import COLLECTIONS
+from core.indexer import TAGGED_COLLECTIONS, create_hybrid_collection
 
 
-def init_collections(client: QdrantClient) -> None:
+def init_collections(client: QdrantClient, vector_size: int) -> None:
     """Create Qdrant collections if they don't already exist.
 
     Args:
         client: QdrantClient instance connected to Qdrant server.
+        vector_size: dense size of the configured embedding model.
     """
     for config in COLLECTIONS:
-        try:
-            client.get_collection(config.name)
+        if client.collection_exists(config.name):
             print(f"  Collection '{config.name}' already exists")
-        except Exception:
-            from qdrant_client.models import Distance, VectorParams
-
-            client.create_collection(
-                collection_name=config.name,
-                vectors_config=VectorParams(
-                    size=config.vector_size, distance=Distance.COSINE
-                ),
-            )
-            print(f"  Created collection '{config.name}'")
+            continue
+        create_hybrid_collection(
+            client, config.name, vector_size, config.name in TAGGED_COLLECTIONS
+        )
+        print(f"  Created collection '{config.name}'")
 
 
 def main():
@@ -44,7 +40,7 @@ def main():
     client = QdrantClient(host=host, port=port)
 
     print("Initializing collections...")
-    init_collections(client)
+    init_collections(client, int(os.getenv("EMBEDDING_DIM", "384")))
 
     print("Done! Collections are ready for indexing.")
 

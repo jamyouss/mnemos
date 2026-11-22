@@ -12,14 +12,14 @@ from core.models import ExtractedMemory
 @pytest.fixture
 def mock_qdrant():
     client = MagicMock()
-    client.get_collections.return_value.collections = []
+    client.collection_exists.return_value = False
     return client
 
 
 @pytest.fixture
 def mock_embeddings():
     service = MagicMock()
-    service.embed.return_value = [0.1] * 384
+    service.embed_documents.return_value = [[0.1] * 384]
     return service
 
 

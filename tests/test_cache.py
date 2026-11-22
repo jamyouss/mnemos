@@ -10,14 +10,15 @@ from core.cache import SemanticCache
 
 def _mock_embed_service(vec=None):
     mock = MagicMock()
-    mock.embed.return_value = vec or [0.1] * 384
+    mock.dimension = 384
+    mock.embed_query.return_value = vec or [0.1] * 384
     return mock
 
 
 def _mock_qdrant():
     mock = MagicMock()
     # collection bootstrap: "doesn't exist yet"
-    mock.get_collections.return_value = SimpleNamespace(collections=[])
+    mock.collection_exists.return_value = False
     return mock
 
 

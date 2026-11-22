@@ -28,7 +28,7 @@ fast, predictable. Every "advanced" feature is opt-in.
 |-----|--------|------|
 | `QDRANT_HOST` | `qdrant` | Hostname inside the compose network |
 | `QDRANT_PORT` | `6333` | |
-| `EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | Any sentence-transformers model. **Change → must reindex.** Vector size in `collections.py` may need updating too. |
+| `EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | Any sentence-transformers model; vector size is read from the model. `google/embeddinggemma-2` is profiled (query prompts, `title: <path>` document framing, 512 tokens). **Change on an existing index → migrate**, see [Changing the embedding model](#changing-the-embedding-model). |
 | `CODEBASE_PATH` | `/data/codebase` | Root for code. Override the bind mount, not this var. |
 | `CLAUDE_CONFIG_PATH` | `/data/claude-config` | Root for skills + docs. |
 | `MNEMOS_STATE_DIR` | `/data/state` | Persistent state (query logs, etc.) |
@@ -385,10 +385,33 @@ For most flags it's just an env var + a container restart:
 MNEMOS_RERANKER_ENABLED=true docker compose up -d rag-server
 ```
 
-For changes that affect indexing (embedding model, contextual flag), you must
-reindex with `--recreate`:
+For a contextual-chunking change, reindex with `--recreate`:
 
 ```bash
 mnemos reindex --recreate --full --collection mnemos_code --tags myproject,go \
        --path /data/codebase/myproject
 ```
+
+### Changing the embedding model
+
+Collections are sized for one model, and the server refuses to start on
+collections sized for another. `core.embedding_migration` moves every
+collection, memories and connector pages included, without re-reading any
+source file: it re-embeds the `content` stored in Qdrant into a copy named
+`<collection>__<model>_<dim>`, then serves the old name as an alias of it.
+
+```bash
+M=google/embeddinggemma-2
+# 1. Copy while the server keeps serving the old model (long: ~8 chunks/s on CPU).
+docker compose exec rag-server python -m core.embedding_migration sync --model $M
+# 2. Stop the writers, catch up what changed meanwhile, switch.
+docker compose stop watcher ingester rag-server
+docker compose run --rm rag-server python -m core.embedding_migration sync --model $M
+docker compose run --rm rag-server python -m core.embedding_migration switch --model $M
+# 3. Restart on the new model.
+EMBEDDING_MODEL=$M docker compose up -d rag-server watcher   # + ingester if you run connectors
+```
+
+The first `switch` snapshots each original collection before deleting it
+(an alias cannot share a collection's name). Going back is `switch --model
+<previous>` once a copy for it exists, which only moves the alias.

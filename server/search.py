@@ -194,7 +194,7 @@ class SearchService:
         if self._mmr_enabled and len(ordered) > limit:
             try:
                 texts = [r.content for r in ordered]
-                vectors = self._embeddings.embed_batch(texts)
+                vectors = self._embeddings.embed_documents(texts)
                 from core.reranker import ScoredDoc
 
                 scored = [ScoredDoc(doc_id=i, score=r.score, payload=r) for i, r in enumerate(ordered)]
@@ -212,7 +212,7 @@ class SearchService:
         query_filter: Filter | None,
         per_collection: int,
     ) -> list[SearchResult]:
-        dense_vec = self._embeddings.embed(query)
+        dense_vec = self._embeddings.embed_query(query)
         sparse_vec = bm25_sparse(query)
         out: list[SearchResult] = []
         for coll_name in target_collections:
@@ -397,7 +397,7 @@ class SearchService:
         any other slice via the `tags` payload filter rather than per-project
         collections."""
         t_start = time.perf_counter()
-        dense_vec = self._embeddings.embed(query)
+        dense_vec = self._embeddings.embed_query(query, task="code")
         sparse_vec = bm25_sparse(query)
 
         must_conditions: list = []
@@ -446,7 +446,7 @@ class SearchService:
 
     def search_skills(self, query: str, limit: int = 3) -> list[SkillResult]:
         t_start = time.perf_counter()
-        dense_vec = self._embeddings.embed(query)
+        dense_vec = self._embeddings.embed_query(query)
         sparse_vec = bm25_sparse(query)
         per_collection = _HYBRID_TOP if (self._reranker and self._reranker.enabled) else limit
         hits = self._hybrid_query("mnemos_skills", dense_vec, sparse_vec, None, per_collection)
@@ -481,7 +481,7 @@ class SearchService:
         limit: int = 5,
         mode: str = "preview",
     ) -> list[MemoryResult]:
-        dense_vec = self._embeddings.embed(query)
+        dense_vec = self._embeddings.embed_query(query)
         sparse_vec = bm25_sparse(query)
 
         t_start = time.perf_counter()

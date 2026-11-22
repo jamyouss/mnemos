@@ -93,7 +93,7 @@ This is the **default-on** part of the pipeline. It happens for every search,
 regardless of feature flags.
 
 ```
-query  ──▶  dense embedding (384d, all-MiniLM-L6-v2, normalised)
+query  ──▶  dense embedding (EMBEDDING_MODEL, normalised; code prompt on search_code)
        └─▶  sparse encoding (in-house BM25, camelCase/snake-aware)
 
 per collection:

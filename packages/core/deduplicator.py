@@ -55,7 +55,7 @@ class Deduplicator:
             return self._store(memory, status)
 
     def _store(self, memory: ExtractedMemory, status: str) -> DeduplicationResult:
-        vector = self._embeddings.embed(memory.content)
+        vector = self._embeddings.embed_documents([memory.content])[0]
 
         try:
             hits = self._qdrant.query_points(
@@ -123,7 +123,7 @@ class Deduplicator:
         existing_content = existing.payload.get("content", "")
 
         merged_content = self._extractor.merge_memories(existing_content, memory.content)
-        merged_vector = self._embeddings.embed(merged_content)
+        merged_vector = self._embeddings.embed_documents([merged_content])[0]
         now = datetime.now(timezone.utc).isoformat()
 
         updated_payload = {

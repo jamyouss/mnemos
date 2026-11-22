@@ -8,6 +8,10 @@ from datetime import datetime, timezone
 
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
+    CreateAlias,
+    CreateAliasOperation,
+    DeleteAlias,
+    DeleteAliasOperation,
     Distance,
     FieldCondition,
     Filter,
@@ -81,9 +85,76 @@ def resolve_skip(
         extra_dirs=[*config["dirs"], *extra_dirs],
     )
 
+
+def relative_to_root(file_path: str, codebase_root: str) -> str:
+    """Strip the codebase mount root. Also the document title the embedder sees."""
+    root = codebase_root.rstrip("/")
+    if file_path.startswith(root + "/"):
+        return file_path[len(root) + 1:]
+    return file_path
+
+
 # Collections whose payload is filtered by `tags` at query time. We
 # create the keyword payload index on those at startup so the filter scales.
-_TAGGED_COLLECTIONS = ("mnemos_code", "mnemos_memory", "mnemos_knowledge")
+TAGGED_COLLECTIONS = ("mnemos_code", "mnemos_memory", "mnemos_knowledge")
+
+
+def create_hybrid_collection(
+    qdrant: QdrantClient, name: str, vector_size: int, tagged: bool
+) -> None:
+    """Create `name` with the hybrid schema (dense + sparse BM25).
+
+    `tagged` adds a keyword payload index on `tags` so tag filters stay O(log n).
+    """
+    qdrant.create_collection(
+        collection_name=name,
+        vectors_config={
+            DENSE_VECTOR_NAME: VectorParams(size=vector_size, distance=Distance.COSINE),
+        },
+        sparse_vectors_config={
+            SPARSE_VECTOR_NAME: SparseVectorParams(modifier=Modifier.IDF),
+        },
+    )
+    if tagged:
+        _ensure_tags_payload_index(qdrant, name)
+
+
+def _ensure_tags_payload_index(qdrant: QdrantClient, name: str) -> None:
+    """Idempotently create a keyword payload index on the `tags` field."""
+    try:
+        qdrant.create_payload_index(
+            collection_name=name,
+            field_name=TAGS_PAYLOAD_FIELD,
+            field_schema=KeywordIndexParams(type=PayloadSchemaType.KEYWORD),
+        )
+    except Exception:
+        # Qdrant raises if the index already exists; that's fine.
+        pass
+
+
+def dense_vector_size(qdrant: QdrantClient, name: str) -> int:
+    """Size of the dense vector of `name` (a collection or an alias)."""
+    vectors = qdrant.get_collection(name).config.params.vectors
+    if isinstance(vectors, dict):
+        return vectors[DENSE_VECTOR_NAME].size
+    return vectors.size  # legacy unnamed-dense schema
+
+
+def resolve_physical(qdrant: QdrantClient, name: str) -> str | None:
+    """The collection `name` designates: its alias target, itself, or None."""
+    for alias in qdrant.get_aliases().aliases:
+        if alias.alias_name == name:
+            return alias.collection_name
+    return name if qdrant.collection_exists(name) else None
+
+
+def point_alias(qdrant: QdrantClient, alias: str, target: str) -> None:
+    """Point `alias` at `target` in one atomic update, replacing any previous target."""
+    ops: list = []
+    if any(a.alias_name == alias for a in qdrant.get_aliases().aliases):
+        ops.append(DeleteAliasOperation(delete_alias=DeleteAlias(alias_name=alias)))
+    ops.append(CreateAliasOperation(create_alias=CreateAlias(collection_name=target, alias_name=alias)))
+    qdrant.update_collection_aliases(change_aliases_operations=ops)
 
 
 class Indexer:
@@ -110,39 +181,20 @@ class Indexer:
         self._fallback_chunker = FallbackChunker()
         self._tabular_chunker = TabularChunker(fallback=self._fallback_chunker)
 
-    def ensure_collection(self, collection_name: str, vector_size: int = 384) -> None:
-        """Create the collection if missing, configured for hybrid (dense + sparse BM25).
+    def ensure_collection(self, collection_name: str) -> None:
+        """Create the collection if missing, hybrid and sized for the current model.
 
-        For collections that scope by tags (mnemos_code, mnemos_memory) we
-        also create a keyword payload index on the `tags` field so that
-        tag filters stay O(log n).
+        `collection_exists` also matches aliases; `get_collections()` does not,
+        and an alias left by an embedding migration would otherwise be
+        "missing" and recreated over.
         """
-        existing = {c.name for c in self._qdrant.get_collections().collections}
-        if collection_name not in existing:
-            self._qdrant.create_collection(
-                collection_name=collection_name,
-                vectors_config={
-                    DENSE_VECTOR_NAME: VectorParams(size=vector_size, distance=Distance.COSINE),
-                },
-                sparse_vectors_config={
-                    SPARSE_VECTOR_NAME: SparseVectorParams(modifier=Modifier.IDF),
-                },
+        tagged = collection_name in TAGGED_COLLECTIONS
+        if not self._qdrant.collection_exists(collection_name):
+            create_hybrid_collection(
+                self._qdrant, collection_name, self._embeddings.dimension, tagged
             )
-
-        if collection_name in _TAGGED_COLLECTIONS:
-            self._ensure_tags_payload_index(collection_name)
-
-    def _ensure_tags_payload_index(self, collection_name: str) -> None:
-        """Idempotently create a keyword payload index on the `tags` field."""
-        try:
-            self._qdrant.create_payload_index(
-                collection_name=collection_name,
-                field_name=TAGS_PAYLOAD_FIELD,
-                field_schema=KeywordIndexParams(type=PayloadSchemaType.KEYWORD),
-            )
-        except Exception:
-            # Qdrant raises if the index already exists; that's fine.
-            pass
+        elif tagged:
+            _ensure_tags_payload_index(self._qdrant, collection_name)
 
     def is_hybrid(self, collection_name: str) -> bool:
         """Return True if the collection already uses named hybrid (dense + sparse) vectors."""
@@ -154,19 +206,26 @@ class Indexer:
         sparse = info.config.params.sparse_vectors
         return isinstance(vectors, dict) and DENSE_VECTOR_NAME in vectors and sparse is not None
 
-    def recreate_collection_hybrid(self, collection_name: str, vector_size: int = 384) -> None:
-        """Drop and recreate the collection with the hybrid schema. Destructive."""
-        try:
-            self._qdrant.delete_collection(collection_name=collection_name)
-        except Exception:
-            pass
-        self.ensure_collection(collection_name, vector_size)
+    def recreate_collection_hybrid(self, collection_name: str) -> None:
+        """Drop and recreate the collection with the hybrid schema. Destructive.
+
+        Behind an alias, the physical collection is the one recreated, and the
+        alias is put back: Qdrant drops aliases with their collection.
+        """
+        physical = resolve_physical(self._qdrant, collection_name)
+        if physical is not None:
+            self._qdrant.delete_collection(collection_name=physical)
+        target = physical or collection_name
+        create_hybrid_collection(
+            self._qdrant, target, self._embeddings.dimension,
+            collection_name in TAGGED_COLLECTIONS,
+        )
+        if target != collection_name:
+            point_alias(self._qdrant, collection_name, target)
 
     def _relative_path(self, file_path: str) -> str:
         """Strip the codebase mount root, so config prefixes match."""
-        if file_path.startswith(self._codebase_root + "/"):
-            return file_path[len(self._codebase_root) + 1:]
-        return file_path
+        return relative_to_root(file_path, self._codebase_root)
 
     def _resolve_excludes(self, file_path: str) -> dict[str, list[str]]:
         """Per-prefix ignore rules from `config/projects.yaml` for this file."""
@@ -246,7 +305,7 @@ class Indexer:
         # collections; skills/docs leave the field unset.
         resolved_tags: list[str] = (
             self._resolve_tags(file_path, tags)
-            if collection in _TAGGED_COLLECTIONS
+            if collection in TAGGED_COLLECTIONS
             else []
         )
 
@@ -260,7 +319,9 @@ class Indexer:
         )
 
         texts = [c["content"] for c in chunks]
-        dense_vectors = self._embeddings.embed_batch(texts)
+        dense_vectors = self._embeddings.embed_documents(
+            texts, titles=[self._relative_path(file_path)] * len(texts)
+        )
         sparse_vectors = [bm25_sparse(t) for t in texts]
 
         now = datetime.now(timezone.utc).isoformat()

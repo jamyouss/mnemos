@@ -141,9 +141,21 @@ def create_app() -> FastAPI:
 
         # Ensure all collections exist on startup (creates new ones as hybrid;
         # legacy unnamed-dense collections stay untouched until `reindex --recreate`).
+        # A collection sized for another embedding model would fail every
+        # query, so refuse to start instead and name the way out.
         from core.collections import COLLECTIONS
+        from core.indexer import dense_vector_size
+        dim = app.state.embeddings.dimension
         for coll in COLLECTIONS:
-            app.state.indexer.ensure_collection(coll.name, coll.vector_size)
+            app.state.indexer.ensure_collection(coll.name)
+            size = dense_vector_size(app.state.qdrant, coll.name)
+            if size != dim:
+                raise RuntimeError(
+                    f"{coll.name} holds {size}-d vectors but {settings.embedding_model} "
+                    f"produces {dim}-d. Migrate with `python -m core.embedding_migration "
+                    f"sync --model {settings.embedding_model}` then `switch`, "
+                    f"or set EMBEDDING_MODEL back."
+                )
 
         from server.mcp_tools import create_mcp_server
         mcp_server = create_mcp_server(

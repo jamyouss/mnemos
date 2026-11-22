@@ -16,7 +16,6 @@ TAGS_PAYLOAD_FIELD = "tags"
 @dataclass
 class CollectionConfig:
     name: str
-    vector_size: int = 384
     path_prefixes: list[str] | None = None
     description: str = ""
 

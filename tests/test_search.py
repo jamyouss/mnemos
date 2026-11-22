@@ -16,7 +16,7 @@ def mock_qdrant():
 @pytest.fixture
 def mock_embeddings():
     service = MagicMock()
-    service.embed.return_value = [0.1] * 384
+    service.embed_query.return_value = [0.1] * 384
     return service
 
 

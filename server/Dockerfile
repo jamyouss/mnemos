@@ -39,13 +39,16 @@ ENV PATH="/opt/venv/bin:${PATH}"
 # NOT bust the heavyweight pip cache. We force the CPU-only torch wheel
 # because Mnemos has no GPU code path; the default `pip install torch` on
 # Linux pulls the full CUDA stack (~4 GB of nvidia/* + triton wheels).
+# torchvision comes from the same index for the same reason: EmbeddingGemma 2
+# loads its image/video processors even text-only, and a PyPI torchvision
+# would drag the CUDA torch back in.
 COPY server/requirements.txt /build/server/requirements.txt
 COPY packages/core/pyproject.toml /build/packages/core/pyproject.toml
 RUN pip install --upgrade pip && \
-    pip install --index-url https://download.pytorch.org/whl/cpu torch && \
+    pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision && \
     pip install -r /build/server/requirements.txt && \
     pip install qdrant-client \
-                sentence-transformers \
+                "sentence-transformers[image]>=6.1" \
                 tree-sitter \
                 tree-sitter-go \
                 tree-sitter-typescript \

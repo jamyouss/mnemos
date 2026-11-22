@@ -12,11 +12,6 @@ def test_all_collections_defined():
     }
 
 
-def test_collection_config_has_vector_size():
-    for c in COLLECTIONS:
-        assert c.vector_size == 384
-
-
 def test_path_to_collection_mapping_for_code():
     """Anything that looks like a real relative path falls into mnemos_code."""
     assert get_collection_for_path("myproject/services/core/main.go") == "mnemos_code"

@@ -28,7 +28,7 @@ services:
     environment:
       QDRANT_HOST: qdrant
       QDRANT_PORT: 6333
-      EMBEDDING_MODEL: all-MiniLM-L6-v2
+      EMBEDDING_MODEL: "${EMBEDDING_MODEL:-all-MiniLM-L6-v2}"
       CODEBASE_PATH: /data/codebase
       CLAUDE_CONFIG_PATH: /data/claude-config
       MNEMOS_AUTH_ENABLED: "false"
@@ -90,9 +90,10 @@ services:
       # image must never carry.
       - ./evals/runs:/app/evals/runs:ro
       - rag_state:/data/state
-      # HuggingFace model cache. The embedding model is baked into the image
-      # so this volume is only meaningful when MNEMOS_RERANKER_ENABLED=true:
-      # it persists the reranker weights (~280 MB) across container restarts.
+      # HuggingFace model cache. The default embedding model is baked into the
+      # image; this volume persists what is fetched at runtime instead: the
+      # reranker (~280 MB) and any other EMBEDDING_MODEL (~1.5 GB for
+      # EmbeddingGemma 2), so a restart does not download them again.
       - hf_cache:/opt/hf_cache
     depends_on:
       qdrant:

@@ -18,7 +18,7 @@ from server.main import create_app
 
 def _make_mock_qdrant():
     mock_client = MagicMock()
-    mock_client.get_collections.return_value.collections = []
+    mock_client.collection_exists.return_value = False
     mock_client.scroll.return_value = ([], None)
     mock_client.search.return_value = []
     return mock_client
@@ -26,8 +26,9 @@ def _make_mock_qdrant():
 
 def _make_mock_embeddings():
     mock_embeddings = MagicMock()
-    mock_embeddings.embed.return_value = [0.1] * 384
-    mock_embeddings.embed_batch.return_value = [[0.1] * 384]
+    mock_embeddings.dimension = 384
+    mock_embeddings.embed_query.return_value = [0.1] * 384
+    mock_embeddings.embed_documents.return_value = [[0.1] * 384]
     return mock_embeddings
 
 

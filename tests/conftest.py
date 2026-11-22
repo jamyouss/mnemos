@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 def mock_qdrant_client():
     """Mock Qdrant client for unit tests (no live Qdrant needed)."""
     client = MagicMock()
-    client.get_collections.return_value.collections = []
+    client.collection_exists.return_value = False
     client.scroll.return_value = ([], None)
     return client
 
@@ -23,8 +23,9 @@ def mock_qdrant_client():
 def mock_embedding_service():
     """Mock embedding service (avoids loading the real model in fast tests)."""
     service = MagicMock()
-    service.embed.return_value = [0.1] * 384
-    service.embed_batch.return_value = [[0.1] * 384]
+    service.dimension = 384
+    service.embed_query.return_value = [0.1] * 384
+    service.embed_documents.return_value = [[0.1] * 384]
     return service
 
 

@@ -85,7 +85,8 @@ For the active improvement plan, see [ROADMAP.md](ROADMAP.md).
 | `chunkers/fallback_chunker.py` | Fixed-size sliding window |
 | `skills.py` | Skill slug from the path + description from frontmatter, so a skill result can name itself |
 | `path_filter.py` | Single source of truth for the **built-in** "do not index" rules (vendored bundles, build outputs, generated reports). A pure function: per-project rules are layered on by the indexer, never loaded here. |
-| `embeddings.py` | sentence-transformers (`all-MiniLM-L6-v2`, 384d, normalised) |
+| `embeddings.py` | sentence-transformers, `EMBEDDING_MODEL` (default `all-MiniLM-L6-v2`, 384d). `embed_query(task)` / `embed_documents(titles)`; per-model profiles frame inputs (EmbeddingGemma 2: query prompts, `title: <path> \| text:` documents) |
+| `embedding_migration.py` | Moves every collection to a new model: `sync` re-embeds stored `content` into `<name>__<model>_<dim>`, `switch` serves the old name as an alias of it |
 | `sparse.py` | BM25 encoder — camelCase/snake split, stable 31-bit hash |
 | `contextual.py` | LLM-generated preamble per chunk (Anthropic-style) |
 | `indexer.py` | Orchestrator: skip check → chunk → contextualise → embed → upsert. `should_skip()` unions the built-in policy, the per-prefix rules from `config/projects.yaml` and any caller extras — the one place that resolution happens. |
@@ -175,7 +176,7 @@ Every code/docs/skills/knowledge/memory collection now uses **named hybrid vecto
 
 ```python
 vectors_config = {
-    "dense": VectorParams(size=384, distance=Distance.COSINE),
+    "dense": VectorParams(size=embeddings.dimension, distance=Distance.COSINE),  # 384 for MiniLM
 }
 sparse_vectors_config = {
     "sparse": SparseVectorParams(modifier=Modifier.IDF),

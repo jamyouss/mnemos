@@ -8,15 +8,15 @@ from core.indexer import Indexer
 @pytest.fixture
 def mock_qdrant():
     client = MagicMock()
-    client.get_collections.return_value.collections = []
+    client.collection_exists.return_value = False
     return client
 
 
 @pytest.fixture
 def mock_embeddings():
     service = MagicMock()
-    service.embed.return_value = [0.1] * 384
-    service.embed_batch.return_value = [[0.1] * 384, [0.2] * 384]
+    service.dimension = 384
+    service.embed_documents.return_value = [[0.1] * 384, [0.2] * 384]
     return service
 
 
@@ -131,7 +131,7 @@ def test_index_file_skips_filtered_path(indexer, mock_qdrant, mock_embeddings, s
         collection="mnemos_code",
     )
     assert result == 0
-    mock_embeddings.embed_batch.assert_not_called()
+    mock_embeddings.embed_documents.assert_not_called()
     mock_qdrant.upsert.assert_not_called()
 
 

@@ -15,11 +15,12 @@ def app():
          patch("server.main.EmbeddingService") as mock_embed_cls:
 
         mock_qdrant = MagicMock()
-        mock_qdrant.get_collections.return_value.collections = []
+        mock_qdrant.collection_exists.return_value = False
         mock_qdrant.scroll.return_value = ([], None)
         mock_embeddings = MagicMock()
-        mock_embeddings.embed.return_value = [0.1] * 384
-        mock_embeddings.embed_batch.return_value = [[0.1] * 384]
+        mock_embeddings.dimension = 384
+        mock_embeddings.embed_query.return_value = [0.1] * 384
+        mock_embeddings.embed_documents.return_value = [[0.1] * 384]
         mock_qdrant_cls.return_value = mock_qdrant
         mock_embed_cls.return_value = mock_embeddings
 

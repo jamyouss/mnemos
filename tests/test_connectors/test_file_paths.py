@@ -22,9 +22,10 @@ RISKY_KEYS = ["DIST", "BUILD", "ARCHIVED", "VENDOR", "BACKUP", "COVERAGE", "PODS
 @pytest.fixture
 def indexer() -> Indexer:
     qdrant = MagicMock()
-    qdrant.get_collections.return_value.collections = []
+    qdrant.collection_exists.return_value = False
     embeddings = MagicMock()
-    embeddings.embed.return_value = [0.1] * 384
+    embeddings.dimension = 384
+    embeddings.embed_documents.return_value = [[0.1] * 384]
     return Indexer(qdrant_client=qdrant, embedding_service=embeddings)
 
 

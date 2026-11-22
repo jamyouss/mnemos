@@ -28,7 +28,6 @@ logger = logging.getLogger("mnemos.cache")
 CACHE_COLLECTION = "mnemos_cache"
 _DEFAULT_THRESHOLD = 0.95
 _DEFAULT_TTL_SECONDS = 3600
-_VECTOR_SIZE = 384
 
 
 @dataclass
@@ -65,13 +64,18 @@ class SemanticCache:
         return self._enabled
 
     def _ensure_collection(self) -> None:
-        existing = {c.name for c in self._qdrant.get_collections().collections}
-        if CACHE_COLLECTION not in existing:
-            # The cache uses an unnamed dense vector (simple lookup, no hybrid needed).
-            self._qdrant.create_collection(
-                collection_name=CACHE_COLLECTION,
-                vectors_config=VectorParams(size=_VECTOR_SIZE, distance=Distance.COSINE),
-            )
+        dim = self._embeddings.dimension
+        if self._qdrant.collection_exists(CACHE_COLLECTION):
+            vectors = self._qdrant.get_collection(CACHE_COLLECTION).config.params.vectors
+            if vectors.size == dim:
+                return
+            # Entries from another embedding model can never match again.
+            self._qdrant.delete_collection(CACHE_COLLECTION)
+        # The cache uses an unnamed dense vector (simple lookup, no hybrid needed).
+        self._qdrant.create_collection(
+            collection_name=CACHE_COLLECTION,
+            vectors_config=VectorParams(size=dim, distance=Distance.COSINE),
+        )
 
     def _bucket(self, namespace: str | None) -> str:
         """Namespacing key — separate code/skills/general lookups in the same collection."""
@@ -82,7 +86,7 @@ class SemanticCache:
         if not self._enabled or not query.strip():
             return None
         try:
-            vec = self._embeddings.embed(query)
+            vec = self._embeddings.embed_query(query)
             hits = self._qdrant.query_points(
                 collection_name=CACHE_COLLECTION,
                 query=vec,
@@ -127,7 +131,7 @@ class SemanticCache:
         if not self._enabled or not query.strip():
             return
         try:
-            vec = self._embeddings.embed(query)
+            vec = self._embeddings.embed_query(query)
             serialised = json.dumps(_to_jsonable(results), ensure_ascii=False)
         except Exception:
             return

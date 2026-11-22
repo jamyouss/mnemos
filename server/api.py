@@ -9,15 +9,14 @@ from typing import List, Optional
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from pydantic import BaseModel
 from qdrant_client.models import (
-    Distance,
     FieldCondition,
     Filter,
     FilterSelector,
     MatchValue,
     PointStruct,
-    VectorParams,
 )
 
+from core.cache import CACHE_COLLECTION
 from core.collections import COLLECTIONS
 from core.llm import LLMError
 from server.config import settings
@@ -487,16 +486,6 @@ def reindex(body: ReindexRequest, request: Request, background_tasks: Background
 # ---------------------------------------------------------------------------
 
 _MEMORY_COLLECTION = "mnemos_memory"
-_MEMORY_VECTOR_SIZE = 384
-
-
-def _ensure_memory_collection(qdrant, vector_size: int = _MEMORY_VECTOR_SIZE) -> None:
-    existing = {c.name for c in qdrant.get_collections().collections}
-    if _MEMORY_COLLECTION not in existing:
-        qdrant.create_collection(
-            collection_name=_MEMORY_COLLECTION,
-            vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE),
-        )
 
 
 @api_router.get("/api/memory")
@@ -710,17 +699,20 @@ def eval_runs(tag: Optional[str] = None):
 @api_router.get("/api/status")
 def api_status(request: Request):
     qdrant = request.app.state.qdrant
-    collections = qdrant.get_collections().collections
+    # Logical names, resolved through aliases: after an embedding migration the
+    # physical collections carry a model suffix that clients must not see.
     index_info = {}
-    for coll in collections:
+    for name in [c.name for c in COLLECTIONS] + [CACHE_COLLECTION]:
+        if not qdrant.collection_exists(name):
+            continue
         try:
-            info = qdrant.get_collection(coll.name)
-            index_info[coll.name] = {
+            info = qdrant.get_collection(name)
+            index_info[name] = {
                 "vectors_count": info.indexed_vectors_count,
                 "points_count": info.points_count,
                 "status": str(info.status),
             }
         except Exception:
-            index_info[coll.name] = {"error": "unavailable"}
+            index_info[name] = {"error": "unavailable"}
 
     return {"status": "healthy", "collections": index_info}

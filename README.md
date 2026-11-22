@@ -124,7 +124,7 @@ What's distinctive about the bundle Mnemos ships:
 
 ### 🔍 Retrieval
 
-- **Hybrid search** — Dense (`all-MiniLM-L6-v2`) + Sparse (BM25) fused with
+- **Hybrid search** — Dense (`EMBEDDING_MODEL`, MiniLM by default) + Sparse (BM25) fused with
   Reciprocal Rank Fusion `k=60`
 - **Cross-encoder reranker** — `BAAI/bge-reranker-base` by default, swap to
   `bge-reranker-v2-m3` for max quality
@@ -258,7 +258,7 @@ is being searched, what has been remembered, and how retrieval scored. See
 |-------|------|-----|
 | Server | FastAPI + MCP Streamable HTTP | Async, type-safe, native MCP |
 | Vector DB | Qdrant (named hybrid vectors) | Single store for dense + sparse, server-side RRF + IDF |
-| Embeddings | `sentence-transformers/all-MiniLM-L6-v2` | 384d, normalised, fast on CPU |
+| Embeddings | `EMBEDDING_MODEL`: `all-MiniLM-L6-v2` (default, 384d, fast on CPU) or `google/embeddinggemma-2` (768d, ~2× code-search MRR, slower to index) | Vector size read from the model; switching migrates every collection |
 | Sparse | In-house BM25 encoder | No model download; camelCase/snake-aware tokenizer |
 | Reranker | `BAAI/bge-reranker-base` (default) | Open-weight, SOTA on MS-MARCO |
 | LLM | Pluggable (Ollama / Anthropic / OpenAI-compatible) | Use local for dev, cloud for prod |

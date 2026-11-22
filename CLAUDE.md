@@ -19,7 +19,7 @@ Exposé comme MCP server (Streamable HTTP) sur `localhost:8100/mcp`.
 INDEXING (watcher / push API / CLI):
   file → chunker (par extension) → embedder → Qdrant upsert
          AST Go (tree-sitter) | Vue SFC | MD headings | Fallback
-         all-MiniLM-L6-v2 (384 dims, cosine, normalized)
+         EMBEDDING_MODEL (défaut all-MiniLM-L6-v2 384d ; google/embeddinggemma-2 768d)
 
 RETRIEVAL (MCP / REST):
   query → cache → hybrid dense+BM25 sparse (RRF)   [collections choisies par l'appelant]
@@ -37,8 +37,8 @@ MEMORY (git hook / API):
 | Couche | Composant |
 |---|---|
 | Server | FastAPI + MCP Streamable HTTP, Python 3.12+ |
-| Vector DB | Qdrant (cosine, 384 dims) |
-| Embeddings | `sentence-transformers/all-MiniLM-L6-v2` |
+| Vector DB | Qdrant (cosine, taille lue sur le modèle) |
+| Embeddings | `EMBEDDING_MODEL` via `core.embeddings` (profils : prompts de requête, cadrage des documents) — changer de modèle = `python -m core.embedding_migration` |
 | LLM | Pluggable provider (ollama / anthropic / openai-compatible) — extraction + dedup merge, contextual chunking, grader, rewriter |
 | Chunkers | tree-sitter (Go), regex SFC (Vue), heading-based (MD) |
 | Watcher | `watchdog`, debounce 2s |

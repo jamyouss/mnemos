@@ -78,6 +78,41 @@ points. That is a retrieval failure worth its own investigation.
 **Grader over reranker:** P@5 +29 % (and +117 % on `doc_lookup` alone) — same
 top-K but cleaner; the grader rejects irrelevant chunks before ranking.
 
+### 2026-11-22 — golden set rebuilt (62 q), reranker and embedding A/B
+
+**The `skill_discovery` zeros above were the golden set, not retrieval.** All
+four questions expected *code* files; the runner sends `skill_discovery` to
+`mnemos_skills`, so no configuration could ever score. They are now
+`code_search` / `doc_lookup`. Two questions pointing at files no longer
+indexed (one a Godot `.md5` import artefact) were dropped, and 40 agent-written
+`code_search` questions added, stratified across the 8 project groups (seed
+20261122). 62 questions, all answerable.
+
+Measured in-process against the live index (hybrid RRF, prefetch 20 per side),
+same code path as `/api/search-code`; reranker `bge-reranker-base` capped at
+256 tokens. "cand@20" is whether the expected file is among the 20 candidates
+the reranker sees.
+
+| Embedding | cand@20 | MRR | NDCG@5 | R@5 | MRR + rerank | R@5 + rerank | query embed |
+|---|---|---|---|---|---|---|---|
+| `all-MiniLM-L6-v2` (current) | 0.726 | 0.283 | 0.322 | 0.460 | 0.492 | 0.645 | 9 ms |
+| MiniLM + path in the text | 0.710 | 0.317 | 0.355 | 0.508 | 0.488 | 0.661 | 7 ms |
+| **`google/embeddinggemma-2`** + path | **0.903** | **0.556** | **0.609** | **0.806** | **0.658** | **0.839** | 47 ms |
+
+**EmbeddingGemma 2 without a reranker beats MiniLM with one**, at ~50 ms
+instead of ~800 ms. The 22 pre-existing questions alone move the same way
+(cand@20 13 → 16, MRR 0.231 → 0.413), so the 40 agent-written ones are not
+what carries it. The path prefix alone is noise for MiniLM. EmbeddingGemma 2
+costs at indexing: 8 chunks/s on CPU in float32 against 158/s for MiniLM, and
+0.6/s if the published bfloat16 weights are left as they are on CPU.
+
+Reranker on its own (24-question set before the rebuild, 18 answerable, MiniLM):
+`bge-reranker-base` takes MRR 0.221 → 0.326 at 1.1 s per 20 candidates on CPU;
+truncating pairs to 256 tokens halves that with no measurable loss;
+`bge-reranker-v2-m3` ranks best (MRR 0.417) but reads up to 8 192 tokens per
+pair and took 68 s per query, `mnemos_code` holding chunks of up to 163 k
+characters.
+
 ### Legacy golden set (25 q, historical)
 
 | Run | MRR | NDCG@5 | R@5 |
