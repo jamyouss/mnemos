@@ -33,7 +33,7 @@ _PROFILES: dict[str, EmbeddingProfile] = {
     ),
 }
 
-_model_cache: dict[str, SentenceTransformer] = {}
+_model_cache: dict[tuple[str, str | None], SentenceTransformer] = {}
 
 
 def _load(model_name: str, profile: EmbeddingProfile, device: str | None) -> SentenceTransformer:
@@ -50,13 +50,14 @@ class EmbeddingService:
     def __init__(self, model_name: str = "all-MiniLM-L6-v2", device: str | None = None) -> None:
         self.model_name = model_name
         self._profile = _PROFILES.get(model_name, EmbeddingProfile())
-        if model_name not in _model_cache:
-            _model_cache[model_name] = _load(model_name, self._profile, device)
-        self._model = _model_cache[model_name]
+        key = (model_name, device)
+        if key not in _model_cache:
+            _model_cache[key] = _load(model_name, self._profile, device)
+        self._model = _model_cache[key]
 
     @property
     def dimension(self) -> int:
-        return self._model.get_sentence_embedding_dimension()
+        return self._model.get_embedding_dimension()
 
     def embed_query(self, text: str, task: QueryTask = "search") -> list[float]:
         """Embed what a user asked. `task="code"` when the target is source code."""

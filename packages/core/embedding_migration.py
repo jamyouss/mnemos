@@ -171,6 +171,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--no-snapshot", action="store_true", help="switch only: skip the safety snapshot")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+    # One line per Qdrant request would bury the progress lines.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
     qdrant = QdrantClient(
         host=os.environ.get("QDRANT_HOST", "localhost"),

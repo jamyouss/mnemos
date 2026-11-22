@@ -49,7 +49,7 @@ class _FakeModel:
         self.floated = True
         return self
 
-    def get_sentence_embedding_dimension(self):
+    def get_embedding_dimension(self):
         return 4
 
     def encode(self, inputs, prompt_name=None, normalize_embeddings=False):
@@ -95,5 +95,4 @@ def test_embeddinggemma_loads_text_only_and_capped(fake_models):
 def test_cpu_weights_are_cast_to_float32(fake_models):
     """bfloat16 weights run ~13x slower than float32 on CPU."""
     assert EmbeddingService("google/embeddinggemma-2", device="cpu")._model.floated
-    embeddings_module._model_cache.clear()
     assert not EmbeddingService("google/embeddinggemma-2", device="mps")._model.floated
