@@ -104,6 +104,8 @@ services:
     pull_policy: ${MNEMOS_PULL_POLICY:-missing}
     environment:
       MNEMOS_SERVER_URL: http://rag-server:8100
+      # Needed only when rag-server runs with MNEMOS_AUTH_ENABLED=true.
+      MNEMOS_API_KEY: ${MNEMOS_API_KEY:-}
       CODEBASE_PATH: /data/codebase
       CLAUDE_CONFIG_PATH: /data/claude-config
       WATCHER_DEBOUNCE_MS: 2000
