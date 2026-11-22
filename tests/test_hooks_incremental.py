@@ -35,7 +35,12 @@ class _Recorder(BaseHTTPRequestHandler):
             body = json.loads(raw) if raw else None
         except ValueError:
             body = {"_raw": raw.decode("utf-8", "replace")}
-        type(self).calls.append({"method": method, "path": self.path, "body": body})
+        type(self).calls.append({
+            "method": method,
+            "path": self.path,
+            "body": body,
+            "auth": self.headers.get("authorization"),
+        })
         self.send_response(200)
         self.send_header("content-type", "application/json")
         self.end_headers()
@@ -228,6 +233,36 @@ def test_post_merge_indexes_changed_files(repo, stub_server):
     assert calls[0]["body"]["content"] == "package pkg\n"
     # Tags are resolved server-side from config/projects.yaml.
     assert "tags" not in calls[0]["body"]
+
+
+def test_hooks_send_the_api_key_when_configured(repo, stub_server):
+    server, recorder = stub_server
+    watch(repo)
+
+    base = _git(repo["path"], "rev-parse", "HEAD")
+    commit(repo, {"pkg/svc.go": "package pkg\n", "main.go": None})
+    _git(repo["path"], "update-ref", "ORIG_HEAD", base)
+
+    result = run_hook(repo, server, "post-merge", env_extra={"MNEMOS_API_KEY": "secret-a"})
+    assert result.returncode == 0
+
+    calls = wait_for_calls(recorder, 2)
+    assert {c["method"] for c in calls} == {"POST", "DELETE"}
+    assert all(c["auth"] == "Bearer secret-a" for c in calls)
+
+
+def test_hooks_send_no_auth_header_without_a_key(repo, stub_server):
+    server, recorder = stub_server
+    watch(repo)
+
+    base = _git(repo["path"], "rev-parse", "HEAD")
+    commit(repo, {"pkg/svc.go": "package pkg\n"})
+    _git(repo["path"], "update-ref", "ORIG_HEAD", base)
+
+    assert run_hook(repo, server, "post-merge").returncode == 0
+
+    calls = wait_for_calls(recorder, 1)
+    assert calls and calls[0]["auth"] is None
 
 
 def test_post_merge_deletes_removed_files(repo, stub_server):

@@ -58,6 +58,12 @@ RAG_SERVER_URL = os.getenv("MNEMOS_SERVER_URL", "http://rag-server:8100")
 DEBOUNCE_MS = int(os.getenv("WATCHER_DEBOUNCE_MS", "2000"))
 
 
+def _auth_headers() -> dict[str, str]:
+    """Bearer header for servers running with MNEMOS_AUTH_ENABLED=true."""
+    key = os.getenv("MNEMOS_API_KEY", "").strip()
+    return {"Authorization": f"Bearer {key}"} if key else {}
+
+
 def should_ignore(path: str) -> bool:
     """Thin alias kept for backwards compatibility with existing tests.
 
@@ -162,6 +168,7 @@ class DebouncedHandler(FileSystemEventHandler):
                         "collection": collection,
                     },
                     timeout=30,
+                    headers=_auth_headers(),
                 )
                 logger.info(f"Indexed {event_type}: {abs_path} -> {collection}")
             except Exception as e:

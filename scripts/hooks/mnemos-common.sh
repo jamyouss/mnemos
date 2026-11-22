@@ -12,6 +12,7 @@
 _mnemos_env_url="${MNEMOS_URL:-}"
 _mnemos_env_root="${MNEMOS_CODEBASE_ROOT:-}"
 _mnemos_env_trigger="${MNEMOS_HOOK_TRIGGER:-}"
+_mnemos_env_key="${MNEMOS_API_KEY:-}"
 
 if [ -f "${MNEMOS_CONFIG_FILE:-$HOME/.config/mnemos/config}" ]; then
     . "${MNEMOS_CONFIG_FILE:-$HOME/.config/mnemos/config}"
@@ -20,10 +21,25 @@ fi
 [ -n "$_mnemos_env_url" ] && MNEMOS_URL="$_mnemos_env_url"
 [ -n "$_mnemos_env_root" ] && MNEMOS_CODEBASE_ROOT="$_mnemos_env_root"
 [ -n "$_mnemos_env_trigger" ] && MNEMOS_HOOK_TRIGGER="$_mnemos_env_trigger"
-unset _mnemos_env_url _mnemos_env_root _mnemos_env_trigger
+[ -n "$_mnemos_env_key" ] && MNEMOS_API_KEY="$_mnemos_env_key"
+unset _mnemos_env_url _mnemos_env_root _mnemos_env_trigger _mnemos_env_key
 
 MNEMOS_URL="${MNEMOS_URL:-http://localhost:8100}"
 MNEMOS_HOOK_TRIGGER="${MNEMOS_HOOK_TRIGGER:-pre-push}"
+
+# curl with the bearer header when MNEMOS_API_KEY is set (server running with
+# MNEMOS_AUTH_ENABLED=true). The header goes through a curl config on fd 3, so
+# the key never shows up in `ps` output.
+mnemos_curl() {
+    if [ -n "${MNEMOS_API_KEY:-}" ]; then
+        curl -K /dev/fd/3 "$@" 3<<EOF
+header = "Authorization: Bearer $MNEMOS_API_KEY"
+EOF
+    else
+        curl "$@"
+    fi
+}
+
 # Two lists, two costs:
 #   repos        memory extraction — one LLM call per push, so keep it to the
 #                repos where real decisions get made.
@@ -98,7 +114,7 @@ mnemos_extract() {
         return
     fi
 
-    curl -s -X POST "$MNEMOS_URL/api/memory/extract" \
+    mnemos_curl -s -X POST "$MNEMOS_URL/api/memory/extract" \
         -H "Content-Type: application/json" \
         -d "$(jq -n \
             --arg msg "$COMMIT_MSG" \
@@ -150,20 +166,20 @@ mnemos_push_file() {
         --arg fp "$_container" \
         --rawfile c "$_host" \
         '{collection: "mnemos_code", file_path: $fp, content: $c}' 2>/dev/null \
-    | curl -s -X POST "$MNEMOS_URL/api/index" \
+    | mnemos_curl -s -X POST "$MNEMOS_URL/api/index" \
         -H "Content-Type: application/json" \
         --data-binary @- >/dev/null 2>&1
 }
 
 mnemos_delete_file() {
-    curl -s -X DELETE "$MNEMOS_URL/api/index/mnemos_code$1" >/dev/null 2>&1
+    mnemos_curl -s -X DELETE "$MNEMOS_URL/api/index/mnemos_code$1" >/dev/null 2>&1
 }
 
 # Reindex everything under one repo in a single background server task.
 mnemos_bulk_reindex() {
     jq -n --arg p "$1" \
         '{collection: "mnemos_code", path: $p, full: true, workers: 4}' 2>/dev/null \
-    | curl -s -X POST "$MNEMOS_URL/api/reindex" \
+    | mnemos_curl -s -X POST "$MNEMOS_URL/api/reindex" \
         -H "Content-Type: application/json" \
         --data-binary @- >/dev/null 2>&1
 }

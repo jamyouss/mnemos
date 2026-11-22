@@ -34,3 +34,19 @@ def test_should_ignore():
     assert should_ignore("/data/codebase/myproject/services/core/main.go") is False
     assert should_ignore("/data/codebase/myproject/dist/bundle.js") is True
     assert should_ignore("/data/codebase/myproject/app.min.js") is True
+
+
+def test_flush_sends_the_api_key(monkeypatch):
+    from unittest.mock import patch
+
+    from watcher.main import DebouncedHandler
+
+    monkeypatch.setenv("MNEMOS_API_KEY", "secret-a")
+    router = PathRouter(codebase_root="/data/codebase", config_root="/data/claude-config")
+    handler = DebouncedHandler(router)
+    handler._pending["/data/codebase/p/main.go"] = ("mnemos_code", "p/main.go", "modified")
+
+    with patch("watcher.main.httpx.post") as mock_post:
+        handler._flush()
+
+    assert mock_post.call_args.kwargs["headers"] == {"Authorization": "Bearer secret-a"}

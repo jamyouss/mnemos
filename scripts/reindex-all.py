@@ -59,13 +59,19 @@ def log(msg: str, *, level: str = "info") -> None:
     print(f"{prefix}{msg}", flush=True)
 
 
+def _auth_headers() -> dict[str, str]:
+    """Bearer header for servers running with MNEMOS_AUTH_ENABLED=true."""
+    key = os.environ.get("MNEMOS_API_KEY", "").strip()
+    return {"Authorization": f"Bearer {key}"} if key else {}
+
+
 def post_json(url: str, payload: dict, timeout: int = 60) -> dict:
     data = json.dumps(payload).encode("utf-8")
     req = request.Request(
         url,
         data=data,
         method="POST",
-        headers={"content-type": "application/json"},
+        headers={"content-type": "application/json", **_auth_headers()},
     )
     with request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
@@ -136,7 +142,8 @@ def wait_for_count_growth(base_url: str, collection: str, *, min_seconds: int = 
     last_count = -1
     while time.monotonic() < deadline:
         try:
-            with request.urlopen(f"{base_url}/api/status", timeout=5) as resp:
+            status_req = request.Request(f"{base_url}/api/status", headers=_auth_headers())
+            with request.urlopen(status_req, timeout=5) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
             last_count = (
                 data.get("collections", {})
