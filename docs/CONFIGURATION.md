@@ -402,15 +402,29 @@ source file: it re-embeds the `content` stored in Qdrant into a copy named
 
 ```bash
 M=google/embeddinggemma-2
-# 1. Copy while the server keeps serving the old model (long: ~8 chunks/s on CPU).
+# 1. Copy while the server keeps serving the old model.
 docker compose exec rag-server python -m core.embedding_migration sync --model $M
 # 2. Stop the writers, catch up what changed meanwhile, switch.
 docker compose stop watcher ingester rag-server
 docker compose run --rm rag-server python -m core.embedding_migration sync --model $M
 docker compose run --rm rag-server python -m core.embedding_migration switch --model $M
-# 3. Restart on the new model.
+# 3. Restart on the new model (set EMBEDDING_MODEL in .env so it sticks).
 EMBEDDING_MODEL=$M docker compose up -d rag-server watcher   # + ingester if you run connectors
 ```
+
+Step 1 is the long one. Docker on a Mac has no GPU and EmbeddingGemma 2
+embeds ~3 chunks/s there (MiniLM: ~60/s), so ~40 000 chunks take hours. On
+Apple Silicon, run `sync` on the host instead, against the same Qdrant, with
+`--device mps` (~17 chunks/s, 44 min for 43 500 points). Use a Python env with
+`packages/core` and `sentence-transformers[image]>=6.1` installed:
+
+```bash
+QDRANT_HOST=localhost CODEBASE_PATH=/data/codebase \
+  python -m core.embedding_migration sync --model $M --device mps
+```
+
+`CODEBASE_PATH` must be the container path even on the host: it only strips
+the prefix stored in each point's `file_path` to build the document title.
 
 The first `switch` snapshots each original collection before deleting it
 (an alias cannot share a collection's name). Going back is `switch --model

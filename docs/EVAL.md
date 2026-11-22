@@ -103,8 +103,17 @@ the reranker sees.
 instead of ~800 ms. The 22 pre-existing questions alone move the same way
 (cand@20 13 → 16, MRR 0.231 → 0.413), so the 40 agent-written ones are not
 what carries it. The path prefix alone is noise for MiniLM. EmbeddingGemma 2
-costs at indexing: 8 chunks/s on CPU in float32 against 158/s for MiniLM, and
-0.6/s if the published bfloat16 weights are left as they are on CPU.
+costs at indexing: 8 chunks/s on a Mac CPU in float32 (3/s inside Docker,
+against 59/s for MiniLM), and 0.6/s if the published bfloat16 weights are
+left as they are on CPU.
+
+Confirmed on the live server after the migration (`EvalRunner`, 62 q, no
+reranker, semantic cache cold):
+
+| Live server | MRR | NDCG@5 | R@1 | R@5 | R@10 | p50 | p95 |
+|---|---|---|---|---|---|---|---|
+| MiniLM (image 0.6.0) | 0.265 | 0.308 | 0.129 | 0.460 | 0.581 | 48 ms | 88 ms |
+| EmbeddingGemma 2 | **0.546** | **0.597** | **0.290** | **0.790** | **0.879** | 128 ms | 172 ms |
 
 Reranker on its own (24-question set before the rebuild, 18 answerable, MiniLM):
 `bge-reranker-base` takes MRR 0.221 → 0.326 at 1.1 s per 20 candidates on CPU;
