@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -721,3 +723,41 @@ async def test_api_list_files_rejects_an_unknown_collection(app):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.get("/api/index/nope/files", params={"tag": "x"})
     assert response.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Concurrency
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_slow_extraction_does_not_block_search(app):
+    """A git hook's LLM extraction must not freeze agent searches.
+
+    Both calls meet at a barrier: it only opens if they run at the same time.
+    A handler blocking the event loop would hold the barrier alone until it
+    times out.
+    """
+    barrier = threading.Barrier(2, timeout=5)
+
+    def slow_extract(**_):
+        barrier.wait()
+        return []
+
+    def slow_search(**_):
+        barrier.wait()
+        return []
+
+    app.state.memory_extractor.extract.side_effect = slow_extract
+    app.state.search_service = MagicMock()
+    app.state.search_service.search.side_effect = slow_search
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        extract_resp, search_resp = await asyncio.gather(
+            client.post("/api/memory/extract", json={"commit_message": "feat: x", "diff": "d"}),
+            client.post("/api/search", json={"query": "auth"}),
+        )
+
+    assert extract_resp.status_code == 200
+    assert search_resp.status_code == 200

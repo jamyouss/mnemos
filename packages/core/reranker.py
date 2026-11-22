@@ -10,6 +10,7 @@ so the module is cheap to import when reranking is disabled.
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass
 from typing import Any
 
@@ -40,6 +41,9 @@ class CrossEncoderReranker:
         self._enabled = enabled
         self._device = device
         self._model = None  # lazy-loaded on first use
+        # Requests now run in parallel threads: without the lock, the first
+        # burst of concurrent searches would each load the ~568MB model.
+        self._load_lock = threading.Lock()
 
     @property
     def enabled(self) -> bool:
@@ -48,6 +52,12 @@ class CrossEncoderReranker:
     def _load(self):
         if self._model is not None:
             return self._model
+        with self._load_lock:
+            if self._model is None:
+                self._model = self._build()
+        return self._model
+
+    def _build(self):
         try:
             from rerankers import Reranker
         except ImportError as exc:
@@ -60,8 +70,7 @@ class CrossEncoderReranker:
         kwargs: dict = {"model_type": self._model_type}
         if self._device:
             kwargs["device"] = self._device
-        self._model = Reranker(self._model_name, **kwargs)
-        return self._model
+        return Reranker(self._model_name, **kwargs)
 
     def rerank(
         self,

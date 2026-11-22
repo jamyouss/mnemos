@@ -22,6 +22,10 @@ from core.collections import COLLECTIONS
 from core.llm import LLMError
 from server.config import settings
 
+# Handlers are plain `def` on purpose: every one of them calls blocking code
+# (torch inference, the sync Qdrant client, LLM calls). FastAPI runs `def`
+# handlers in its threadpool; an `async def` would run them on the event loop
+# and serialize every request behind the slowest one.
 api_router = APIRouter()
 
 _VALID_COLLECTIONS = {c.name for c in COLLECTIONS}
@@ -129,7 +133,7 @@ def _validate_path(file_path: str) -> Path:
 
 
 @api_router.post("/internal/reindex")
-async def internal_reindex(body: ReindexInternalRequest, request: Request):
+def internal_reindex(body: ReindexInternalRequest, request: Request):
     safe_path = _validate_path(body.file_path)
 
     if body.event == "deleted":
@@ -163,7 +167,7 @@ async def internal_reindex(body: ReindexInternalRequest, request: Request):
 
 
 @api_router.post("/api/index")
-async def push_index(body: IndexPushRequest, request: Request):
+def push_index(body: IndexPushRequest, request: Request):
     if body.collection not in _VALID_COLLECTIONS:
         raise HTTPException(status_code=400, detail=f"Unknown collection: {body.collection}")
     request.app.state.indexer.ensure_collection(body.collection)
@@ -179,7 +183,7 @@ async def push_index(body: IndexPushRequest, request: Request):
 
 
 @api_router.delete("/api/index/{collection}/{file_path:path}")
-async def delete_index(collection: str, file_path: str, request: Request):
+def delete_index(collection: str, file_path: str, request: Request):
     request.app.state.indexer.delete_file(
         file_path=file_path,
         collection=collection,
@@ -188,7 +192,7 @@ async def delete_index(collection: str, file_path: str, request: Request):
 
 
 @api_router.get("/api/index/{collection}/files")
-async def list_indexed_files(collection: str, tag: str, request: Request):
+def list_indexed_files(collection: str, tag: str, request: Request):
     """Files indexed under one tag, with their `file_mtime` — the sync state of a connector."""
     if collection not in _VALID_COLLECTIONS:
         raise HTTPException(status_code=400, detail=f"Unknown collection: {collection}")
@@ -202,7 +206,7 @@ async def list_indexed_files(collection: str, tag: str, request: Request):
 
 
 @api_router.post("/api/search")
-async def search(body: SearchRequest, request: Request):
+def search(body: SearchRequest, request: Request):
     results = request.app.state.search_service.search(
         query=body.query,
         collections=body.collections,
@@ -217,7 +221,7 @@ async def search(body: SearchRequest, request: Request):
 
 
 @api_router.post("/api/search-code")
-async def search_code(body: SearchCodeRequest, request: Request):
+def search_code(body: SearchCodeRequest, request: Request):
     results = request.app.state.search_service.search_code(
         query=body.query,
         language=body.language,
@@ -232,7 +236,7 @@ async def search_code(body: SearchCodeRequest, request: Request):
 
 
 @api_router.post("/api/search-skills")
-async def search_skills(body: SearchSkillsRequest, request: Request):
+def search_skills(body: SearchSkillsRequest, request: Request):
     results = request.app.state.search_service.search_skills(
         query=body.query,
         limit=body.limit,
@@ -250,7 +254,7 @@ class SearchMemoryRequest(BaseModel):
 
 
 @api_router.post("/api/search-memory")
-async def search_memory(body: SearchMemoryRequest, request: Request):
+def search_memory(body: SearchMemoryRequest, request: Request):
     results = request.app.state.search_service.search_memory(
         query=body.query,
         memory_type=body.memory_type,
@@ -310,7 +314,7 @@ def _is_blocklisted_for_golden(file_path: str) -> bool:
 
 
 @api_router.post("/api/eval/sample")
-async def eval_sample(body: EvalSampleRequest, request: Request):
+def eval_sample(body: EvalSampleRequest, request: Request):
     """Return up to `count` random chunks from a collection (for golden-set generation).
 
     Filters out chunks whose file_path looks like generated / build / backup
@@ -437,7 +441,7 @@ def _run_reindex(
 
 
 @api_router.post("/api/reindex")
-async def reindex(body: ReindexRequest, request: Request, background_tasks: BackgroundTasks):
+def reindex(body: ReindexRequest, request: Request, background_tasks: BackgroundTasks):
     indexer = request.app.state.indexer
 
     if body.recreate:
@@ -496,7 +500,7 @@ def _ensure_memory_collection(qdrant, vector_size: int = _MEMORY_VECTOR_SIZE) ->
 
 
 @api_router.get("/api/memory")
-async def list_memory(request: Request, status: Optional[str] = None):
+def list_memory(request: Request, status: Optional[str] = None):
     qdrant = request.app.state.qdrant
 
     scroll_filter = None
@@ -516,7 +520,7 @@ async def list_memory(request: Request, status: Optional[str] = None):
 
 
 @api_router.post("/api/memory")
-async def create_memory(body: MemoryCreateRequest, request: Request):
+def create_memory(body: MemoryCreateRequest, request: Request):
     deduplicator = request.app.state.deduplicator
 
     from core.models import ExtractedMemory
@@ -532,7 +536,7 @@ async def create_memory(body: MemoryCreateRequest, request: Request):
 
 
 @api_router.post("/api/memory/{mem_id}/review")
-async def review_memory(mem_id: str, body: MemoryReviewRequest, request: Request):
+def review_memory(mem_id: str, body: MemoryReviewRequest, request: Request):
     if body.action not in ("approve", "reject"):
         raise HTTPException(status_code=400, detail="action must be 'approve' or 'reject'")
 
@@ -572,7 +576,7 @@ async def review_memory(mem_id: str, body: MemoryReviewRequest, request: Request
 
 
 @api_router.post("/api/memory/extract")
-async def extract_memories(body: MemoryExtractRequest, request: Request):
+def extract_memories(body: MemoryExtractRequest, request: Request):
     extractor = request.app.state.memory_extractor
     deduplicator = request.app.state.deduplicator
 
@@ -647,7 +651,7 @@ def _tail_jsonl(path: Path, limit: int) -> list[dict]:
 
 
 @api_router.get("/api/query-log")
-async def query_log(limit: int = 500, intent: Optional[str] = None):
+def query_log(limit: int = 500, intent: Optional[str] = None):
     """Recent retrieval calls, newest last.
 
     `enabled` is reported separately from an empty list on purpose: a
@@ -663,7 +667,7 @@ async def query_log(limit: int = 500, intent: Optional[str] = None):
 
 
 @api_router.get("/api/eval/runs")
-async def eval_runs(tag: Optional[str] = None):
+def eval_runs(tag: Optional[str] = None):
     """Eval runs on disk: summaries by default, one full run when `tag` is set.
 
     Per-question `results` carry indexed file paths, so they are only returned
@@ -704,7 +708,7 @@ async def eval_runs(tag: Optional[str] = None):
 
 
 @api_router.get("/api/status")
-async def api_status(request: Request):
+def api_status(request: Request):
     qdrant = request.app.state.qdrant
     collections = qdrant.get_collections().collections
     index_info = {}

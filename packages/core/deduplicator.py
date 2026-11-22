@@ -1,6 +1,7 @@
 """Deduplicate memories by detecting similar entries and merging or replacing."""
 from __future__ import annotations
 
+import threading
 import time
 import uuid
 import logging
@@ -33,6 +34,9 @@ class Deduplicator:
         self._extractor = memory_extractor
         self._threshold = threshold
         self._strategy = strategy
+        # Search-then-write is not atomic: two concurrent writes of the same
+        # memory would both miss each other and insert twice.
+        self._write_lock = threading.Lock()
 
     def deduplicate_and_store(
         self, memory: ExtractedMemory, status: str = "approved"
@@ -47,6 +51,10 @@ class Deduplicator:
         reason, and lets retrieval ranking sort conflicting facts out at read
         time. `status` remains, for taking a bad memory back out.
         """
+        with self._write_lock:
+            return self._store(memory, status)
+
+    def _store(self, memory: ExtractedMemory, status: str) -> DeduplicationResult:
         vector = self._embeddings.embed(memory.content)
 
         try:

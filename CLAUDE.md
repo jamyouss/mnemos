@@ -165,7 +165,7 @@ Conventions tests :
 - Dataclasses ou Pydantic pour les modèles
 - Pas d'effets de bord dans les imports
 - Logging via `logging` standard (pas de `print`)
-- Async pour les handlers FastAPI, sync ailleurs sauf justification
+- Handlers FastAPI en `def` (pas `async def`) dès qu'ils appellent du bloquant (torch, client Qdrant sync, LLM) : FastAPI les passe au threadpool. Un `async def` bloquant fige l'event loop et sérialise toutes les requêtes. Côté MCP, le dispatch passe par `anyio.to_thread.run_sync`
 
 ### Architecture
 - `core/` est **pure logique** — pas d'I/O server ni HTTP

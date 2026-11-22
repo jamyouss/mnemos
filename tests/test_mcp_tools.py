@@ -1,5 +1,6 @@
 """Tests for MCP tool definitions."""
 import asyncio
+import threading
 from unittest.mock import MagicMock
 
 import mcp.types as types
@@ -311,3 +312,36 @@ def test_dispatch_search_forwards_tag_filters():
     assert kwargs["query"] == "anything"
     assert kwargs["tags_any"] == ["a"]
     assert kwargs["tags_all"] == ["b"]
+
+
+def test_dispatch_runs_concurrent_tool_calls_in_parallel():
+    """Two MCP sessions searching at once must not queue behind each other.
+
+    The barrier only opens if both searches are in flight together; a
+    dispatcher running the tool on the event loop would hold it alone until
+    it times out.
+    """
+    barrier = threading.Barrier(2, timeout=5)
+    search_service = MagicMock()
+
+    def slow_search(**_):
+        barrier.wait()
+        return []
+
+    search_service.search.side_effect = slow_search
+
+    async def two_calls():
+        return await asyncio.gather(*(
+            _dispatch_tool(
+                name="mnemos_search",
+                args={"query": q},
+                search_service=search_service,
+                indexer=MagicMock(),
+                qdrant_client=None,
+            )
+            for q in ("auth", "routing")
+        ))
+
+    results = asyncio.run(two_calls())
+
+    assert [r["results"] for r in results] == [[], []]

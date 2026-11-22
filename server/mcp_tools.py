@@ -1,8 +1,11 @@
 """MCP tool definitions for the RAG server."""
 from __future__ import annotations
 
+import functools
 import json
 from typing import Any
+
+import anyio
 
 import mcp.types as types
 from mcp.server import Server
@@ -381,6 +384,23 @@ def create_mcp_server(
 
 
 async def _dispatch_tool(
+    name: str,
+    args: dict[str, Any],
+    search_service: SearchService,
+    indexer: Indexer,
+    qdrant_client: QdrantClient | None,
+    deduplicator=None,
+) -> Any:
+    # Every tool blocks (torch, sync Qdrant, LLM): run it off the event loop so
+    # one slow call does not stall the other MCP sessions and REST requests.
+    return await anyio.to_thread.run_sync(
+        functools.partial(
+            _run_tool, name, args, search_service, indexer, qdrant_client, deduplicator
+        )
+    )
+
+
+def _run_tool(
     name: str,
     args: dict[str, Any],
     search_service: SearchService,
