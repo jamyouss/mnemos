@@ -93,6 +93,37 @@ Two things are deliberate:
 An empty screen states *why* it is empty: nothing searched, or nothing
 recorded. Those are different problems.
 
+Playground searches are left out of this screen and the dashboard unless the
+*Playground* switch is on: test traffic would move the very figures being read.
+
+### Playground
+
+Runs a search exactly as an agent would — any of the four endpoints, with
+their filters (tags suggested from what is indexed), limit and preview/full —
+and shows why each result came back.
+
+- **Trace.** Per stage: cache, embedding, retrieval per collection, grader,
+  rewriter variants, reranker, MMR, with timings. Per candidate: its rank on
+  the dense side, on the BM25 side, after fusion and after the reranker, its
+  grade, and whether it made the final list. A rank of `—` means outside that
+  side's top 20. This is the view for "why is this file first?" and "why is
+  the right one missing?".
+- **Bypass cache** (on by default, `/api/search` only) skips the semantic cache
+  both ways: the trace shows the live pipeline, and nothing is stored that
+  real traffic would then be served.
+- **Copy as curl / MCP call** replays the same search outside the dashboard,
+  without the Playground-only fields. The API key is never inlined; the curl
+  reads `$MNEMOS_API_KEY`.
+
+Every search endpoint accepts the same two fields for this:
+
+| Field | Effect |
+|-------|--------|
+| `trace: true` | Adds `"trace": {total_ms, stages, candidates}` to the response. Costs two extra Qdrant queries per collection — the fused query does not report where each hit stood on either side — so it is off by default |
+| `source: "playground"` | Tags the query-log entry. Only that value is accepted, so no client can write arbitrary labels into the log |
+
+`/api/search` also takes `use_cache: false`.
+
 ### Memories
 
 Browse, filter by type, tag, text and status, and reject in one click.

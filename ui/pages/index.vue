@@ -34,7 +34,8 @@ function refreshAll() {
 const now = ref(Math.floor(Date.now() / 1000))
 watch([period, () => log.data.value], () => (now.value = Math.floor(Date.now() / 1000)))
 const fromTs = computed(() => now.value - PERIODS[period.value].seconds)
-const entries = computed(() => since(log.data.value?.entries ?? [], fromTs.value))
+const playground = usePlaygroundTraffic()
+const entries = computed(() => playground.keep(since(log.data.value?.entries ?? [], fromTs.value)))
 const oldestLoaded = computed(() => log.data.value?.entries?.[0]?.ts)
 // The tail is capped server-side: if it starts after the window opens, the
 // window is only partly covered and the totals below undercount.
@@ -98,6 +99,9 @@ const fmtMs = (x: number) => (x >= 1000 ? `${(x / 1000).toFixed(1)} s` : `${Math
   <div class="space-y-6">
     <PageHeader title="Dashboard" description="What the index holds, how search behaves, and what is switched on.">
       <template #actions>
+        <label class="flex items-center gap-2 text-sm text-muted-foreground">
+          <Switch v-model="playground.include.value" /> Playground
+        </label>
         <ToggleGroup v-model="period" type="single" variant="outline" size="sm">
           <ToggleGroupItem v-for="(p, id) in PERIODS" :key="id" :value="id" :aria-label="p.label">{{ id }}</ToggleGroupItem>
         </ToggleGroup>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BrainIcon, LayoutDashboardIcon, SearchIcon, SlidersHorizontalIcon } from '@lucide/vue'
+import { BrainIcon, FlaskConicalIcon, LayoutDashboardIcon, SearchIcon, SlidersHorizontalIcon } from '@lucide/vue'
 
 const route = useRoute()
 
@@ -9,6 +9,7 @@ const groups = [
     items: [
       { to: '/', label: 'Dashboard', icon: LayoutDashboardIcon },
       { to: '/search', label: 'Search', icon: SearchIcon },
+      { to: '/playground', label: 'Playground', icon: FlaskConicalIcon },
     ],
   },
   {

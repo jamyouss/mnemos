@@ -32,6 +32,8 @@ export interface QueryLogEntry {
   grader?: boolean
   cache_hit?: boolean
   collections?: string[]
+  /** Set on test traffic ("playground"), which the dashboard leaves out by default. */
+  source?: string
 }
 
 export interface QueryLogResponse {
@@ -156,6 +158,44 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T
 }
 
+export type SearchTarget = 'search' | 'search-code' | 'search-skills' | 'search-memory'
+
+export interface TraceStage {
+  name: string
+  /** null for a step with nothing to time (cache miss, stage off). */
+  ms: number | null
+  [detail: string]: unknown
+}
+
+export interface TraceCandidate {
+  collection: string
+  file_path: string
+  symbol: string | null
+  /** 1-based rank on each side; null = outside that side's top 20. */
+  dense_rank: number | null
+  sparse_rank: number | null
+  fused_rank: number
+  fused_score: number
+  rerank_rank?: number
+  rerank_score?: number
+  grade?: string
+  via?: string | null
+  /** Absent when the candidate did not make the final list. */
+  final_rank?: number
+  final_score?: number
+}
+
+export interface SearchTrace {
+  total_ms: number
+  stages: TraceStage[]
+  candidates: TraceCandidate[]
+}
+
+export interface SearchResponse {
+  results: Array<Record<string, any>>
+  trace?: SearchTrace
+}
+
 export function useApi() {
   return {
     status: () => request<StatusResponse>('/api/status'),
@@ -199,5 +239,9 @@ export function useApi() {
 
     resetConfig: (key: string) =>
       request<ConfigResponse>(`/api/config/${encodeURIComponent(key)}`, { method: 'DELETE' }),
+
+    /** Any search endpoint, as the Playground calls it. */
+    runSearch: (target: SearchTarget, body: Record<string, unknown>) =>
+      request<SearchResponse>(`/api/${target}`, { method: 'POST', body: JSON.stringify(body) }),
   }
 }

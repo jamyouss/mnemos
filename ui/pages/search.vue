@@ -15,7 +15,8 @@ const { data, error, refresh, pending } = await useAsyncData(
   { watch: [intent] },
 )
 
-const entries = computed(() => data.value?.entries ?? [])
+const playground = usePlaygroundTraffic()
+const entries = computed(() => playground.keep(data.value?.entries ?? []))
 const stats = computed(() => latencyStats(entries.value))
 const shares = computed(() => rates(entries.value))
 const intents = computed(() => Object.entries(byIntent(entries.value)).map(([label, count]) => ({ label, count })))
@@ -31,7 +32,7 @@ const matching = computed(() => {
   return [...entries.value].reverse().filter((e) => !q || e.query.toLowerCase().includes(q))
 })
 const recent = computed(() => matching.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value))
-watch([filter, intent, pageSize], () => (page.value = 1))
+watch([filter, intent, pageSize, playground.include], () => (page.value = 1))
 
 const fmtMs = (x: number) => (x >= 1000 ? `${(x / 1000).toFixed(1)} s` : `${Math.round(x)} ms`)
 const fmtTime = (ts: number) => new Date(ts * 1000).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
@@ -42,6 +43,9 @@ const shortFile = (f?: string) => f?.replace('/data/codebase/', '') ?? '—'
   <div class="space-y-6">
     <PageHeader title="Search" description="The last 1,000 recorded searches, newest first.">
       <template #actions>
+        <label class="flex items-center gap-2 text-sm text-muted-foreground">
+          <Switch v-model="playground.include.value" /> Playground
+        </label>
         <Select v-model="intent">
           <SelectTrigger size="sm" class="w-44"><SelectValue /></SelectTrigger>
           <SelectContent>
