@@ -9,6 +9,8 @@ from server.settings_registry import FIELDS, FIELDS_BY_KEY, SECTIONS, coerce
 EDITABLE = {
     "mnemos_reranker_enabled": "live",
     "mnemos_reranker_model": "restart",
+    "mnemos_reranker_max_length": "restart",
+    "mnemos_fusion_dense_weight": "restart",
     "mnemos_mmr_enabled": "live",
     "mnemos_mmr_lambda": "live",
     "mnemos_grader_enabled": "live",
