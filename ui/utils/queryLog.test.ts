@@ -74,17 +74,28 @@ describe('scoreBuckets', () => {
 
   it('buckets on the range the scores span', () => {
     const rows = scoreBuckets(tops(0.55, 0.52, 0.91))
-    expect(rows[0]).toEqual({ bucket: '0.50–0.55', count: 1 })
-    expect(rows.find((r) => r.bucket === '0.55–0.60')?.count).toBe(1)
-    expect(rows.at(-1)).toEqual({ bucket: '0.90–0.95', count: 1 })
+    expect(rows[0]).toEqual({ bucket: '0.50 – 0.55', count: 1 })
+    expect(rows.find((r) => r.bucket === '0.55 – 0.60')?.count).toBe(1)
+    expect(rows.at(-1)).toEqual({ bucket: '0.90 – 0.95', count: 1 })
   })
 
   it('keeps scores above 1 in their own buckets instead of piling them into the last', () => {
     // Weighted RRF (dense weight 3.0) puts a normal top-1 above 1.
     const rows = scoreBuckets(tops(0.75, 1.08, 1.25, 1.25))
-    expect(rows.find((r) => r.bucket === '1.25–1.30')?.count).toBe(2)
-    expect(rows.find((r) => r.bucket === '1.05–1.10')?.count).toBe(1)
+    expect(rows.find((r) => r.bucket === '1.25 – 1.30')?.count).toBe(2)
+    expect(rows.find((r) => r.bucket === '1.05 – 1.10')?.count).toBe(1)
     expect(rows.reduce((n, r) => n + r.count, 0)).toBe(4)
+  })
+
+  it('keeps stray logits in edge buckets instead of stretching the axis', () => {
+    // A cross-encoder logit at ±8 among a hundred fused scores near 1.
+    const normal = Array.from({ length: 100 }, (_, i) => 0.6 + (i % 7) * 0.1)
+    const rows = scoreBuckets(tops(-8, ...normal, 8))
+    expect(rows[0]).toEqual({ bucket: '< 0.6', count: 1 })
+    expect(rows.at(-1)).toEqual({ bucket: '≥ 1.3', count: 1 })
+    // The hundred normal scores spread over several buckets, not one.
+    expect(rows.slice(1, -1).filter((r) => r.count > 0).length).toBe(7)
+    expect(rows.reduce((n, r) => n + r.count, 0)).toBe(102)
   })
 
   it('keeps empty buckets inside the range, so a gap reads as a gap', () => {
@@ -94,11 +105,11 @@ describe('scoreBuckets', () => {
 
   it('puts a score on a bucket edge in the bucket that starts there', () => {
     const rows = scoreBuckets(tops(0.1, 0.3, 1.1))
-    expect(rows.find((r) => r.bucket === '0.3–0.4')?.count).toBe(1)
+    expect(rows.find((r) => r.bucket === '0.3 – 0.4')?.count).toBe(1)
   })
 
   it('gives one bucket when every score is equal, none when there is no score', () => {
-    expect(scoreBuckets(tops(0.7, 0.7))).toEqual([{ bucket: '0.7–0.8', count: 2 }])
+    expect(scoreBuckets(tops(0.7, 0.7))).toEqual([{ bucket: '0.7 – 0.8', count: 2 }])
     expect(scoreBuckets([])).toEqual([])
   })
 })

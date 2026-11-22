@@ -85,10 +85,14 @@ function niceStep(raw: number): number {
  * Distribution of the top-1 score over the range the scores actually span.
  *
  * The scale is not fixed: it moves with the fusion weights and with the
- * reranker (weighted RRF puts top-1 above 1). A fixed 0–1 axis piled every
- * such score into its last bucket. Empty buckets inside the range are kept,
- * so a gap reads as a gap. There is no cutoff separating a good result from
- * a bad one — read the shape.
+ * reranker (weighted RRF puts top-1 above 1, cross-encoder logits go
+ * negative). A fixed 0–1 axis piled every such score into its last bucket.
+ *
+ * The range is the 2nd–98th percentile, not min–max: one stray logit at −8
+ * would otherwise stretch the axis until every normal score shares a single
+ * bucket. Scores outside it are counted in "< x" / "≥ y" edge buckets, never
+ * dropped. Empty buckets inside the range are kept, so a gap reads as a gap.
+ * There is no cutoff separating a good result from a bad one — read the shape.
  */
 export function scoreBuckets(entries: QueryLogEntry[], target = 10): Array<{ bucket: string; count: number }> {
   const tops = entries
@@ -96,22 +100,33 @@ export function scoreBuckets(entries: QueryLogEntry[], target = 10): Array<{ buc
     .filter((v): v is number => typeof v === 'number' && Number.isFinite(v))
   if (!tops.length) return []
 
-  const min = Math.min(...tops)
-  const max = Math.max(...tops)
-  const step = niceStep((max - min) / target)
+  let lo = percentile(tops, 2)
+  let hi = percentile(tops, 98)
+  if (lo === hi) [lo, hi] = [Math.min(...tops), Math.max(...tops)]
+  const step = niceStep((hi - lo) / target)
   // The epsilon absorbs float error (0.7 / 0.1 is 6.999…), so a score on an
   // edge lands in the bucket that starts there: 0.3 in 0.30–0.35, not 0.25–0.30.
-  const start = Math.floor(min / step + 1e-9) * step
+  const start = Math.floor(lo / step + 1e-9) * step
   const index = (v: number) => Math.floor((v - start) / step + 1e-9)
-  // As many decimals as the step has: 0.25 → "0.75–1.00", 0.05 → "0.50–0.55".
+  const n = index(hi) + 1
+  const end = start + n * step
+  // As many decimals as the step has: 0.25 → "0.75 – 1.00", 0.05 → "0.50 – 0.55".
   const decimals = (String(Number(step.toPrecision(12))).split('.')[1] ?? '').length
+  const fmt = (v: number) => v.toFixed(decimals)
 
-  const out = Array.from({ length: index(max) + 1 }, (_, i) => ({
-    bucket: `${(start + i * step).toFixed(decimals)}–${(start + (i + 1) * step).toFixed(decimals)}`,
+  const below = { bucket: `< ${fmt(start)}`, count: 0 }
+  const above = { bucket: `≥ ${fmt(end)}`, count: 0 }
+  const inRange = Array.from({ length: n }, (_, i) => ({
+    bucket: `${fmt(start + i * step)} – ${fmt(start + (i + 1) * step)}`,
     count: 0,
   }))
-  for (const score of tops) out[index(score)]!.count += 1
-  return out
+  for (const score of tops) {
+    const i = index(score)
+    if (i < 0) below.count += 1
+    else if (i >= n) above.count += 1
+    else inRange[i]!.count += 1
+  }
+  return [...(below.count ? [below] : []), ...inRange, ...(above.count ? [above] : [])]
 }
 
 export type Period = '24h' | '7d' | '30d'
