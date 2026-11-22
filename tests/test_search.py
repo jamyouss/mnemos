@@ -223,6 +223,18 @@ def test_search_code_returns_code_results(search_service, mock_qdrant):
     assert "project" not in results[0].metadata
 
 
+def test_search_code_keeps_the_source_url_of_pushed_code(search_service, mock_qdrant):
+    # The git connector's files link back to the forge; local files have no URL.
+    url = "https://github.com/acme/app/blob/main/app.go"
+    _mock_query_points(mock_qdrant, [
+        MagicMock(score=0.9, payload={"content": "x", "file_path": "git/github.com/acme~app/app.go", "source_url": url}),
+        MagicMock(score=0.8, payload={"content": "y", "file_path": "local/app.go"}),
+    ])
+    pushed, local = search_service.search_code(query="q", limit=5)
+    assert pushed.metadata["source_url"] == url
+    assert "source_url" not in local.metadata
+
+
 def test_search_skills(search_service, mock_qdrant):
     _mock_query_points(mock_qdrant, [
         MagicMock(

@@ -537,7 +537,11 @@ class SearchService:
                 score=hit.score,
                 chunk_type=hit.payload.get("chunk_type", ""),
                 collection="mnemos_code",
-                metadata={"tags": hit.payload.get("tags", [])},
+                # source_url: code pushed by the git connector links back to its forge.
+                metadata={
+                    "tags": hit.payload.get("tags", []),
+                    **({"source_url": hit.payload["source_url"]} if hit.payload.get("source_url") else {}),
+                },
                 language=hit.payload.get("language", ""),
                 symbol_name=hit.payload.get("symbol_name"),
                 package=hit.payload.get("package"),
