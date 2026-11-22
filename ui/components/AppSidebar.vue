@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BrainIcon, FlaskConicalIcon, LayoutDashboardIcon, SearchIcon, SlidersHorizontalIcon } from '@lucide/vue'
+import { BrainIcon, FlaskConicalIcon, LayoutDashboardIcon, PlugIcon, SearchIcon, SlidersHorizontalIcon } from '@lucide/vue'
 
 const route = useRoute()
 
@@ -16,6 +16,7 @@ const groups = [
     label: 'Manage',
     items: [
       { to: '/memories', label: 'Memories', icon: BrainIcon },
+      { to: '/connectors', label: 'Connectors', icon: PlugIcon },
       { to: '/config', label: 'Configuration', icon: SlidersHorizontalIcon },
     ],
   },

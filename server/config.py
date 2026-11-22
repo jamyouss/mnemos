@@ -80,6 +80,10 @@ class Settings(BaseSettings):
     # Index only what config/projects.yaml declares. Off by default so an
     # empty or absent config keeps indexing everything, as before.
     mnemos_index_only_declared_paths: bool = False
+    # Knowledge connectors file, edited from the dashboard's Connectors page
+    # (when MNEMOS_UI_CONFIG_WRITABLE) and read by `mnemos ingest serve`. Same
+    # variable name as the CLI's, since both mean the same file.
+    mnemos_connectors_config: str = "/app/config/connectors.yaml"
 
     class Config:
         env_prefix = ""

@@ -378,17 +378,19 @@ named by each source's `token_env`.
 
 | Var | Default | Description |
 |-----|--------|------|
-| `MNEMOS_CONNECTORS_CONFIG` | `config/connectors.yaml` | File read by `mnemos ingest run` and `mnemos ingest serve` |
+| `MNEMOS_CONNECTORS_CONFIG` | `config/connectors.yaml` (CLI) · `/app/config/connectors.yaml` (server) | File read by `mnemos ingest run` / `mnemos ingest serve`, and edited by the dashboard's Connectors page |
 
 `mnemos ingest serve` (the opt-in `ingester` compose service) syncs at
-start-up, then every `interval`, and on `SIGHUP`. See
+start-up, then every `interval`, when the file changes, and on `SIGHUP`. The
+server only edits the file (with `MNEMOS_UI_CONFIG_WRITABLE=true`); it never
+syncs and never sees the tokens. See
 [`CONNECTORS.md`](CONNECTORS.md#configuration-file).
 
 ## Dashboard overrides
 
 | Var | Default | Description |
 |-----|--------|------|
-| `MNEMOS_UI_CONFIG_WRITABLE` | `false` | Let the dashboard's Settings page (`PATCH`/`DELETE /api/config`) save overrides. Off → the page is read-only and writes answer `403` |
+| `MNEMOS_UI_CONFIG_WRITABLE` | `false` | Let the dashboard save: settings overrides (`PATCH`/`DELETE /api/config`) and `connectors.yaml` (`PUT /api/connectors`). Off → both pages are read-only and writes answer `403` |
 
 The dashboard edits a fixed set of settings — retrieval flags, cache, CRAG,
 query log, contextual chunking, dedup, LLM provider/model, declared-paths
@@ -414,10 +416,10 @@ How a change applies depends on the setting (`apply` in `GET /api/config`):
 `MNEMOS_LLM_API_KEY` is never returned by the API, not even masked: the page
 only learns whether it is set.
 
-> **Security.** `/api/config` sits behind the API key when
+> **Security.** `/api/config` and `/api/connectors` sit behind the API key when
 > `MNEMOS_AUTH_ENABLED=true`. With auth off and `MNEMOS_UI_CONFIG_WRITABLE=true`,
-> anyone who can reach port 8100 can change retrieval settings. Turn auth on
-> first on anything but a private machine.
+> anyone who can reach port 8100 can change retrieval settings and point the
+> ingester at other sites. Turn auth on first on anything but a private machine.
 
 ## Instance theme
 

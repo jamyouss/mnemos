@@ -7,6 +7,7 @@
  */
 
 import { createAuthedFetch, type AuthedFetch } from '../utils/auth'
+import type { ConnectorSource } from '../utils/connectors'
 
 export interface CollectionInfo {
   points_count: number
@@ -102,6 +103,16 @@ export interface ConfigResponse {
   applied?: string[]
 }
 
+export interface ConnectorsResponse {
+  path: string
+  writable: boolean
+  exists: boolean
+  interval: string | null
+  sources: ConnectorSource[]
+  /** What the ingester would reject; token variables are not checked here. */
+  problems: string[]
+}
+
 export interface MemoryStats {
   total: number
   by_status: Record<string, number>
@@ -131,7 +142,7 @@ export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
-    readonly body: { detail?: unknown; errors?: Record<string, string> } | null,
+    readonly body: { detail?: unknown; errors?: Record<string, string>; problems?: string[] } | null,
   ) {
     super(message)
   }
@@ -239,6 +250,11 @@ export function useApi() {
 
     resetConfig: (key: string) =>
       request<ConfigResponse>(`/api/config/${encodeURIComponent(key)}`, { method: 'DELETE' }),
+
+    connectors: () => request<ConnectorsResponse>('/api/connectors'),
+
+    saveConnectors: (body: { interval: string; sources: ConnectorSource[] }) =>
+      request<ConnectorsResponse>('/api/connectors', { method: 'PUT', body: JSON.stringify(body) }),
 
     /** Any search endpoint, as the Playground calls it. */
     runSearch: (target: SearchTarget, body: Record<string, unknown>) =>

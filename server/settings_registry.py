@@ -141,6 +141,9 @@ FIELDS: tuple[FieldSpec, ...] = (
               "Container path of the mounted Claude config (skills, docs).", "path"),
     FieldSpec("mnemos_projects_config_path", "indexing", "Projects config",
               "YAML mapping path prefixes to tags and ignore rules.", "path"),
+    FieldSpec("mnemos_connectors_config", "indexing", "Connectors config",
+              "Confluence, Jira and web sources; edited on the Connectors page, read by the ingester.",
+              "path"),
     # --- observability -----------------------------------------------------
     _live("mnemos_query_log_enabled", "observability", "Query log",
           "Append every retrieval call to a JSONL log; required by the Search screen.",

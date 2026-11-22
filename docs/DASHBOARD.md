@@ -148,6 +148,23 @@ API key is never sent to the browser. Saved values are overrides in
 `<state dir>/settings.json` and win over `.env`; the reset button next to an
 override removes it. Details: [CONFIGURATION.md](CONFIGURATION.md#dashboard-overrides).
 
+### Connectors
+
+Edits `config/connectors.yaml`: the sync `interval` and one card per
+Confluence, Jira or web source, with the fields of
+[CONNECTORS.md](CONNECTORS.md#configuration-file). Each card shows its scope
+tags (`jira:OPS`, `web:docs.example.com`) and how many chunks
+`mnemos_knowledge` holds under each — `not synced yet` is the answer to "did
+the ingester ever run?".
+
+The server validates with the ingester's own parser and refuses a file the
+ingester would reject, listing every problem; a hand-edited file that is
+already broken is flagged the same way on load. Tokens are never shown or
+sent: a card names the variable (`token_env`) that holds one in the
+ingester's environment. The ingester watches the file and resyncs within
+seconds of a save. Read-only unless `MNEMOS_UI_CONFIG_WRITABLE=true`; details
+in [CONNECTORS.md](CONNECTORS.md#from-the-dashboard).
+
 ### Appearance
 
 Two layers, the higher one winning:
@@ -166,7 +183,8 @@ Two layers, the higher one winning:
 | `MNEMOS_QUERY_LOG_ENABLED` | `false` | **Required for the Search screen.** Without it there is nothing to display |
 | `MNEMOS_QUERY_LOG_PATH` | `/data/state/query-log.jsonl` | Read by tailing, so the file can grow |
 | `MNEMOS_UI_PATH` | `/app/ui` | Absent → API only |
-| `MNEMOS_UI_CONFIG_WRITABLE` | `false` | Lets the Configuration page save overrides. See [CONFIGURATION.md](CONFIGURATION.md#dashboard-overrides) |
+| `MNEMOS_UI_CONFIG_WRITABLE` | `false` | Lets the Configuration page save overrides and the Connectors page save `connectors.yaml`. See [CONFIGURATION.md](CONFIGURATION.md#dashboard-overrides) |
+| `MNEMOS_CONNECTORS_CONFIG` | `/app/config/connectors.yaml` | File the Connectors page edits |
 | `MNEMOS_UI_THEME_PATH` | `/app/config/theme.css` | Instance theme served at `/theme.css`. See [CONFIGURATION.md](CONFIGURATION.md#instance-theme) |
 
 ## Not included
@@ -177,5 +195,6 @@ kept in the browser's localStorage (`mnemos.apiKey`).
 
 **No writing memories, no triggering a reindex.** The CLI and the MCP tools
 write; this screen prunes, which was the missing gesture. And a button that
-starts hours of LLM work needs guard rails that do not exist yet. Settings are
-the one exception, behind an opt-in flag.
+starts hours of LLM work needs guard rails that do not exist yet. Settings and
+the connectors file are the exceptions, behind an opt-in flag; the dashboard
+edits what the ingester syncs, it never runs a sync itself.

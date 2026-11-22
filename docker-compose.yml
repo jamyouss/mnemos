@@ -84,7 +84,10 @@ services:
       # Path -> tags mapping. Bind-mounted (not only baked into the image at
       # build time) so edits to config/projects.yaml apply on a restart,
       # without rebuilding or republishing the server image.
-      - ./config:/app/config:ro
+      # Writable because the dashboard's Connectors page saves
+      # config/connectors.yaml here (only with MNEMOS_UI_CONFIG_WRITABLE);
+      # the server writes no other file in it.
+      - ./config:/app/config
       # projects.yaml is mounted as a file, not left to the directory mount
       # above, so it can be a symlink into a dotfiles repo. Docker resolves a
       # bind-mount source on the host; a symlink *inside* a mounted directory
@@ -145,7 +148,9 @@ services:
     environment:
       MNEMOS_URL: http://rag-server:8100
     volumes:
-      - ./config/connectors.yaml:/app/config/connectors.yaml:ro
+      # The directory, not the file: the dashboard replaces connectors.yaml
+      # atomically, and a file bind mount would keep the old inode.
+      - ./config:/app/config:ro
     depends_on:
       rag-server:
         condition: service_healthy

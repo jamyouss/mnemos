@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from server.api import api_router
 from server.config import settings
 from server.config_api import config_router
+from server.connectors_api import connectors_router
 from server.settings_store import ConfigStore
 
 logger = logging.getLogger("mnemos.server")
@@ -228,6 +229,7 @@ def create_app() -> FastAPI:
 
     app.include_router(api_router)
     app.include_router(config_router)
+    app.include_router(connectors_router)
 
     # --- Dashboard ---
     # Mounted last and at the root, so it only catches what /mcp, /health and

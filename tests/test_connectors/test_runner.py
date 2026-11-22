@@ -7,7 +7,7 @@ import pytest
 
 import connectors.transport
 from connectors.config import ConnectorsConfig, JiraConfig, WebConfig
-from connectors.runner import run_sources, serve
+from connectors.runner import run_sources, serve, watch_file
 
 from .conftest import FakeMnemos, Router
 
@@ -164,3 +164,23 @@ def test_serve_keeps_running_when_a_run_raises():
     serve(run_once, interval=0.01, trigger=trigger, stop=stop)
 
     assert len(runs) == 2
+
+
+def test_watch_file_triggers_on_an_atomic_replace(tmp_path):
+    import os
+
+    path = tmp_path / "connectors.yaml"
+    path.write_text("interval: 6h\n")
+    trigger, stop = threading.Event(), threading.Event()
+    thread = threading.Thread(target=watch_file, args=(str(path), trigger, stop), kwargs={"poll": 0.01})
+    thread.start()
+    try:
+        assert not trigger.wait(0.05)  # nothing changed yet
+        # What the dashboard does: same size, possibly same mtime, new inode.
+        replacement = tmp_path / "next.yaml"
+        replacement.write_text("interval: 1h\n")
+        os.replace(replacement, path)
+        assert trigger.wait(2)
+    finally:
+        stop.set()
+        thread.join()

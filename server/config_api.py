@@ -20,7 +20,7 @@ class ConfigPatchRequest(BaseModel):
     values: dict[str, Any]
 
 
-def _writable_store(request: Request) -> ConfigStore:
+def writable_store(request: Request) -> ConfigStore:
     store: ConfigStore = request.app.state.config_store
     if not store.writable:
         raise HTTPException(status_code=403, detail=_READ_ONLY)
@@ -41,7 +41,7 @@ def get_config(request: Request):
 
 @config_router.patch("/api/config")
 def patch_config(body: ConfigPatchRequest, request: Request):
-    store = _writable_store(request)
+    store = writable_store(request)
     try:
         applied = store.update(body.values, request.app.state)
     except ConfigValidationError as exc:
@@ -56,7 +56,7 @@ def patch_config(body: ConfigPatchRequest, request: Request):
 
 @config_router.delete("/api/config/{key}")
 def delete_config_override(key: str, request: Request):
-    store = _writable_store(request)
+    store = writable_store(request)
     try:
         store.reset(key, request.app.state)
     except KeyError:

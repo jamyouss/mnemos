@@ -54,7 +54,9 @@ RUN pip install --upgrade pip && \
                 tree-sitter-typescript \
                 pydantic \
                 pyyaml \
-                httpx
+                httpx \
+                markdownify \
+                beautifulsoup4
 
 # Pre-download the fixed embedding model so the first MCP query is instant
 # instead of stalling 5-15s while sentence-transformers downloads weights.
@@ -92,6 +94,9 @@ COPY --from=builder /opt/venv /opt/venv
 # first query never blocks on a network fetch.
 COPY --from=builder /opt/hf_cache /opt/hf_cache
 COPY packages/core /app/packages/core
+# Imported, never run: the Connectors page validates connectors.yaml with the
+# ingester's own parser. On PYTHONPATH via /app/packages, no install needed.
+COPY packages/connectors /app/packages/connectors
 COPY server/ /app/server/
 COPY scripts/ /app/scripts/
 COPY config/ /app/config/

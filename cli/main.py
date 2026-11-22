@@ -1111,9 +1111,9 @@ def ingest_serve(config_path: str) -> None:
     """Sync at start-up, then every `interval` of the connectors file.
 
     Send SIGHUP to resync now (`docker compose kill -s HUP ingester`,
-    `kill -HUP 1` in a pod). The file is re-read before every run, so edited
-    sources apply on the next sync; a broken edit keeps the previous version.
-    A changed `interval` needs a restart.
+    `kill -HUP 1` in a pod); editing the file does too, within seconds. The
+    file is re-read before every run; a broken edit keeps the previous
+    version. A changed `interval` needs a restart.
     """
     import signal
     import threading
@@ -1142,11 +1142,19 @@ def ingest_serve(config_path: str) -> None:
 
     previous = {sig: signal.signal(sig, handler) for sig, handler in
                 ((signal.SIGHUP, resync), (signal.SIGTERM, shutdown))}
-    every = f"every {config.interval}s and " if config.interval else ""
-    console.print(f"Serving {len(config.sources)} source(s) from {config_path}: sync now, then {every}on SIGHUP.")
+    watcher = threading.Thread(
+        target=connectors.runner.watch_file, args=(config_path, trigger, stop), daemon=True
+    )
+    watcher.start()
+    every = f"every {config.interval}s, " if config.interval else ""
+    console.print(
+        f"Serving {len(config.sources)} source(s) from {config_path}: "
+        f"sync now, then {every}on file change and on SIGHUP."
+    )
     try:
         connectors.runner.serve(run_once, interval=config.interval, trigger=trigger, stop=stop)
     finally:
+        stop.set()
         for sig, handler in previous.items():
             signal.signal(sig, handler)
 

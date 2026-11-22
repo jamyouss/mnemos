@@ -5,6 +5,7 @@ long-lived service that syncs at start-up, then on a timer or on demand
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from collections.abc import Callable, Collection
 
@@ -90,3 +91,27 @@ def serve(
         if stop.is_set():
             return
         trigger.wait(timeout=interval)
+
+
+def watch_file(path: str, trigger: threading.Event, stop: threading.Event, *, poll: float = 5.0) -> None:
+    """Set `trigger` each time `path` changes, until `stop` is set.
+
+    Lets an edit — by hand or from the dashboard — sync within seconds rather
+    than at the next `interval`. The inode is part of the signature: the
+    dashboard replaces the file atomically, which may keep mtime and size.
+    """
+
+    def signature() -> tuple[int, int, int] | None:
+        try:
+            st = os.stat(path)
+        except OSError:
+            return None
+        return st.st_mtime_ns, st.st_size, st.st_ino
+
+    last = signature()
+    while not stop.wait(poll):
+        current = signature()
+        if current != last:
+            last = current
+            logger.info("%s changed: resyncing", path)
+            trigger.set()

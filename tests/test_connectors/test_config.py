@@ -153,3 +153,20 @@ def test_the_shipped_example_is_valid():
     example = Path(__file__).parents[2] / "config" / "connectors.example.yaml"
     config = load_config(example, environ={"CONFLUENCE_TOKEN": "x", "JIRA_TOKEN": "y"})
     assert {s.type for s in config.sources} == {"confluence", "jira", "web"}
+
+
+def test_without_an_environment_token_names_are_checked_but_not_resolved():
+    from connectors.config import parse_config
+
+    raw = {"sources": [
+        {"type": "jira", "url": "https://jira.example.com", "token_env": "UNSET_IN_THIS_PROCESS", "projects": ["OPS"]},
+    ]}
+    (tracker,) = parse_config(raw, environ=None).sources
+    assert tracker.token == ""
+
+    raw["sources"][0].pop("token_env")
+    with pytest.raises(ConfigError) as exc:
+        parse_config(raw, environ=None)
+    assert exc.value.problems == [
+        "sources[0] (jira): missing 'token_env' (name of the variable holding the token)"
+    ]

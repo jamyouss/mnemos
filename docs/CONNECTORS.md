@@ -83,6 +83,28 @@ The path is `--config`, else `MNEMOS_CONNECTORS_CONFIG`, else
 `config/connectors.yaml` (relative to the working directory; `/app/config/`
 in the `jamyouss/mnemos-cli` image).
 
+### From the dashboard
+
+The **Connectors** page of the dashboard (`http://localhost:8100/connectors`)
+edits the same file: one card per source, the `interval`, and per scope tag
+how many chunks `mnemos_knowledge` holds — `not synced yet` until the ingester
+has delivered something. The server validates with the ingester's own parser
+before writing, so a save the ingester would reject is refused with every
+problem listed, and nothing is written.
+
+- **Writing** needs `MNEMOS_UI_CONFIG_WRITABLE=true` on the server; otherwise
+  the page is read-only. The compose file mounts `./config` writable into
+  `rag-server` for this, and as a directory (not the file) into `ingester`, so
+  it sees the atomic replace.
+- **Tokens** never pass through the server: a card only names the variable
+  (`token_env`), set in the ingester's environment. The server cannot check
+  that it is set — the ingester reports a missing one at its next sync.
+- Saving **rewrites the file and drops its comments**. Through a symlink that
+  resolves inside the container, the target is written and the link kept.
+- The `ingester` picks the change up within seconds (it watches the file).
+  A new `interval` still needs `docker compose restart ingester`.
+- Removing a source stops its syncs; what it already indexed stays.
+
 ### Sync once: `mnemos ingest run`
 
 ```bash
@@ -97,16 +119,17 @@ the others still run; the command exits 1 if anything failed.
 ### Sync at start-up, then on a timer: `mnemos ingest serve`
 
 `serve` is the long-running form: it syncs every source as soon as it starts,
-then every `interval`, and immediately on `SIGHUP`:
+then every `interval`, when the file changes (checked every 5 s), and
+immediately on `SIGHUP`:
 
 | To… | Do |
 |---|---|
 | resync now | `docker compose kill -s HUP ingester` · `kubectl exec <pod> -c ingester -- kill -HUP 1` |
 | resync one source, or with `--full` | `mnemos ingest run --only <name> [--full]` from anywhere |
-| apply an edited `connectors.yaml` | nothing: the file is re-read before every sync (a broken edit is reported and the previous version kept). A changed `interval` needs a restart |
+| apply an edited `connectors.yaml` | nothing: the change triggers a sync within seconds, and the file is re-read before every sync (a broken edit is reported and the previous version kept). A changed `interval` needs a restart |
 | stop | `SIGTERM` — the service exits at once; an interrupted sync resumes at the next run |
 
-Without `interval`, `serve` syncs at start-up and on `SIGHUP` only.
+Without `interval`, `serve` syncs at start-up, on file change and on `SIGHUP` only.
 
 ## Confluence
 
