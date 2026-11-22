@@ -37,7 +37,7 @@ venv: ## Create the project venv [setup]
 	@$(BIN)/pip install --upgrade pip >/dev/null
 
 install: venv install-cli ## Create venv + install ALL packages in editable mode [setup]
-	@$(BIN)/pip install -e ./packages/core -e ./packages/eval >/dev/null
+	@$(BIN)/pip install -e ./packages/core -e ./packages/eval -e ./packages/connectors >/dev/null
 	@echo ""
 	@echo "Mnemos installed. Activate with:"
 	@echo "  source $(VENV)/bin/activate"

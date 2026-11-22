@@ -30,6 +30,9 @@ jobs:
           - name: watcher
             repo: jamyouss/mnemos-watcher
             dockerfile: watcher/Dockerfile
+          - name: cli
+            repo: jamyouss/mnemos-cli
+            dockerfile: cli/Dockerfile
         platform:
           - { name: amd64, runner: ubuntu-latest,   tag: linux/amd64 }
           - { name: arm64, runner: ubuntu-24.04-arm, tag: linux/arm64 }
@@ -110,6 +113,8 @@ jobs:
             repo: jamyouss/mnemos-server
           - name: watcher
             repo: jamyouss/mnemos-watcher
+          - name: cli
+            repo: jamyouss/mnemos-cli
 
     steps:
       - name: Download digests
@@ -171,6 +176,9 @@ jobs:
           - repo: jamyouss/mnemos-watcher
             short: "Filesystem watcher for mnemos-server — pushes incremental indexing as your code changes."
             readme: docs/DOCKERHUB-watcher.md
+          - repo: jamyouss/mnemos-cli
+            short: "Mnemos CLI + knowledge connectors — schedule Confluence, Jira and web ingestion as a cron job."
+            readme: docs/DOCKERHUB-cli.md
 
     steps:
       - name: Checkout

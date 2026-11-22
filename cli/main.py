@@ -905,5 +905,146 @@ def eval_list() -> None:
     console.print(table)
 
 
+# ---------------------------------------------------------------------------
+# ingest — external knowledge connectors (packages/connectors)
+# ---------------------------------------------------------------------------
+
+
+@cli.group()
+@click.option("-v", "--verbose", is_flag=True, help="Log every pushed/deleted document.")
+def ingest(verbose: bool) -> None:
+    """Pull Confluence, Jira and web content into mnemos_knowledge.
+
+    Each space / project / host is synced against what the server already
+    holds under its tag: changed documents are pushed, unchanged ones
+    skipped, vanished ones deleted. Exits non-zero if anything failed.
+    """
+    import logging
+
+    logging.basicConfig(
+        level=logging.INFO if verbose else logging.WARNING,
+        format="%(levelname)s %(name)s: %(message)s",
+    )
+
+
+_deployment_option = click.option(
+    "--deployment",
+    type=click.Choice(["auto", "cloud", "datacenter"]),
+    default="auto",
+    show_default=True,
+    help="Atlassian deployment. auto = cloud for *.atlassian.net hosts, datacenter otherwise.",
+)
+_tags_option = click.option(
+    "--tags", default=None, help="Comma-separated extra tags added to every document."
+)
+_full_option = click.option(
+    "--full", is_flag=True, default=False, help="Push every document, even unchanged ones."
+)
+
+
+def _run_sync(source: str, scopes: list[tuple[str, object]], tags: str | None, full: bool) -> None:
+    """Sync each ``(scope, items)`` pair, print the counts, exit 1 on any failure."""
+    from connectors.mnemos import MNEMOS_TIMEOUT, MnemosClient
+    from connectors.sync import sync_scope
+    from connectors.transport import make_client
+
+    user_tags = _parse_tags(tags) if tags else []
+    with make_client(headers=_headers(), timeout=MNEMOS_TIMEOUT) as http:
+        mnemos = MnemosClient(_base_url(), http)
+        results = [
+            sync_scope(mnemos, source=source, scope=scope, items=items, user_tags=user_tags, full=full)
+            for scope, items in scopes
+        ]
+
+    table = Table(title=f"Ingest {source}")
+    table.add_column("Scope", style="cyan")
+    for column in ("Pushed", "Unchanged", "Deleted", "Failed"):
+        table.add_column(column, justify="right")
+    table.add_column("Note")
+    for r in results:
+        note = f"[red]{r.error}[/red]" if r.error else ("[yellow]truncated, nothing deleted[/yellow]" if r.truncated else "")
+        failed = f"[red]{r.failed}[/red]" if r.failed else "0"
+        table.add_row(r.scope_tag, str(r.pushed), str(r.unchanged), str(r.deleted), failed, note)
+    console.print(table)
+    if not all(r.ok for r in results):
+        sys.exit(1)
+
+
+@ingest.command("confluence")
+@click.option("--url", envvar="CONFLUENCE_URL", required=True, help="Site URL, e.g. https://example.atlassian.net or https://wiki.example.com [env CONFLUENCE_URL].")
+@click.option("--user", envvar="CONFLUENCE_USER", default=None, help="Account email for Cloud (Basic auth). Omit to send the token as a Bearer PAT [env CONFLUENCE_USER].")
+@click.option("--token", envvar="CONFLUENCE_TOKEN", required=True, help="Cloud API token or Data Center personal access token [env CONFLUENCE_TOKEN].")
+@click.option("--space", "spaces", multiple=True, required=True, help="Space key to sync (repeatable).")
+@_deployment_option
+@_tags_option
+@_full_option
+def ingest_confluence(
+    url: str,
+    user: str | None,
+    token: str,
+    spaces: tuple[str, ...],
+    deployment: str,
+    tags: str | None,
+    full: bool,
+) -> None:
+    """Sync Confluence spaces (current pages) into mnemos_knowledge."""
+    from connectors.atlassian import auth_kwargs
+    from connectors.confluence import SOURCE, ConfluenceSource, scope_key
+    from connectors.transport import make_client
+
+    with make_client(**auth_kwargs(user, token)) as client:
+        source = ConfluenceSource(client, url, deployment=deployment)
+        _run_sync(SOURCE, [(scope_key(s), source.items(s)) for s in spaces], tags, full)
+
+
+@ingest.command("jira")
+@click.option("--url", envvar="JIRA_URL", required=True, help="Site URL, e.g. https://example.atlassian.net or https://jira.example.com [env JIRA_URL].")
+@click.option("--user", envvar="JIRA_USER", default=None, help="Account email for Cloud (Basic auth). Omit to send the token as a Bearer PAT [env JIRA_USER].")
+@click.option("--token", envvar="JIRA_TOKEN", required=True, help="Cloud API token or Data Center personal access token [env JIRA_TOKEN].")
+@click.option("--project", "projects", multiple=True, required=True, help="Project key to sync (repeatable).")
+@click.option("--jql", default=None, help="Extra JQL filter ANDed to `project = KEY` (no ORDER BY).")
+@_deployment_option
+@_tags_option
+@_full_option
+def ingest_jira(
+    url: str,
+    user: str | None,
+    token: str,
+    projects: tuple[str, ...],
+    jql: str | None,
+    deployment: str,
+    tags: str | None,
+    full: bool,
+) -> None:
+    """Sync Jira projects (issues + comments, no people) into mnemos_knowledge."""
+    from connectors.atlassian import auth_kwargs
+    from connectors.jira import SOURCE, JiraSource, scope_key
+    from connectors.transport import make_client
+
+    with make_client(**auth_kwargs(user, token)) as client:
+        source = JiraSource(client, url, deployment=deployment)
+        _run_sync(SOURCE, [(scope_key(p), source.items(p, jql)) for p in projects], tags, full)
+
+
+@ingest.command("web")
+@click.argument("urls", nargs=-1, required=True)
+@click.option("--max-pages", default=200, show_default=True, type=click.IntRange(min=1), help="Pages fetched per host before the crawl stops.")
+@_tags_option
+@_full_option
+def ingest_web(urls: tuple[str, ...], max_pages: int, tags: str | None, full: bool) -> None:
+    """Crawl web sites from seed URLs (same host, under the seed path) into mnemos_knowledge."""
+    from connectors.transport import make_client
+    from connectors.web import SOURCE, WebSource, group_seeds
+
+    try:
+        groups = group_seeds(urls)
+    except ValueError as exc:
+        raise click.BadParameter(str(exc), param_hint="URLS") from exc
+
+    with make_client() as client:
+        source = WebSource(client, max_pages=max_pages)
+        _run_sync(SOURCE, [(scope, source.items(scope, seeds)) for scope, seeds in groups.items()], tags, full)
+
+
 if __name__ == "__main__":
     cli()
