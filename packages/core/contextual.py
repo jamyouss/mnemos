@@ -67,6 +67,11 @@ class ContextualEnricher:
     def enabled(self) -> bool:
         return self._enabled
 
+    @enabled.setter
+    def enabled(self, value: bool) -> None:
+        # Read per file by the indexer: takes effect on the next indexing.
+        self._enabled = bool(value)
+
     def enrich(
         self,
         document_content: str,

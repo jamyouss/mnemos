@@ -14,6 +14,8 @@ from fastapi.staticfiles import StaticFiles
 
 from server.api import api_router
 from server.config import settings
+from server.config_api import config_router
+from server.settings_store import ConfigStore
 
 logger = logging.getLogger("mnemos.server")
 from core.embeddings import EmbeddingService
@@ -22,6 +24,9 @@ from core.indexer import Indexer
 
 def create_app() -> FastAPI:
     _session_manager_holder: dict[str, StreamableHTTPSessionManager] = {}
+    # Before anything reads `settings`: overrides from the dashboard take
+    # precedence over env vars, and the lifespan builds components from them.
+    config_store = ConfigStore.load(settings)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -182,6 +187,7 @@ def create_app() -> FastAPI:
         app.state.qdrant.close()
 
     app = FastAPI(title="Mnemos MCP Server", lifespan=lifespan)
+    app.state.config_store = config_store
 
     if settings.mnemos_auth_enabled:
         from server.auth import BearerAuthMiddleware, load_api_keys
@@ -208,7 +214,20 @@ def create_app() -> FastAPI:
     async def health():
         return {"status": "healthy"}
 
+    # Instance theme. Not under /api, so it stays outside auth (it is CSS),
+    # and registered before the root static mount, which would shadow it.
+    # Read per request: editing the file needs a reload, not a restart.
+    @app.get("/theme.css")
+    def theme_css():
+        try:
+            css = Path(settings.mnemos_ui_theme_path).read_text(encoding="utf-8")
+        except OSError:
+            # Absent is the normal case: no instance override.
+            css = ""
+        return Response(css, media_type="text/css", headers={"Cache-Control": "no-cache"})
+
     app.include_router(api_router)
+    app.include_router(config_router)
 
     # --- Dashboard ---
     # Mounted last and at the root, so it only catches what /mcp, /health and

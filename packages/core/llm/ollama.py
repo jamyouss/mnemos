@@ -74,3 +74,21 @@ class OllamaProvider:
             temperature=temperature,
             timeout=timeout,
         )
+
+    def ping(self, *, timeout: float = 3.0) -> None:
+        """`/api/tags`, and fail when the configured model is not pulled.
+
+        Reachable-but-empty is the silent failure the URL autodetection
+        warns about: every completion would 404.
+        """
+        try:
+            response = httpx.get(f"{self._base_url}/api/tags", timeout=timeout)
+            response.raise_for_status()
+            models = (response.json() or {}).get("models") or []
+        except (httpx.HTTPError, ValueError) as exc:
+            raise LLMError(f"ollama at {self._base_url} unreachable: {exc}") from exc
+
+        names = {m.get("name") for m in models if isinstance(m, dict)}
+        wanted = {self.model, f"{self.model}:latest"}
+        if not names & wanted:
+            raise LLMError(f"model {self.model!r} is not pulled on ollama at {self._base_url}")

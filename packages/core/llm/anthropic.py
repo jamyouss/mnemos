@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from core.llm.base import LLMError, Message
+from core.llm.base import LLMError, Message, describe_sdk_error
 
 logger = logging.getLogger("mnemos.llm.anthropic")
 
@@ -101,3 +101,10 @@ class AnthropicProvider:
             temperature=temperature,
             timeout=timeout,
         )
+
+    def ping(self, *, timeout: float = 3.0) -> None:
+        """`GET /v1/models`: authenticates the key, generates nothing."""
+        try:
+            self._client.with_options(timeout=timeout, max_retries=0).models.list(limit=1)
+        except Exception as exc:
+            raise LLMError(f"anthropic /v1/models failed: {describe_sdk_error(exc)}") from exc

@@ -33,6 +33,10 @@ services:
       CLAUDE_CONFIG_PATH: /data/claude-config
       MNEMOS_AUTH_ENABLED: "false"
       MNEMOS_STATE_DIR: /data/state
+      # Let the dashboard's config page write overrides to
+      # /data/state/settings.json. With auth off, anyone reaching :8100 can
+      # then change retrieval settings.
+      MNEMOS_UI_CONFIG_WRITABLE: "${MNEMOS_UI_CONFIG_WRITABLE:-false}"
       # Index only what config/projects.yaml declares. The watcher walks the
       # whole codebase mount and has no idea which repos you meant to index,
       # so this is the only place that scope can be enforced.

@@ -137,6 +137,22 @@ class SearchService:
             else RrfQuery(rrf=Rrf(weights=[dense_weight, 1.0]))
         )
 
+    @property
+    def mmr_enabled(self) -> bool:
+        return self._mmr_enabled
+
+    @mmr_enabled.setter
+    def mmr_enabled(self, value: bool) -> None:
+        self._mmr_enabled = bool(value)
+
+    @property
+    def mmr_lambda(self) -> float:
+        return self._mmr_lambda
+
+    @mmr_lambda.setter
+    def mmr_lambda(self, value: float) -> None:
+        self._mmr_lambda = float(value)
+
     # ------------------------------------------------------------------
     # Core hybrid retrieval — used by every public search method.
     # ------------------------------------------------------------------

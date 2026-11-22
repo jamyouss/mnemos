@@ -99,13 +99,25 @@ def relative_to_root(file_path: str, codebase_root: str) -> str:
 # create the keyword payload index on those at startup so the filter scales.
 TAGGED_COLLECTIONS = ("mnemos_code", "mnemos_memory", "mnemos_knowledge")
 
+# Chunk metadata the dashboard counts with Qdrant's facet API, which refuses
+# a field without a payload index. Indexed on every collection: an index on a
+# field a collection never carries (memories have no `language`) stays empty.
+CHUNK_FACET_FIELDS = ("language", "chunk_type")
+
+
+def facet_fields(collection_name: str) -> tuple[str, ...]:
+    """Payload fields of `collection_name` that carry a keyword index."""
+    tags = (TAGS_PAYLOAD_FIELD,) if collection_name in TAGGED_COLLECTIONS else ()
+    return tags + CHUNK_FACET_FIELDS
+
 
 def create_hybrid_collection(
     qdrant: QdrantClient, name: str, vector_size: int, tagged: bool
 ) -> None:
     """Create `name` with the hybrid schema (dense + sparse BM25).
 
-    `tagged` adds a keyword payload index on `tags` so tag filters stay O(log n).
+    `tagged` adds a keyword payload index on `tags` so tag filters stay O(log n);
+    the chunk facet fields are indexed on every collection.
     """
     qdrant.create_collection(
         collection_name=name,
@@ -116,21 +128,22 @@ def create_hybrid_collection(
             SPARSE_VECTOR_NAME: SparseVectorParams(modifier=Modifier.IDF),
         },
     )
-    if tagged:
-        _ensure_tags_payload_index(qdrant, name)
+    _ensure_payload_indexes(qdrant, name, tagged)
 
 
-def _ensure_tags_payload_index(qdrant: QdrantClient, name: str) -> None:
-    """Idempotently create a keyword payload index on the `tags` field."""
-    try:
-        qdrant.create_payload_index(
-            collection_name=name,
-            field_name=TAGS_PAYLOAD_FIELD,
-            field_schema=KeywordIndexParams(type=PayloadSchemaType.KEYWORD),
-        )
-    except Exception:
-        # Qdrant raises if the index already exists; that's fine.
-        pass
+def _ensure_payload_indexes(qdrant: QdrantClient, name: str, tagged: bool) -> None:
+    """Idempotently create the keyword payload indexes `name` needs."""
+    fields = ((TAGS_PAYLOAD_FIELD,) if tagged else ()) + CHUNK_FACET_FIELDS
+    for field in fields:
+        try:
+            qdrant.create_payload_index(
+                collection_name=name,
+                field_name=field,
+                field_schema=KeywordIndexParams(type=PayloadSchemaType.KEYWORD),
+            )
+        except Exception:
+            # Qdrant raises if the index already exists; that's fine.
+            pass
 
 
 def dense_vector_size(qdrant: QdrantClient, name: str) -> int:
@@ -201,8 +214,8 @@ class Indexer:
             create_hybrid_collection(
                 self._qdrant, collection_name, self._embeddings.dimension, tagged
             )
-        elif tagged:
-            _ensure_tags_payload_index(self._qdrant, collection_name)
+        else:
+            _ensure_payload_indexes(self._qdrant, collection_name, tagged)
 
     def is_hybrid(self, collection_name: str) -> bool:
         """Return True if the collection already uses named hybrid (dense + sparse) vectors."""

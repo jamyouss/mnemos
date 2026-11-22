@@ -72,6 +72,10 @@ class DocumentGrader:
     def enabled(self) -> bool:
         return self._enabled
 
+    @enabled.setter
+    def enabled(self, value: bool) -> None:
+        self._enabled = bool(value)
+
     def grade(
         self,
         query: str,

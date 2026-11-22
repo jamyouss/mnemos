@@ -27,6 +27,7 @@ data/claude-config/*
 config/projects.yaml
 config/tenants.yaml
 config/connectors.yaml
+config/theme.css
 
 # Dashboard build artefacts
 ui/node_modules/

@@ -38,6 +38,22 @@ class Deduplicator:
         # memory would both miss each other and insert twice.
         self._write_lock = threading.Lock()
 
+    @property
+    def threshold(self) -> float:
+        return self._threshold
+
+    @threshold.setter
+    def threshold(self, value: float) -> None:
+        self._threshold = float(value)
+
+    @property
+    def strategy(self) -> str:
+        return self._strategy
+
+    @strategy.setter
+    def strategy(self, value: str) -> None:
+        self._strategy = value
+
     def deduplicate_and_store(
         self, memory: ExtractedMemory, status: str = "approved"
     ) -> DeduplicationResult:

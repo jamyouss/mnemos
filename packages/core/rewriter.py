@@ -85,9 +85,27 @@ class QueryRewriter:
     def enabled(self) -> bool:
         return self._enabled
 
+    @enabled.setter
+    def enabled(self, value: bool) -> None:
+        self._enabled = bool(value)
+
     @property
     def strategy(self) -> Strategy:
         return self._strategy
+
+    @strategy.setter
+    def strategy(self, value: Strategy) -> None:
+        if value not in _PROMPTS:
+            raise ValueError(f"unknown rewriter strategy {value!r}; expected one of {sorted(_PROMPTS)}")
+        self._strategy = value
+
+    @property
+    def max_variants(self) -> int:
+        return self._max_variants
+
+    @max_variants.setter
+    def max_variants(self, value: int) -> None:
+        self._max_variants = max(1, int(value))
 
     def rewrite(self, query: str) -> list[str]:
         """Return up to `max_variants` alternative queries.

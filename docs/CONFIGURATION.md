@@ -2,7 +2,8 @@
 
 Every Mnemos knob is an **environment variable**, passed through Docker
 Compose. The full surface lives in [`.env.example`](../.env.example); this
-doc explains what each variable does and when to flip it.
+doc explains what each variable does and when to flip it. A subset can also
+be changed from the dashboard, see [Dashboard overrides](#dashboard-overrides).
 
 ## Defaults at a glance
 
@@ -336,6 +337,7 @@ that never source a shell profile, where an exported variable would be lost.
 | `MNEMOS_QUERY_LOG_ENABLED` | `false` | Append every retrieval call to a JSONL log. **Required by the dashboard's Search screen** — without it there is nothing to display |
 | `MNEMOS_EVAL_RUNS_PATH` | `/app/evals/runs` | Where the dashboard reads eval runs. Bind-mounted read-only: runs are local artefacts, never baked into the image |
 | `MNEMOS_UI_PATH` | `/app/ui` | Built dashboard. Absent → the server serves the API alone |
+| `MNEMOS_UI_THEME_PATH` | `/app/config/theme.css` | Instance stylesheet served at `/theme.css`, see [Instance theme](#instance-theme) |
 | `MNEMOS_QUERY_LOG_PATH` | `/data/state/query-log.jsonl` | Log location (inside the container) |
 
 Each line is a flat JSON object:
@@ -382,9 +384,63 @@ named by each source's `token_env`.
 start-up, then every `interval`, and on `SIGHUP`. See
 [`CONNECTORS.md`](CONNECTORS.md#configuration-file).
 
+## Dashboard overrides
+
+| Var | Default | Description |
+|-----|--------|------|
+| `MNEMOS_UI_CONFIG_WRITABLE` | `false` | Let the dashboard's Settings page (`PATCH`/`DELETE /api/config`) save overrides. Off → the page is read-only and writes answer `403` |
+
+The dashboard edits a fixed set of settings — retrieval flags, cache, CRAG,
+query log, contextual chunking, dedup, LLM provider/model, declared-paths
+indexing. Everything else (API key, URLs, Qdrant, paths, auth, the embedding
+model) stays env-only. `server/settings_registry.py` is the list.
+
+**Precedence: override > env var > default.** Overrides are stored as
+`{key: value}` JSON in `$MNEMOS_STATE_DIR/settings.json` (the `rag_state`
+volume, `/data/state/settings.json` in compose), written atomically. They are
+applied every time the server starts, so an override keeps winning over the
+env var in `.env` until it is removed — from the page, or by deleting the key
+from the file. A corrupt file, or a key that is unknown or not editable, is
+logged as a warning and ignored; the server still boots.
+
+How a change applies depends on the setting (`apply` in `GET /api/config`):
+
+| `apply` | Effect |
+|---------|--------|
+| `live` | The running components switch at once, no restart |
+| `restart` | Saved, effective at the next start; listed in `pending_restart` until then |
+| `reindex` | Needs a re-embedding (the embedding model — env only, see below) |
+
+`MNEMOS_LLM_API_KEY` is never returned by the API, not even masked: the page
+only learns whether it is set.
+
+> **Security.** `/api/config` sits behind the API key when
+> `MNEMOS_AUTH_ENABLED=true`. With auth off and `MNEMOS_UI_CONFIG_WRITABLE=true`,
+> anyone who can reach port 8100 can change retrieval settings. Turn auth on
+> first on anything but a private machine.
+
+## Instance theme
+
+`GET /theme.css` serves the file at `MNEMOS_UI_THEME_PATH`
+(`/app/config/theme.css`, i.e. `config/theme.css` through the compose bind
+mount) with `Cache-Control: no-cache`. No file → an empty stylesheet, i.e. the
+built-in theme. The route is outside `/api`, so it needs no API key.
+
+```bash
+cp config/theme.example.css config/theme.css   # gitignored
+```
+
+[`config/theme.example.css`](../config/theme.example.css) lists every CSS
+variable the dashboard reads (`--background`, `--primary`, `--radius`,
+`--chart-1..5`, `--sidebar-*` …), in oklch, with a `:root` block for the light
+theme and `.dark` for the dark one. Keep only the variables you change. The
+file is read on every request: reload the page, no restart.
+
 ## How to apply a config change
 
-For most flags it's just an env var + a container restart:
+For most flags it's just an env var + a container restart (or the dashboard,
+for [the editable ones](#dashboard-overrides) — an override in
+`settings.json` wins over the env var):
 
 ```bash
 MNEMOS_RERANKER_ENABLED=true docker compose up -d rag-server

@@ -762,3 +762,177 @@ async def test_slow_extraction_does_not_block_search(app):
 
     assert extract_resp.status_code == 200
     assert search_resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Dashboard: memory stats, pagination, facets, dependency health
+# ---------------------------------------------------------------------------
+
+
+def _paged_scroll(payloads: list[dict]):
+    """A Qdrant scroll over `payloads`, honouring `limit` and `offset`."""
+    calls = []
+
+    def scroll(collection_name, scroll_filter=None, limit=10, offset=None,
+               with_payload=True, with_vectors=False):
+        calls.append({"limit": limit, "offset": offset, "with_payload": with_payload,
+                      "with_vectors": with_vectors})
+        start = offset or 0
+        page = payloads[start:start + limit]
+        nxt = start + limit if start + limit < len(payloads) else None
+        return [MagicMock(payload=p) for p in page], nxt
+
+    return scroll, calls
+
+
+def _memories(n: int) -> list[dict]:
+    types = ["decision", "pattern", "lesson"]
+    return [
+        {
+            "id": f"m{i}",
+            "status": "approved" if i % 4 else "pending",
+            "memory_type": types[i % 3],
+            "created_at": f"2026-11-{1 + i % 3:02d}T23:30:00+00:00",
+        }
+        for i in range(n)
+    ]
+
+
+@pytest.mark.anyio
+async def test_memory_stats_aggregates_every_page(app):
+    payloads = _memories(1203)
+    payloads.append({"id": "x", "status": "rejected", "memory_type": "note",
+                     "created_at": "2026-11-05T01:00:00+02:00"})   # 2026-11-04 in UTC
+    payloads.append({"id": "y"})                                   # legacy, no fields
+    scroll, calls = _paged_scroll(payloads)
+    app.state.qdrant.scroll.side_effect = scroll
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        body = (await client.get("/api/memory/stats")).json()
+
+    assert body["total"] == 1205
+    assert body["by_status"] == {"pending": 301, "approved": 902, "rejected": 1, "unknown": 1}
+    assert body["by_type"] == {"decision": 401, "pattern": 401, "lesson": 401, "note": 1, "unknown": 1}
+    assert body["by_day"] == {"2026-11-01": 401, "2026-11-02": 401, "2026-11-03": 401, "2026-11-04": 1}
+    assert len(calls) > 1
+    assert all(c["with_vectors"] is False for c in calls)
+    assert all(c["with_payload"] == ["status", "memory_type", "created_at"] for c in calls)
+
+
+@pytest.mark.anyio
+async def test_memory_list_paginates_beyond_100(app):
+    scroll, _ = _paged_scroll(_memories(1203))
+    app.state.qdrant.scroll.side_effect = scroll
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        default = (await client.get("/api/memory")).json()["entries"]
+        everything = (await client.get("/api/memory", params={"limit": 5000})).json()["entries"]
+        small = (await client.get("/api/memory", params={"limit": 150})).json()["entries"]
+        too_big = await client.get("/api/memory", params={"limit": 10001})
+
+    assert len(default) == 1000
+    assert len(everything) == 1203
+    assert [e["id"] for e in small] == [f"m{i}" for i in range(150)]
+    assert too_big.status_code == 422
+
+
+@pytest.mark.anyio
+async def test_memory_list_keeps_the_status_filter_on_every_page(app):
+    filters = []
+
+    def scroll(collection_name, scroll_filter=None, limit=10, offset=None, **_):
+        filters.append(scroll_filter)
+        return ([MagicMock(payload={"id": "a"})], 1) if offset is None else ([], None)
+
+    app.state.qdrant.scroll.side_effect = scroll
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        await client.get("/api/memory", params={"status": "pending"})
+
+    assert len(filters) == 2
+    assert all(f.must[0].match.value == "pending" for f in filters)
+
+
+@pytest.mark.anyio
+async def test_facets_counts_a_payload_field(app):
+    from qdrant_client.models import FacetResponse, FacetValueHit
+
+    app.state.qdrant.facet.return_value = FacetResponse(hits=[
+        FacetValueHit(value="acme", count=42), FacetValueHit(value="webshop", count=7),
+    ])
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/api/index/facets",
+                                params={"collection": "mnemos_code", "field": "tags", "limit": 5})
+
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "collection": "mnemos_code",
+        "field": "tags",
+        "counts": [{"value": "acme", "count": 42}, {"value": "webshop", "count": 7}],
+    }
+    app.state.qdrant.facet.assert_called_once_with(collection_name="mnemos_code", key="tags", limit=5)
+
+
+@pytest.mark.anyio
+async def test_facets_rejects_unknown_collection_and_fields(app):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        unknown = await client.get("/api/index/facets", params={"collection": "nope", "field": "tags"})
+        not_allowed = await client.get("/api/index/facets",
+                                       params={"collection": "mnemos_code", "field": "file_path"})
+        not_indexed = await client.get("/api/index/facets",
+                                       params={"collection": "mnemos_docs", "field": "tags"})
+
+    assert unknown.status_code == 404
+    assert not_allowed.status_code == 400
+    assert not_indexed.status_code == 400
+    app.state.qdrant.facet.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_health_deps_reports_both_dependencies(app):
+    llm = MagicMock()
+    llm.name, llm.model = "ollama", "qwen2.5:7b"
+    app.state.llm = llm
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        body = (await client.get("/api/health/deps")).json()
+        again = (await client.get("/api/health/deps")).json()
+
+    assert body["qdrant"]["ok"] is True and body["qdrant"]["error"] is None
+    assert isinstance(body["qdrant"]["latency_ms"], float)
+    llm_body = body["llm"]
+    assert llm_body["ok"] is True
+    assert (llm_body["provider"], llm_body["model"]) == ("ollama", "qwen2.5:7b")
+    assert llm_body["error"] is None and llm_body["checked_at"]
+    llm.ping.assert_called_once_with(timeout=3.0)  # second call hit the 30 s cache
+    assert again["llm"] == llm_body
+
+
+@pytest.mark.anyio
+async def test_health_deps_failure_never_leaks_the_key(app, monkeypatch):
+    from core.llm import LLMError
+    from server.api import settings
+
+    secret = "sk-SENTINEL-health-9999"
+    monkeypatch.setattr(settings, "mnemos_llm_api_key", secret)
+    llm = MagicMock()
+    llm.name, llm.model = "openai", "gpt-4o-mini"
+    llm.ping.side_effect = LLMError(f"auth failed for {secret}")
+    app.state.llm = llm
+    app.state.qdrant.get_collections.side_effect = ConnectionError("qdrant down")
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/api/health/deps")
+
+    body = resp.json()
+    assert resp.status_code == 200
+    assert body["qdrant"]["ok"] is False and "qdrant down" in body["qdrant"]["error"]
+    assert body["llm"]["ok"] is False and body["llm"]["error"]
+    assert isinstance(body["llm"]["latency_ms"], float)
+    assert "SENTINEL" not in resp.text

@@ -51,6 +51,11 @@ class CrossEncoderReranker:
     def enabled(self) -> bool:
         return self._enabled
 
+    @enabled.setter
+    def enabled(self, value: bool) -> None:
+        # The model stays lazy: enabling loads it on the next rerank call.
+        self._enabled = bool(value)
+
     def _load(self):
         if self._model is not None:
             return self._model

@@ -72,3 +72,23 @@ def test_logger_extra_fields_are_merged(tmp_path: Path):
     entries = _read(path)
     assert entries[0]["variant"] == "rerank_on"
     assert entries[0]["cache_hit"] is False
+
+
+def test_enabling_live_creates_the_log_dir(tmp_path: Path):
+    path = tmp_path / "nested" / "log.jsonl"
+    q = QueryLogger(path, enabled=False)
+    assert not path.parent.exists()
+
+    q.enabled = True
+    q.log("hello", [], 1.0)
+
+    assert q.enabled is True
+    assert len(_read(path)) == 1
+
+
+def test_enabling_stays_off_when_the_dir_cannot_be_created(tmp_path: Path):
+    blocker = tmp_path / "file"
+    blocker.write_text("")
+    q = QueryLogger(blocker / "sub" / "log.jsonl", enabled=False)
+    q.enabled = True
+    assert q.enabled is False

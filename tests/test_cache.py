@@ -144,3 +144,17 @@ def test_cache_invalidate_recreates_collection():
     c.invalidate()
     qdrant.delete_collection.assert_called_once()
     qdrant.create_collection.assert_called_once()
+
+
+def test_cache_enabled_live_creates_the_collection():
+    qdrant = _mock_qdrant()
+    c = SemanticCache(qdrant, _mock_embed_service(), enabled=False)
+    qdrant.create_collection.assert_not_called()
+
+    c.enabled = True
+    c.threshold = 0.8
+    c.ttl_seconds = 5
+
+    assert c.enabled is True
+    qdrant.create_collection.assert_called_once()
+    assert (c.threshold, c.ttl_seconds) == (0.8, 5)

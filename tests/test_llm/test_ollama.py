@@ -102,3 +102,39 @@ def test_ollama_raises_on_malformed_response(monkeypatch):
     llm = OllamaProvider(base_url="http://localhost:11434", model="m")
     with pytest.raises(LLMError, match="malformed payload"):
         llm.complete([{"role": "user", "content": "x"}])
+
+
+def _patch_get(monkeypatch, handler):
+    monkeypatch.setattr(
+        httpx,
+        "get",
+        lambda url, timeout: httpx.Client(transport=_make_transport(handler)).get(url, timeout=timeout),
+    )
+
+
+def test_ollama_ping_lists_tags_without_generating(monkeypatch):
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        return httpx.Response(200, json={"models": [{"name": "qwen2.5:7b"}, {"name": "mistral:latest"}]})
+
+    _patch_get(monkeypatch, handler)
+    OllamaProvider(base_url="http://localhost:11434/", model="qwen2.5:7b").ping()
+    OllamaProvider(base_url="http://localhost:11434", model="mistral").ping()
+    assert seen == ["/api/tags", "/api/tags"]
+
+
+def test_ollama_ping_fails_when_the_model_is_not_pulled(monkeypatch):
+    _patch_get(monkeypatch, lambda request: httpx.Response(200, json={"models": []}))
+    with pytest.raises(LLMError, match="not pulled"):
+        OllamaProvider(base_url="http://localhost:11434", model="llama3.1:8b").ping()
+
+
+def test_ollama_ping_fails_when_unreachable(monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request)
+
+    _patch_get(monkeypatch, handler)
+    with pytest.raises(LLMError, match="unreachable"):
+        OllamaProvider(base_url="http://localhost:11434", model="m").ping(timeout=0.1)

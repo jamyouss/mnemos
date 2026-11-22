@@ -69,6 +69,11 @@ class Settings(BaseSettings):
     # Built dashboard. Absent in a headless deployment, and the server must
     # start anyway.
     mnemos_ui_path: str = "/app/ui"
+    # Instance theme served at /theme.css. Absent → empty stylesheet.
+    mnemos_ui_theme_path: str = "/app/config/theme.css"
+    # Let the dashboard write `<state_dir>/settings.json`. With auth off,
+    # anyone reaching the server can then change retrieval settings.
+    mnemos_ui_config_writable: bool = False
 
     # Project detection (auto-detect + optional YAML override)
     mnemos_projects_config_path: str = "/app/config/projects.yaml"

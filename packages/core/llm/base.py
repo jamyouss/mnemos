@@ -15,6 +15,16 @@ class LLMError(RuntimeError):
     """Raised when an LLM provider fails (network, parse, auth)."""
 
 
+def describe_sdk_error(exc: BaseException) -> str:
+    """Exception class plus HTTP status, never the exception message.
+
+    Cloud SDKs echo part of the API key in some auth errors (OpenAI prints
+    `sk-...abcd`); a health probe must not carry that to a dashboard.
+    """
+    status = getattr(exc, "status_code", None)
+    return f"{type(exc).__name__} (HTTP {status})" if status else type(exc).__name__
+
+
 @runtime_checkable
 class LLMProvider(Protocol):
     """Generic chat-completion interface used by Mnemos LLM consumers.
@@ -54,4 +64,13 @@ class LLMProvider(Protocol):
         timeout: float = 60.0,
     ) -> str:
         """Convenience wrapper around complete() for a single user prompt."""
+        ...
+
+    def ping(self, *, timeout: float = 3.0) -> None:
+        """Check the provider answers, without spending tokens.
+
+        Hits a listing endpoint (models / tags), never a completion. Raises
+        LLMError when unreachable or misconfigured; the message must not
+        contain the API key.
+        """
         ...

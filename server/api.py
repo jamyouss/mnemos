@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from pydantic import BaseModel
 from qdrant_client.models import (
     FieldCondition,
@@ -17,7 +19,8 @@ from qdrant_client.models import (
 )
 
 from core.cache import CACHE_COLLECTION
-from core.collections import COLLECTIONS
+from core.collections import COLLECTIONS, TAGS_PAYLOAD_FIELD
+from core.indexer import CHUNK_FACET_FIELDS, facet_fields
 from core.llm import LLMError
 from server.config import settings
 
@@ -197,6 +200,40 @@ def list_indexed_files(collection: str, tag: str, request: Request):
         raise HTTPException(status_code=400, detail=f"Unknown collection: {collection}")
     files = request.app.state.indexer.list_files(collection, tag=tag)
     return {"collection": collection, "tag": tag, "files": files}
+
+
+# Payload fields the dashboard may count. Qdrant facets need a keyword
+# index; `core.indexer.facet_fields` says which collection carries which.
+_FACET_FIELDS = (TAGS_PAYLOAD_FIELD, *CHUNK_FACET_FIELDS)
+
+
+@api_router.get("/api/index/facets")
+def index_facets(
+    request: Request,
+    collection: str,
+    field: str,
+    limit: int = Query(20, ge=1, le=1000),
+):
+    """Most frequent values of one payload field, with their point counts."""
+    if collection not in _VALID_COLLECTIONS:
+        raise HTTPException(status_code=404, detail=f"Unknown collection: {collection}")
+    if field not in _FACET_FIELDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Field {field!r} cannot be faceted; allowed: {', '.join(_FACET_FIELDS)}",
+        )
+    if field not in facet_fields(collection):
+        raise HTTPException(
+            status_code=400, detail=f"Field {field!r} is not indexed on {collection}"
+        )
+    response = request.app.state.qdrant.facet(
+        collection_name=collection, key=field, limit=limit
+    )
+    return {
+        "collection": collection,
+        "field": field,
+        "counts": [{"value": str(hit.value), "count": hit.count} for hit in response.hits],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -488,24 +525,93 @@ def reindex(body: ReindexRequest, request: Request, background_tasks: Background
 _MEMORY_COLLECTION = "mnemos_memory"
 
 
-@api_router.get("/api/memory")
-def list_memory(request: Request, status: Optional[str] = None):
-    qdrant = request.app.state.qdrant
+# Qdrant scroll page; endpoints loop over pages instead of trusting one call.
+_SCROLL_PAGE = 500
 
+
+def _scroll_all(
+    qdrant,
+    collection: str,
+    scroll_filter: Filter | None = None,
+    with_payload: bool | list[str] = True,
+    limit: int | None = None,
+):
+    """Every point of `collection` (up to `limit`), page by page, no vectors."""
+    offset = None
+    fetched = 0
+    while True:
+        page_size = _SCROLL_PAGE if limit is None else min(_SCROLL_PAGE, limit - fetched)
+        records, offset = qdrant.scroll(
+            collection_name=collection,
+            scroll_filter=scroll_filter,
+            limit=page_size,
+            offset=offset,
+            with_payload=with_payload,
+            with_vectors=False,
+        )
+        yield from records
+        fetched += len(records)
+        if offset is None or not records or (limit is not None and fetched >= limit):
+            return
+
+
+@api_router.get("/api/memory")
+def list_memory(
+    request: Request,
+    status: Optional[str] = None,
+    limit: int = Query(1000, ge=1, le=10000),
+):
     scroll_filter = None
     if status:
         scroll_filter = Filter(
             must=[FieldCondition(key="status", match=MatchValue(value=status))]
         )
-
-    records, _ = qdrant.scroll(
-        collection_name=_MEMORY_COLLECTION,
-        scroll_filter=scroll_filter,
-        limit=100,
-        with_payload=True,
-        with_vectors=False,
+    records = _scroll_all(
+        request.app.state.qdrant, _MEMORY_COLLECTION, scroll_filter, limit=limit
     )
     return {"entries": [r.payload for r in records]}
+
+
+def _utc_day(created_at) -> str | None:
+    """`YYYY-MM-DD` (UTC) of an ISO timestamp; None when unparseable."""
+    if not isinstance(created_at, str):
+        return None
+    try:
+        moment = datetime.fromisoformat(created_at)
+    except ValueError:
+        return None
+    if moment.tzinfo is not None:
+        moment = moment.astimezone(timezone.utc)
+    return moment.date().isoformat()
+
+
+@api_router.get("/api/memory/stats")
+def memory_stats(request: Request):
+    """Counts over every memory, whatever its status. Payload fields only."""
+    by_status: dict[str, int] = {}
+    by_type: dict[str, int] = {}
+    by_day: dict[str, int] = {}
+    total = 0
+    for record in _scroll_all(
+        request.app.state.qdrant,
+        _MEMORY_COLLECTION,
+        with_payload=["status", "memory_type", "created_at"],
+    ):
+        payload = record.payload or {}
+        total += 1
+        status = payload.get("status") or "unknown"
+        by_status[status] = by_status.get(status, 0) + 1
+        memory_type = payload.get("memory_type") or "unknown"
+        by_type[memory_type] = by_type.get(memory_type, 0) + 1
+        day = _utc_day(payload.get("created_at"))
+        if day:
+            by_day[day] = by_day.get(day, 0) + 1
+    return {
+        "total": total,
+        "by_status": by_status,
+        "by_type": by_type,
+        "by_day": dict(sorted(by_day.items())),
+    }
 
 
 @api_router.post("/api/memory")
@@ -640,7 +746,7 @@ def _tail_jsonl(path: Path, limit: int) -> list[dict]:
 
 
 @api_router.get("/api/query-log")
-def query_log(limit: int = 500, intent: Optional[str] = None):
+def query_log(request: Request, limit: int = 500, intent: Optional[str] = None):
     """Recent retrieval calls, newest last.
 
     `enabled` is reported separately from an empty list on purpose: a
@@ -648,7 +754,10 @@ def query_log(limit: int = 500, intent: Optional[str] = None):
     traffic" or "nothing is being recorded". Conflating the two is how a
     logger that had been off for a week went unnoticed.
     """
-    enabled = settings.mnemos_query_log_enabled
+    # The running logger, not the setting: it can be toggled live from the
+    # config page, and it stays off when its directory cannot be created.
+    query_logger = getattr(request.app.state, "query_logger", None)
+    enabled = query_logger.enabled if query_logger is not None else settings.mnemos_query_log_enabled
     entries = _tail_jsonl(Path(settings.mnemos_query_log_path), max(1, min(limit, 5000)))
     if intent:
         entries = [e for e in entries if e.get("intent") == intent]
@@ -716,3 +825,67 @@ def api_status(request: Request):
             index_info[name] = {"error": "unavailable"}
 
     return {"status": "healthy", "collections": index_info}
+
+
+# The LLM probe crosses the network (and may hit a paid API's rate limit):
+# a dashboard polling every few seconds gets the cached answer.
+_LLM_PROBE_TTL_S = 30.0
+_LLM_PROBE_TIMEOUT_S = 3.0
+_llm_probe_lock = threading.Lock()
+
+
+def _redact_key(text: str) -> str:
+    key = settings.mnemos_llm_api_key
+    return text.replace(key, "***") if key else text
+
+
+def _probe_qdrant(qdrant) -> dict:
+    started = time.perf_counter()
+    error = None
+    try:
+        qdrant.get_collections()
+    except Exception as exc:
+        error = f"{type(exc).__name__}: {exc}"
+    return {
+        "ok": error is None,
+        "latency_ms": round((time.perf_counter() - started) * 1000, 1),
+        "error": error,
+    }
+
+
+def _probe_llm(state) -> dict:
+    llm = getattr(state, "llm", None)
+    result = {
+        "ok": False,
+        "provider": getattr(llm, "name", settings.mnemos_llm_provider),
+        "model": getattr(llm, "model", settings.mnemos_llm_model),
+        "latency_ms": None,
+        "error": None,
+    }
+    if llm is None:
+        result["error"] = "LLM provider not initialised"
+    else:
+        started = time.perf_counter()
+        try:
+            llm.ping(timeout=_LLM_PROBE_TIMEOUT_S)
+            result["ok"] = True
+        except LLMError as exc:
+            result["error"] = _redact_key(str(exc))
+        except Exception as exc:
+            # Unexpected: the class only, the message could quote a request.
+            result["error"] = f"unexpected {type(exc).__name__}"
+        result["latency_ms"] = round((time.perf_counter() - started) * 1000, 1)
+    result["checked_at"] = datetime.now(timezone.utc).isoformat()
+    return result
+
+
+@api_router.get("/api/health/deps")
+def health_deps(request: Request):
+    """Reachability of Qdrant (live) and of the LLM provider (cached 30 s)."""
+    state = request.app.state
+    with _llm_probe_lock:
+        cached = getattr(state, "llm_probe", None)
+        if cached is None or time.monotonic() - cached[0] > _LLM_PROBE_TTL_S:
+            cached = (time.monotonic(), _probe_llm(state))
+            state.llm_probe = cached
+    return {"qdrant": _probe_qdrant(state.qdrant), "llm": cached[1]}

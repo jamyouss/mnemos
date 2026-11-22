@@ -355,3 +355,36 @@ def test_list_files_returns_each_file_once_with_its_mtime(mock_qdrant, mock_embe
     first_filter = mock_qdrant.scroll.call_args_list[0].kwargs["scroll_filter"]
     assert first_filter.must[0].key == "tags"
     assert mock_qdrant.scroll.call_args_list[1].kwargs["offset"] == "next"
+
+
+def test_ensure_collection_indexes_facet_fields(mock_qdrant, mock_embeddings):
+    """Qdrant facets refuse unindexed fields: the dashboard counts these."""
+    indexer = Indexer(qdrant_client=mock_qdrant, embedding_service=mock_embeddings)
+
+    indexer.ensure_collection("mnemos_code")
+    indexer.ensure_collection("mnemos_docs")
+
+    indexed = [
+        (c.kwargs["collection_name"], c.kwargs["field_name"])
+        for c in mock_qdrant.create_payload_index.call_args_list
+    ]
+    assert indexed == [
+        ("mnemos_code", "tags"), ("mnemos_code", "language"), ("mnemos_code", "chunk_type"),
+        ("mnemos_docs", "language"), ("mnemos_docs", "chunk_type"),
+    ]
+
+
+def test_ensure_collection_backfills_indexes_on_existing_collections(mock_qdrant, mock_embeddings):
+    mock_qdrant.collection_exists.return_value = True
+    Indexer(qdrant_client=mock_qdrant, embedding_service=mock_embeddings).ensure_collection("mnemos_skills")
+
+    mock_qdrant.create_collection.assert_not_called()
+    fields = [c.kwargs["field_name"] for c in mock_qdrant.create_payload_index.call_args_list]
+    assert fields == ["language", "chunk_type"]
+
+
+def test_facet_fields_follow_tagging():
+    from core.indexer import facet_fields
+
+    assert facet_fields("mnemos_code") == ("tags", "language", "chunk_type")
+    assert facet_fields("mnemos_docs") == ("language", "chunk_type")

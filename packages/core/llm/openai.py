@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from core.llm.base import LLMError, Message
+from core.llm.base import LLMError, Message, describe_sdk_error
 
 logger = logging.getLogger("mnemos.llm.openai")
 
@@ -93,3 +93,10 @@ class OpenAIProvider:
             temperature=temperature,
             timeout=timeout,
         )
+
+    def ping(self, *, timeout: float = 3.0) -> None:
+        """`GET /models`: authenticates the key, generates nothing."""
+        try:
+            self._client.with_options(timeout=timeout, max_retries=0).models.list()
+        except Exception as exc:
+            raise LLMError(f"openai-compatible /models failed: {describe_sdk_error(exc)}") from exc

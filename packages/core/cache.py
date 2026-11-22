@@ -63,6 +63,29 @@ class SemanticCache:
     def enabled(self) -> bool:
         return self._enabled
 
+    @enabled.setter
+    def enabled(self, value: bool) -> None:
+        # A cache built disabled never created its collection.
+        if value and not self._enabled:
+            self._ensure_collection()
+        self._enabled = bool(value)
+
+    @property
+    def threshold(self) -> float:
+        return self._threshold
+
+    @threshold.setter
+    def threshold(self, value: float) -> None:
+        self._threshold = float(value)
+
+    @property
+    def ttl_seconds(self) -> int:
+        return self._ttl
+
+    @ttl_seconds.setter
+    def ttl_seconds(self, value: int) -> None:
+        self._ttl = int(value)
+
     def _ensure_collection(self) -> None:
         dim = self._embeddings.dimension
         if self._qdrant.collection_exists(CACHE_COLLECTION):

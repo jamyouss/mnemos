@@ -23,18 +23,25 @@ class QueryLogger:
 
     def __init__(self, path: str | Path, enabled: bool = True) -> None:
         self._path = Path(path)
-        self._enabled = enabled
+        self._enabled = False
         self._lock = threading.Lock()
-        if self._enabled:
+        self.enabled = enabled
+
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
+
+    @enabled.setter
+    def enabled(self, value: bool) -> None:
+        """Turning on creates the log dir; failing that, the logger stays off."""
+        if value:
             try:
                 self._path.parent.mkdir(parents=True, exist_ok=True)
             except OSError:
                 logger.warning("Could not create query-log dir: %s", self._path.parent)
                 self._enabled = False
-
-    @property
-    def enabled(self) -> bool:
-        return self._enabled
+                return
+        self._enabled = bool(value)
 
     def log(
         self,
