@@ -955,19 +955,23 @@ def _run_sync(source: str, scopes: list[tuple[str, object]], tags: str | None, f
             sync_scope(mnemos, source=source, scope=scope, items=items, user_tags=user_tags, full=full)
             for scope, items in scopes
         ]
+    _print_sync_results(f"Ingest {source}", results)
+    if not all(r.ok for r in results):
+        sys.exit(1)
 
-    table = Table(title=f"Ingest {source}")
+
+def _print_sync_results(title: str, results: list) -> None:
+    table = Table(title=title)
     table.add_column("Scope", style="cyan")
     for column in ("Pushed", "Unchanged", "Deleted", "Failed"):
         table.add_column(column, justify="right")
     table.add_column("Note")
     for r in results:
-        note = f"[red]{r.error}[/red]" if r.error else ("[yellow]truncated, nothing deleted[/yellow]" if r.truncated else "")
+        # First line only: httpx appends a "For more information" link to every status error.
+        note = f"[red]{r.error.splitlines()[0]}[/red]" if r.error else ("[yellow]truncated, nothing deleted[/yellow]" if r.truncated else "")
         failed = f"[red]{r.failed}[/red]" if r.failed else "0"
         table.add_row(r.scope_tag, str(r.pushed), str(r.unchanged), str(r.deleted), failed, note)
     console.print(table)
-    if not all(r.ok for r in results):
-        sys.exit(1)
 
 
 @ingest.command("confluence")
@@ -1044,6 +1048,99 @@ def ingest_web(urls: tuple[str, ...], max_pages: int, tags: str | None, full: bo
     with make_client() as client:
         source = WebSource(client, max_pages=max_pages)
         _run_sync(SOURCE, [(scope, source.items(scope, seeds)) for scope, seeds in groups.items()], tags, full)
+
+
+_config_option = click.option(
+    "--config",
+    "config_path",
+    envvar="MNEMOS_CONNECTORS_CONFIG",
+    default="config/connectors.yaml",
+    show_default=True,
+    type=click.Path(dir_okay=False),
+    help="Connectors file (template: config/connectors.example.yaml) [env MNEMOS_CONNECTORS_CONFIG].",
+)
+
+
+def _load_connectors(config_path: str):
+    from connectors.config import ConfigError, load_config
+
+    try:
+        return load_config(config_path)
+    except ConfigError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
+def _sync_config(config, only: set[str] | None = None, full: bool = False) -> list:
+    from connectors.mnemos import MNEMOS_TIMEOUT, MnemosClient
+    from connectors.runner import run_sources
+    from connectors.transport import make_client
+
+    with make_client(headers=_headers(), timeout=MNEMOS_TIMEOUT) as http:
+        return run_sources(config, MnemosClient(_base_url(), http), only=only, full=full)
+
+
+@ingest.command("run")
+@_config_option
+@click.option("--only", multiple=True, help="Sync only this source `name` (repeatable).")
+@_full_option
+def ingest_run(config_path: str, only: tuple[str, ...], full: bool) -> None:
+    """Sync every source declared in the connectors file, once."""
+    config = _load_connectors(config_path)
+    unknown = sorted(set(only) - {s.name for s in config.sources})
+    if unknown:
+        names = ", ".join(s.name for s in config.sources)
+        raise click.BadParameter(f"no source named {', '.join(unknown)} (known: {names})", param_hint="--only")
+
+    results = _sync_config(config, set(only) or None, full)
+    _print_sync_results("Ingest", results)
+    if not all(r.ok for r in results):
+        sys.exit(1)
+
+
+@ingest.command("serve")
+@_config_option
+def ingest_serve(config_path: str) -> None:
+    """Sync at start-up, then every `interval` of the connectors file.
+
+    Send SIGHUP to resync now (`docker compose kill -s HUP ingester`,
+    `kill -HUP 1` in a pod). The file is re-read before every run, so edited
+    sources apply on the next sync; a broken edit keeps the previous version.
+    A changed `interval` needs a restart.
+    """
+    import signal
+    import threading
+    from datetime import datetime
+
+    import connectors.runner
+    from connectors.config import ConfigError, load_config
+
+    config = _load_connectors(config_path)
+    trigger, stop = threading.Event(), threading.Event()
+
+    def run_once() -> None:
+        nonlocal config
+        try:
+            config = load_config(config_path)
+        except ConfigError as exc:
+            console.print(f"[red]{exc}[/red]\n[yellow]keeping the previous configuration[/yellow]")
+        _print_sync_results(f"Sync {datetime.now():%Y-%m-%d %H:%M:%S}", _sync_config(config))
+
+    def resync(_signum, _frame) -> None:
+        trigger.set()
+
+    def shutdown(_signum, _frame) -> None:
+        # Syncs are idempotent: dropping one half-way only defers work to the next run.
+        raise SystemExit(0)
+
+    previous = {sig: signal.signal(sig, handler) for sig, handler in
+                ((signal.SIGHUP, resync), (signal.SIGTERM, shutdown))}
+    every = f"every {config.interval}s and " if config.interval else ""
+    console.print(f"Serving {len(config.sources)} source(s) from {config_path}: sync now, then {every}on SIGHUP.")
+    try:
+        connectors.runner.serve(run_once, interval=config.interval, trigger=trigger, stop=stop)
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
 
 
 if __name__ == "__main__":

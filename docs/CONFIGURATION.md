@@ -362,6 +362,21 @@ Keys live in `config/tenants.yaml` (gitignored — copy
 an identity only: all tenants share the same collections. See
 [`DEPLOYMENT.md`](DEPLOYMENT.md#authentication).
 
+## Knowledge connectors
+
+Confluence spaces, Jira projects and web sites synced into `mnemos_knowledge`
+are declared in `config/connectors.yaml` (gitignored — copy
+`config/connectors.example.yaml`). The tokens stay in environment variables
+named by each source's `token_env`.
+
+| Var | Default | Description |
+|-----|--------|------|
+| `MNEMOS_CONNECTORS_CONFIG` | `config/connectors.yaml` | File read by `mnemos ingest run` and `mnemos ingest serve` |
+
+`mnemos ingest serve` (the opt-in `ingester` compose service) syncs at
+start-up, then every `interval`, and on `SIGHUP`. See
+[`CONNECTORS.md`](CONNECTORS.md#configuration-file).
+
 ## How to apply a config change
 
 For most flags it's just an env var + a container restart:

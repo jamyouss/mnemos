@@ -1,0 +1,38 @@
+# Knowledge connectors — what `mnemos ingest run` / `mnemos ingest serve` keep
+# in sync inside the `mnemos_knowledge` collection.
+#
+# Copy to config/connectors.yaml (gitignored) and adapt. See docs/CONNECTORS.md.
+#
+# Secrets never go in this file: each Confluence / Jira source names the
+# environment variable that holds its token (`token_env`). A variable that is
+# not set stops the run before anything is synced.
+
+# How often `mnemos ingest serve` resyncs after the start-up sync: 45s, 30m,
+# 6h, 1d… Omit it to sync only at start-up and on SIGHUP.
+interval: 6h
+
+sources:
+  # Every source: `type` (confluence | jira | web), optional `name` (defaults
+  # to the type; must be unique — it is what `mnemos ingest run --only <name>`
+  # selects) and optional `tags` added to every document.
+
+  - type: confluence
+    name: wiki
+    url: https://wiki.example.com          # Cloud: https://<site>.atlassian.net
+    token_env: CONFLUENCE_TOKEN            # Data Center PAT, or Cloud API token
+    # user: bot@example.com                # Cloud only: account email (HTTP Basic)
+    # deployment: auto                     # auto | cloud | datacenter
+    spaces: [ENG, OPS]
+    tags: [acme]
+
+  - type: jira
+    name: tracker
+    url: https://jira.example.com
+    token_env: JIRA_TOKEN
+    projects: [OPS]
+    # jql: resolution = Unresolved OR updated >= -180d   # ANDed to `project = KEY`
+
+  - type: web
+    name: handbook
+    urls: [https://docs.example.com/handbook/]   # crawl stays on the host, under this path
+    max_pages: 200

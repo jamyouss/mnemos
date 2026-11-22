@@ -52,8 +52,8 @@ mnemos/
   server/                 # FastAPI + MCP server (port 8100)
   watcher/                # File watcher (watchdog)
   cli/                    # Click CLI client
-  config/                 # projects.yaml, tenants.yaml (clés API)
-  packages/connectors/    # Connecteurs (Confluence, Jira, web) → push API
+  config/                 # projects.yaml, tenants.yaml (clés API), connectors.yaml (sources)
+  packages/connectors/    # Connecteurs (Confluence, Jira, web) → push API ; `mnemos ingest run|serve`
   scripts/hooks/          # Global git hooks (memory extraction + incremental indexing)
   tests/                  # pytest suite
   eval/                   # Eval harness (Phase 1.2, en cours)

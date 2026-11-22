@@ -26,6 +26,7 @@ data/claude-config/*
 !data/claude-config/.gitkeep
 config/projects.yaml
 config/tenants.yaml
+config/connectors.yaml
 
 # Dashboard build artefacts
 ui/node_modules/

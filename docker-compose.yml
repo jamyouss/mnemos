@@ -116,6 +116,31 @@ services:
       rag-server:
         condition: service_healthy
 
+  # Knowledge connectors (Confluence, Jira, web) from config/connectors.yaml:
+  # syncs at start-up, then every `interval`. Opt-in:
+  #   cp config/connectors.example.yaml config/connectors.yaml
+  #   docker compose --profile connectors up -d
+  # Resync now: docker compose kill -s HUP ingester
+  ingester:
+    image: ${MNEMOS_CLI_IMAGE:-jamyouss/mnemos-cli:latest}
+    restart: unless-stopped
+    pull_policy: ${MNEMOS_PULL_POLICY:-missing}
+    command: ["ingest", "serve", "--config", "/app/config/connectors.yaml"]
+    # Tokens named by `token_env` in connectors.yaml (CONFLUENCE_TOKEN, …) and
+    # MNEMOS_API_KEY come from .env.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      MNEMOS_URL: http://rag-server:8100
+    volumes:
+      - ./config/connectors.yaml:/app/config/connectors.yaml:ro
+    depends_on:
+      rag-server:
+        condition: service_healthy
+    profiles:
+      - connectors
+
   ollama:
     image: ollama/ollama:latest
     volumes:

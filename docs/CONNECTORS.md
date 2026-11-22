@@ -6,7 +6,8 @@ Confluence pages, Jira issues, web documentation — into the
 (`collections: ["mnemos_knowledge"]`) next to code and memories.
 
 ```
-mnemos ingest confluence|jira|web
+mnemos ingest run | serve        (config/connectors.yaml)
+mnemos ingest confluence|jira|web  (one source, from flags)
    │  source REST API / HTTP crawl        (httpx, retries, proxy-aware)
    ▼
 connector → Markdown documents (# title, metadata, body)
@@ -22,7 +23,7 @@ Mnemos server (chunk → embed → Qdrant)
 The connectors are a client package (`packages/connectors`, installed by
 `make install`). They talk to the server over its HTTP API only and keep no
 local state: what is indexed under a scope tag **is** the sync state, so a
-throwaway container on a schedule is all it takes.
+throwaway container — or a long-running `ingest serve` — is all it takes.
 
 ## Common setup
 
@@ -41,6 +42,71 @@ Options shared by every `ingest` command:
 
 Each command prints a table — pushed / unchanged / deleted / failed per
 scope — and **exits 1 if anything failed**, so a scheduler flags the run.
+
+## Configuration file
+
+Declare every source once in `config/connectors.yaml` (gitignored; start from
+[`config/connectors.example.yaml`](../config/connectors.example.yaml)):
+
+```yaml
+interval: 6h                     # `ingest serve` resync period: 45s, 30m, 6h, 1d
+
+sources:
+  - type: confluence
+    name: wiki                   # optional, defaults to the type; unique
+    url: https://wiki.example.com
+    token_env: CONFLUENCE_TOKEN  # NAME of the variable holding the token
+    # user: bot@example.com      # Cloud only (HTTP Basic); omit for a Data Center PAT
+    # deployment: auto           # auto | cloud | datacenter
+    spaces: [ENG, OPS]
+    tags: [acme]
+  - type: jira
+    name: tracker
+    url: https://jira.example.com
+    token_env: JIRA_TOKEN
+    projects: [OPS]
+    # jql: resolution = Unresolved
+  - type: web
+    name: handbook
+    urls: [https://docs.example.com/handbook/]
+    max_pages: 200
+```
+
+Keys mirror the command-line options of each source below (`spaces` /
+`projects` / `urls` are the repeatable `--space` / `--project` / URL
+arguments). Tokens never go in the file: `token_env` names the variable, which
+must be set when the file is loaded — a missing one, an unknown key, a typo in
+`type` or a duplicate `name` stops the run before anything is synced, with
+every problem listed at once.
+
+The path is `--config`, else `MNEMOS_CONNECTORS_CONFIG`, else
+`config/connectors.yaml` (relative to the working directory; `/app/config/`
+in the `jamyouss/mnemos-cli` image).
+
+### Sync once: `mnemos ingest run`
+
+```bash
+mnemos ingest run                       # every source
+mnemos ingest run --only tracker        # one source by name (repeatable)
+mnemos ingest run --only wiki --full    # force a re-push of unchanged pages
+```
+
+A source that fails (unreachable, 401, bad URL) is reported in the table and
+the others still run; the command exits 1 if anything failed.
+
+### Sync at start-up, then on a timer: `mnemos ingest serve`
+
+`serve` is the long-running form: it syncs every source as soon as it starts,
+then every `interval`, and immediately on `SIGHUP`:
+
+| To… | Do |
+|---|---|
+| resync now | `docker compose kill -s HUP ingester` · `kubectl exec <pod> -c ingester -- kill -HUP 1` |
+| resync one source, or with `--full` | `mnemos ingest run --only <name> [--full]` from anywhere |
+| apply an edited `connectors.yaml` | nothing: the file is re-read before every sync (a broken edit is reported and the previous version kept). A changed `interval` needs a restart |
+| stop | `SIGTERM` — the service exits at once; an interrupted sync resumes at the next run |
+
+Without `interval`, `serve` syncs at start-up and on `SIGHUP` only.
 
 ## Confluence
 
@@ -214,14 +280,48 @@ then walks the source:
 ## Scheduling
 
 The `jamyouss/mnemos-cli` image packages the CLI and the connectors
-(`ENTRYPOINT ["mnemos"]`). Any scheduler works.
+(`ENTRYPOINT ["mnemos"]`). Pick one of two shapes.
+
+**A long-running `ingest serve`** (syncs when it starts, then every
+`interval`). With Docker Compose, the bundled `ingester` service is opt-in:
+
+```bash
+cp config/connectors.example.yaml config/connectors.yaml   # then edit it
+# tokens (CONFLUENCE_TOKEN, …) and MNEMOS_API_KEY go in .env
+docker compose --profile connectors up -d
+docker compose logs -f ingester
+```
+
+On Kubernetes, run it as one more container next to the server (or its own
+Deployment), with the file from a ConfigMap and the tokens from a Secret:
+
+```yaml
+- name: ingester
+  image: jamyouss/mnemos-cli:latest
+  args: ["ingest", "serve"]                     # reads /app/config/connectors.yaml
+  env:
+    - name: MNEMOS_URL
+      value: http://127.0.0.1:8100              # same pod; else the Service URL
+  envFrom:
+    - secretRef:
+        name: mnemos-ingest                     # MNEMOS_API_KEY + every token_env
+  volumeMounts:
+    - name: connectors-config                   # ConfigMap with key connectors.yaml
+      mountPath: /app/config
+      readOnly: true
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+```
+
+**Or a scheduler running one-shot commands** — `ingest run` with the same
+file, or the per-source commands with flags.
 
 Plain cron on a host with Docker:
 
 ```cron
 # m h dom mon dow
-15 2 * * * docker run --rm --env-file /etc/mnemos/ingest.env jamyouss/mnemos-cli ingest confluence --space ENG --space OPS
-45 2 * * * docker run --rm --env-file /etc/mnemos/ingest.env jamyouss/mnemos-cli ingest jira --project OPS
+15 2 * * * docker run --rm --env-file /etc/mnemos/ingest.env -v /etc/mnemos/connectors.yaml:/app/config/connectors.yaml:ro jamyouss/mnemos-cli ingest run
 30 3 * * 0 docker run --rm --env-file /etc/mnemos/ingest.env jamyouss/mnemos-cli ingest web https://docs.example.com/guide/
 ```
 

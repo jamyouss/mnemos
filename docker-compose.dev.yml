@@ -18,3 +18,9 @@ services:
       context: .
       dockerfile: watcher/Dockerfile
     image: mnemos-watcher:dev
+
+  ingester:
+    build:
+      context: .
+      dockerfile: cli/Dockerfile
+    image: mnemos-cli:dev

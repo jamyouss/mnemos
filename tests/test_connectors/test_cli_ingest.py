@@ -91,3 +91,112 @@ def test_ingest_requires_a_token(wired):
     result = CliRunner().invoke(cli, ["ingest", "confluence", "--url", "https://wiki.example.com", "--space", "ENG"])
     assert result.exit_code == 2
     assert "--token" in result.output
+
+
+# ---------------------------------------------------------------------------
+# config file: `ingest run` / `ingest serve`
+# ---------------------------------------------------------------------------
+
+
+def _write_config(tmp_path, projects: str = "[demo]") -> str:
+    path = tmp_path / "connectors.yaml"
+    path.write_text(
+        "sources:\n"
+        "  - type: jira\n"
+        "    name: tracker\n"
+        f"    url: {JIRA}\n"
+        "    token_env: TRACKER_TOKEN\n"
+        f"    projects: {projects}\n"
+        "    tags: [team-a]\n"
+        "  - type: web\n"
+        "    name: docs\n"
+        "    urls: [https://docs.example.com/]\n"
+    )
+    return str(path)
+
+
+def test_ingest_run_syncs_every_source_of_the_config(wired, monkeypatch, tmp_path):
+    mnemos, router = wired
+    router.add(f"{JIRA}/rest/api/2/search", {"startAt": 0, "maxResults": 100, "total": 1, "issues": [_issue("DEMO-1")]})
+    router.add("https://docs.example.com/robots.txt", httpx.Response(404))
+    router.add("https://docs.example.com/", httpx.Response(200, html="<title>Docs</title><main>Hi</main>"))
+    monkeypatch.setenv("TRACKER_TOKEN", "jira-pat")
+
+    result = CliRunner().invoke(cli, ["ingest", "run", "--config", _write_config(tmp_path)])
+
+    assert result.exit_code == 0, result.output
+    assert "jira:DEMO" in result.output and "web:docs.example.com" in result.output
+    assert sorted(mnemos.pushed_paths)[0] == "jira/DEMO/DEMO-1.md"
+    assert len(mnemos.pushed_paths) == 2
+
+
+def test_ingest_run_only_selects_sources_by_name(wired, monkeypatch, tmp_path):
+    mnemos, router = wired
+    router.add(f"{JIRA}/rest/api/2/search", {"startAt": 0, "maxResults": 100, "total": 1, "issues": [_issue("DEMO-1")]})
+    monkeypatch.setenv("TRACKER_TOKEN", "jira-pat")
+
+    result = CliRunner().invoke(cli, ["ingest", "run", "--config", _write_config(tmp_path), "--only", "tracker"])
+
+    assert result.exit_code == 0, result.output
+    assert mnemos.pushed_paths == ["jira/DEMO/DEMO-1.md"]
+    assert not any(r.url.host == "docs.example.com" for r in router.requests)
+
+
+def test_ingest_run_rejects_an_unknown_only_name(wired, monkeypatch, tmp_path):
+    monkeypatch.setenv("TRACKER_TOKEN", "jira-pat")
+    result = CliRunner().invoke(cli, ["ingest", "run", "--config", _write_config(tmp_path), "--only", "wiki"])
+    assert result.exit_code == 2
+    assert "wiki" in result.output
+
+
+def test_ingest_run_reports_config_errors_without_syncing(wired, tmp_path):
+    mnemos, _ = wired
+    result = CliRunner().invoke(cli, ["ingest", "run", "--config", _write_config(tmp_path)])
+    assert result.exit_code == 1
+    assert "TRACKER_TOKEN is not set" in result.output
+    assert mnemos.requests == []
+
+
+def test_ingest_run_reads_the_config_path_from_the_environment(wired, monkeypatch, tmp_path):
+    mnemos, router = wired
+    router.add(f"{JIRA}/rest/api/2/search", {"startAt": 0, "maxResults": 100, "total": 0, "issues": []})
+    monkeypatch.setenv("TRACKER_TOKEN", "jira-pat")
+    monkeypatch.setenv("MNEMOS_CONNECTORS_CONFIG", _write_config(tmp_path))
+
+    result = CliRunner().invoke(cli, ["ingest", "run", "--only", "tracker"])
+
+    assert result.exit_code == 0, result.output
+    assert "jira:DEMO" in result.output
+
+
+def test_ingest_serve_syncs_at_start_and_rereads_the_config_on_each_run(wired, monkeypatch, tmp_path):
+    import connectors.runner
+
+    mnemos, router = wired
+    router.add(f"{JIRA}/rest/api/2/search", lambda r: httpx.Response(200, json={
+        "startAt": 0, "maxResults": 100, "total": 1,
+        "issues": [_issue("OPS-1" if "OPS" in r.url.params["jql"] else "DEMO-1")],
+    }))
+    router.add("https://docs.example.com/robots.txt", httpx.Response(404))
+    router.add("https://docs.example.com/", httpx.Response(200, html="<title>Docs</title><main>Hi</main>"))
+    monkeypatch.setenv("TRACKER_TOKEN", "jira-pat")
+    config_path = _write_config(tmp_path)
+
+    def fake_serve(run_once, *, interval, trigger, stop):
+        run_once()                                  # start-up sync
+        _write_config(tmp_path, projects="[ops]")   # edited while the service runs
+        run_once()                                  # what SIGHUP / the timer triggers
+
+    monkeypatch.setattr(connectors.runner, "serve", fake_serve)
+
+    result = CliRunner().invoke(cli, ["ingest", "serve", "--config", config_path])
+
+    assert result.exit_code == 0, result.output
+    assert "jira/DEMO/DEMO-1.md" in mnemos.pushed_paths
+    assert "jira/OPS/OPS-1.md" in mnemos.pushed_paths
+
+
+def test_ingest_serve_refuses_to_start_on_a_bad_config(wired, tmp_path):
+    result = CliRunner().invoke(cli, ["ingest", "serve", "--config", str(tmp_path / "absent.yaml")])
+    assert result.exit_code == 1
+    assert "not found" in result.output
