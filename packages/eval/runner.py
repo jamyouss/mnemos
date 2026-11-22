@@ -11,14 +11,17 @@ from eval.schema import GoldenItem, QueryResult
 class EvalRunner:
     """Runs a golden set against a live Mnemos server via the REST API."""
 
-    def __init__(self, mnemos_url: str, limit: int = 10, timeout: float = 120.0) -> None:
+    def __init__(
+        self, mnemos_url: str, limit: int = 10, timeout: float = 120.0, api_key: str | None = None
+    ) -> None:
         self._url = mnemos_url.rstrip("/")
         self._limit = limit
         self._timeout = timeout
+        self._headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
 
     def run(self, items: Iterable[GoldenItem]) -> list[QueryResult]:
         results: list[QueryResult] = []
-        with httpx.Client(timeout=self._timeout) as client:
+        with httpx.Client(timeout=self._timeout, headers=self._headers) as client:
             for item in items:
                 results.append(self._run_one(client, item))
         return results

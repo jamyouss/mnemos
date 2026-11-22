@@ -17,6 +17,12 @@ def _base_url() -> str:
     return os.environ.get("MNEMOS_URL", DEFAULT_RAG_URL).rstrip("/")
 
 
+def _headers() -> dict[str, str]:
+    """Bearer header for servers running with MNEMOS_AUTH_ENABLED=true."""
+    key = os.environ.get("MNEMOS_API_KEY", "").strip()
+    return {"Authorization": f"Bearer {key}"} if key else {}
+
+
 def _handle_http_error(exc: Exception) -> None:
     console.print(f"[bold red]Error:[/bold red] {exc}")
     sys.exit(1)
@@ -62,7 +68,7 @@ def doctor() -> None:
 
     # 1. /health
     def _health():
-        r = httpx.get(f"{_base_url()}/health", timeout=5)
+        r = httpx.get(f"{_base_url()}/health", timeout=5, headers=_headers())
         r.raise_for_status()
         body = r.json()
         if body.get("status") != "healthy":
@@ -74,14 +80,14 @@ def doctor() -> None:
     collections: dict = {}
     def _status():
         nonlocal collections
-        r = httpx.get(f"{_base_url()}/api/status", timeout=10)
+        r = httpx.get(f"{_base_url()}/api/status", timeout=10, headers=_headers())
         r.raise_for_status()
         collections = r.json().get("collections", {})
         return f"{len(collections)} collections"
     _check("Qdrant reachable + collections enumerable", _status)
 
     # 3. Core collections present
-    expected = {"mnemos_skills", "mnemos_docs", "mnemos_code", "mnemos_memory"}
+    expected = {"mnemos_skills", "mnemos_docs", "mnemos_code", "mnemos_memory", "mnemos_knowledge"}
     missing = expected - set(collections.keys())
     if missing:
         console.print(f"  [yellow]⚠[/yellow] missing core collections: {sorted(missing)}")
@@ -101,6 +107,7 @@ def doctor() -> None:
             f"{_base_url()}/api/search",
             json={"query": "function", "limit": 1},
             timeout=30,
+            headers=_headers(),
         )
         r.raise_for_status()
         return f"{len(r.json().get('results', []))} hits"
@@ -119,7 +126,7 @@ def status() -> None:
     """Show server health and collection counts."""
     url = f"{_base_url()}/api/status"
     try:
-        resp = httpx.get(url, timeout=10)
+        resp = httpx.get(url, timeout=10, headers=_headers())
         resp.raise_for_status()
         data = resp.json()
     except Exception as exc:
@@ -209,7 +216,7 @@ def search(
         payload["tags_all"] = _parse_tags(tags_all)
 
     try:
-        resp = httpx.post(url, json=payload, timeout=30)
+        resp = httpx.post(url, json=payload, timeout=30, headers=_headers())
         resp.raise_for_status()
         results = resp.json().get("results", [])
     except Exception as exc:
@@ -274,7 +281,7 @@ def search_code(
         payload["path_filter"] = path_filter
 
     try:
-        resp = httpx.post(url, json=payload, timeout=30)
+        resp = httpx.post(url, json=payload, timeout=30, headers=_headers())
         resp.raise_for_status()
         results = resp.json().get("results", [])
     except Exception as exc:
@@ -298,7 +305,7 @@ def search_skills(query: str, limit: int) -> None:
     payload: dict = {"query": query, "limit": limit}
 
     try:
-        resp = httpx.post(url, json=payload, timeout=30)
+        resp = httpx.post(url, json=payload, timeout=30, headers=_headers())
         resp.raise_for_status()
         results = resp.json().get("results", [])
     except Exception as exc:
@@ -355,7 +362,7 @@ def search_memory(
         payload["memory_type"] = memory_type
 
     try:
-        resp = httpx.post(url, json=payload, timeout=30)
+        resp = httpx.post(url, json=payload, timeout=30, headers=_headers())
         resp.raise_for_status()
         results = resp.json().get("results", [])
     except Exception as exc:
@@ -451,7 +458,7 @@ def reindex(
         payload["exclude_dirs"] = list(exclude_dirs)
 
     try:
-        resp = httpx.post(url, json=payload, timeout=600)
+        resp = httpx.post(url, json=payload, timeout=600, headers=_headers())
         resp.raise_for_status()
         data = resp.json()
     except Exception as exc:
@@ -490,7 +497,7 @@ def memory_list(status: str | None) -> None:
         params["status"] = status
 
     try:
-        resp = httpx.get(url, params=params, timeout=10)
+        resp = httpx.get(url, params=params, timeout=10, headers=_headers())
         resp.raise_for_status()
         entries = resp.json().get("entries", [])
     except Exception as exc:
@@ -539,7 +546,7 @@ def memory_add(content: str, project: str | None, memory_type: str, tags: tuple)
         payload["project"] = project
 
     try:
-        resp = httpx.post(url, json=payload, timeout=10)
+        resp = httpx.post(url, json=payload, timeout=10, headers=_headers())
         resp.raise_for_status()
         data = resp.json()
     except Exception as exc:
@@ -554,7 +561,7 @@ def memory_add(content: str, project: str | None, memory_type: str, tags: tuple)
 def _fetch_pending() -> list[dict]:
     """Pending entries, oldest first — review in the order they arrived."""
     try:
-        resp = httpx.get(f"{_base_url()}/api/memory", params={"status": "pending"}, timeout=10)
+        resp = httpx.get(f"{_base_url()}/api/memory", params={"status": "pending"}, timeout=10, headers=_headers())
         resp.raise_for_status()
         entries = resp.json().get("entries", [])
     except Exception as exc:
@@ -646,7 +653,7 @@ def memory_reject(mem_id: str) -> None:
 def _review_memory(mem_id: str, action: str) -> None:
     url = f"{_base_url()}/api/memory/{mem_id}/review"
     try:
-        resp = httpx.post(url, json={"action": action}, timeout=10)
+        resp = httpx.post(url, json={"action": action}, timeout=10, headers=_headers())
         resp.raise_for_status()
         data = resp.json()
     except Exception as exc:
@@ -764,6 +771,7 @@ def eval_generate(
             sample_url,
             json={"collection": collection, "count": count, "seed": seed},
             timeout=30,
+            headers=_headers(),
         )
         resp.raise_for_status()
         chunks = resp.json().get("chunks", [])
@@ -829,7 +837,9 @@ def eval_run(tag: str, limit: int) -> None:
         console.print("[red]Golden set is empty.[/red] Generate questions first with [bold]mnemos eval generate[/bold].")
         sys.exit(1)
 
-    runner = EvalRunner(mnemos_url=_base_url(), limit=limit)
+    runner = EvalRunner(
+        mnemos_url=_base_url(), limit=limit, api_key=os.environ.get("MNEMOS_API_KEY") or None
+    )
     try:
         results = runner.run(items)
     except Exception as exc:

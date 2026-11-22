@@ -567,3 +567,26 @@ def test_review_with_nothing_pending(monkeypatch):
 
     result = CliRunner().invoke(cli, ["memory", "review"])
     assert "Nothing pending" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Authentication (MNEMOS_API_KEY)
+# ---------------------------------------------------------------------------
+
+
+def test_requests_carry_the_api_key_when_set(monkeypatch):
+    monkeypatch.setenv("MNEMOS_API_KEY", "secret-a")
+    runner = CliRunner()
+    with patch("httpx.post", return_value=_mock_response({"results": []})) as mock_post:
+        result = runner.invoke(cli, ["search", "query"])
+    assert result.exit_code == 0
+    assert mock_post.call_args.kwargs["headers"] == {"Authorization": "Bearer secret-a"}
+
+
+def test_requests_carry_no_auth_header_without_a_key(monkeypatch):
+    monkeypatch.delenv("MNEMOS_API_KEY", raising=False)
+    runner = CliRunner()
+    with patch("httpx.get", return_value=_mock_response({"status": "healthy", "collections": {}})) as mock_get:
+        result = runner.invoke(cli, ["status"])
+    assert result.exit_code == 0
+    assert mock_get.call_args.kwargs["headers"] == {}
