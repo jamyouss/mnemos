@@ -56,6 +56,75 @@ export interface EvalRunSummary {
   report: Record<string, any>
 }
 
+export type ConfigApply = 'live' | 'restart' | 'reindex'
+export type ConfigSource = 'default' | 'env' | 'override'
+
+export interface ConfigField {
+  key: string
+  env: string
+  label: string
+  description: string
+  type: 'bool' | 'int' | 'float' | 'str' | 'enum' | 'secret' | 'path' | 'url'
+  options: string[] | null
+  min: number | null
+  max: number | null
+  value: unknown
+  default: unknown
+  source: ConfigSource
+  editable: boolean
+  apply: ConfigApply
+  is_set: boolean
+}
+
+export interface ConfigSection {
+  id: string
+  label: string
+  fields: ConfigField[]
+}
+
+export interface ConfigResponse {
+  writable: boolean
+  overrides_path: string
+  pending_restart: string[]
+  sections: ConfigSection[]
+  applied?: string[]
+}
+
+export interface MemoryStats {
+  total: number
+  by_status: Record<string, number>
+  by_type: Record<string, number>
+  by_day: Record<string, number>
+}
+
+export interface FacetResponse {
+  collection: string
+  field: string
+  counts: Array<{ value: string; count: number }>
+}
+
+export interface DepHealth {
+  ok: boolean
+  latency_ms: number | null
+  error: string | null
+}
+
+export interface HealthDeps {
+  qdrant: DepHealth
+  llm: DepHealth & { provider: string; model: string; checked_at: string }
+}
+
+/** Carries the server's JSON body so a 422 can show which field failed. */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly body: { detail?: unknown; errors?: Record<string, string> } | null,
+  ) {
+    super(message)
+  }
+}
+
 let authedFetch: AuthedFetch | null = null
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -70,7 +139,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
   })
   if (!res.ok) {
-    throw new Error(`${init?.method ?? 'GET'} ${path} → ${res.status}`)
+    const body = await res.json().catch(() => null)
+    const detail = typeof body?.detail === 'string' ? `: ${body.detail}` : ''
+    throw new ApiError(`${init?.method ?? 'GET'} ${path} → ${res.status}${detail}`, res.status, body)
   }
   return (await res.json()) as T
 }
@@ -102,5 +173,22 @@ export function useApi() {
 
     evalRun: (tag: string) =>
       request<Record<string, any>>(`/api/eval/runs?tag=${encodeURIComponent(tag)}`),
+
+    memoryStats: () => request<MemoryStats>('/api/memory/stats'),
+
+    facets: (collection: string, field = 'tags', limit = 12) =>
+      request<FacetResponse>(
+        `/api/index/facets?collection=${encodeURIComponent(collection)}&field=${encodeURIComponent(field)}&limit=${limit}`,
+      ),
+
+    healthDeps: () => request<HealthDeps>('/api/health/deps'),
+
+    config: () => request<ConfigResponse>('/api/config'),
+
+    updateConfig: (values: Record<string, unknown>) =>
+      request<ConfigResponse>('/api/config', { method: 'PATCH', body: JSON.stringify({ values }) }),
+
+    resetConfig: (key: string) =>
+      request<ConfigResponse>(`/api/config/${encodeURIComponent(key)}`, { method: 'DELETE' }),
   }
 }

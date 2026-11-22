@@ -1,22 +1,35 @@
 <script setup lang="ts">
-/** Horizontal bars scaled to the largest row — readable without a chart lib. */
+/**
+ * Ranked horizontal bars, scaled to the largest row. Labels sit inside the
+ * bar so long file paths stay readable instead of being squeezed into an axis.
+ */
 const props = defineProps<{
   rows: Array<{ label: string; count: number }>
   empty?: string
+  mono?: boolean
 }>()
 
 const max = computed(() => Math.max(1, ...props.rows.map((r) => r.count)))
 </script>
 
 <template>
-  <div v-if="!rows.length" class="py-6 text-sm text-muted-foreground">
+  <p v-if="!rows.length" class="py-6 text-sm text-muted-foreground">
     {{ empty ?? 'Nothing to show yet.' }}
-  </div>
-  <div v-else class="space-y-1.5">
-    <div v-for="row in rows" :key="row.label" class="flex items-center gap-3 text-sm">
-      <span class="w-16 shrink-0 text-right tabular-nums text-muted-foreground">{{ row.count }}</span>
-      <div class="h-5 min-w-[2px] rounded bg-primary/80" :style="{ width: `${(row.count / max) * 55}%` }" />
-      <span class="truncate font-mono text-xs text-muted-foreground" :title="row.label">{{ row.label }}</span>
-    </div>
-  </div>
+  </p>
+  <ul v-else class="space-y-1.5">
+    <li v-for="row in rows" :key="row.label" class="flex items-center gap-3 text-sm">
+      <div class="relative h-7 min-w-0 flex-1">
+        <div
+          class="absolute inset-y-0 left-0 rounded-md bg-primary/15"
+          :style="{ width: `${Math.max(1, (row.count / max) * 100)}%` }"
+        />
+        <span
+          class="relative flex h-full items-center truncate px-2"
+          :class="mono && 'font-mono text-xs'"
+          :title="row.label"
+        >{{ row.label }}</span>
+      </div>
+      <span class="w-12 shrink-0 text-right tabular-nums text-muted-foreground">{{ row.count.toLocaleString() }}</span>
+    </li>
+  </ul>
 </template>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { byDay, byIntent, latencyStats, percentile, scoreBuckets, topFiles } from './queryLog'
+import { byDay, byIntent, latencyStats, percentile, rates, scoreBuckets, timeSeries, topFiles } from './queryLog'
 
 const entry = (over: Partial<any> = {}) => ({
   ts: 1_700_000_000,
@@ -82,10 +82,55 @@ describe('scoreBuckets', () => {
 
   it('keeps a score of exactly 1 inside the last bucket', () => {
     const rows = scoreBuckets([entry({ top_scores: [1] })] as any)
-    expect(rows[rows.length - 1].count).toBe(1)
+    expect(rows.at(-1)?.count).toBe(1)
   })
 
   it('always returns every bucket, so an empty chart still has an axis', () => {
     expect(scoreBuckets([])).toHaveLength(10)
+  })
+})
+
+describe('timeSeries', () => {
+  const hour = 3600
+  // Aligned on a local hour boundary so the bucket arithmetic is exact in any TZ.
+  const t0 = Math.floor(new Date(2026, 0, 10, 12).getTime() / 1000)
+
+  it('zero-fills quiet hours so a gap reads as a dip, not a straight line', () => {
+    const series = timeSeries([entry({ ts: t0 + 60 }), entry({ ts: t0 + 3 * hour })], t0, t0 + 3 * hour, 'hour')
+    expect(series.map((b) => b.count)).toEqual([1, 0, 0, 1])
+  })
+
+  it('splits each bucket by intent and computes latency per bucket', () => {
+    const series = timeSeries(
+      [entry({ ts: t0 + 1, intent: 'search', latency_ms: 10 }), entry({ ts: t0 + 2, latency_ms: 90 })],
+      t0,
+      t0 + 60,
+      'hour',
+    )
+    expect(series).toHaveLength(1)
+    expect(series[0]?.byIntent).toEqual({ search: 1, search_code: 1 })
+    expect(series[0]?.p95).toBe(90)
+  })
+
+  it('drops entries outside the window instead of stretching it', () => {
+    const series = timeSeries([entry({ ts: t0 - hour }), entry({ ts: t0 + 10 * hour })], t0, t0 + hour, 'hour')
+    expect(series.reduce((n, b) => n + b.count, 0)).toBe(0)
+  })
+
+  it('buckets by local calendar day', () => {
+    const day = 24 * hour
+    const series = timeSeries([entry({ ts: t0 }), entry({ ts: t0 + day })], t0, t0 + day, 'day')
+    expect(series.map((b) => b.count)).toEqual([1, 1])
+  })
+})
+
+describe('rates', () => {
+  it('reports cache hits and empty results as shares of all searches', () => {
+    const r = rates([entry({ cache_hit: true }), entry({ n_results: 0 }), entry(), entry()])
+    expect(r).toEqual({ cacheHit: 0.25, zeroResults: 0.25 })
+  })
+
+  it('is 0, not NaN, on an empty log', () => {
+    expect(rates([])).toEqual({ cacheHit: 0, zeroResults: 0 })
   })
 })

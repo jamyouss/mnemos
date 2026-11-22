@@ -20,7 +20,7 @@ describe('createAuthedFetch', () => {
 
     await authed('/api/status')
 
-    expect(authHeader(fetch.mock.calls[0][1])).toBe('Bearer k1')
+    expect(authHeader(fetch.mock.calls[0]?.[1])).toBe('Bearer k1')
   })
 
   it('asks for a key on 401, stores it and retries once', async () => {
@@ -36,7 +36,7 @@ describe('createAuthedFetch', () => {
     expect(res.status).toBe(200)
     expect(ask).toHaveBeenCalledTimes(1)
     expect(storage.data.get('mnemos.apiKey')).toBe('k2')
-    expect(authHeader(fetch.mock.calls[1][1])).toBe('Bearer k2')
+    expect(authHeader(fetch.mock.calls[1]?.[1])).toBe('Bearer k2')
   })
 
   it('asks only once when several requests hit 401 together', async () => {

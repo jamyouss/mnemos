@@ -1,0 +1,125 @@
+/*
+ * Accent presets a user picks in the dashboard (stored per browser).
+ * Unlayered and keyed on :root[data-theme], so they win over both the
+ * bundled defaults and an instance's /theme.css. No attribute = instance
+ * theme as-is. Only the accent moves: chart colours stay categorical.
+ */
+
+:root[data-theme="blue"] {
+  --primary: oklch(0.546 0.245 262.881);
+  --primary-foreground: oklch(0.97 0.014 254.604);
+  --ring: oklch(0.546 0.245 262.881);
+  --sidebar-primary: oklch(0.546 0.245 262.881);
+  --sidebar-primary-foreground: oklch(0.97 0.014 254.604);
+  --sidebar-ring: oklch(0.546 0.245 262.881);
+}
+:root.dark[data-theme="blue"] {
+  --primary: oklch(0.623 0.214 259.815);
+  --primary-foreground: oklch(0.97 0.014 254.604);
+  --ring: oklch(0.623 0.214 259.815);
+  --sidebar-primary: oklch(0.623 0.214 259.815);
+  --sidebar-primary-foreground: oklch(0.97 0.014 254.604);
+  --sidebar-ring: oklch(0.623 0.214 259.815);
+}
+
+:root[data-theme="violet"] {
+  --primary: oklch(0.541 0.281 293.009);
+  --primary-foreground: oklch(0.969 0.016 293.756);
+  --ring: oklch(0.541 0.281 293.009);
+  --sidebar-primary: oklch(0.541 0.281 293.009);
+  --sidebar-primary-foreground: oklch(0.969 0.016 293.756);
+  --sidebar-ring: oklch(0.541 0.281 293.009);
+}
+:root.dark[data-theme="violet"] {
+  --primary: oklch(0.606 0.25 292.717);
+  --primary-foreground: oklch(0.969 0.016 293.756);
+  --ring: oklch(0.606 0.25 292.717);
+  --sidebar-primary: oklch(0.606 0.25 292.717);
+  --sidebar-primary-foreground: oklch(0.969 0.016 293.756);
+  --sidebar-ring: oklch(0.606 0.25 292.717);
+}
+
+:root[data-theme="green"] {
+  --primary: oklch(0.627 0.194 149.214);
+  --primary-foreground: oklch(0.982 0.018 155.826);
+  --ring: oklch(0.627 0.194 149.214);
+  --sidebar-primary: oklch(0.627 0.194 149.214);
+  --sidebar-primary-foreground: oklch(0.982 0.018 155.826);
+  --sidebar-ring: oklch(0.627 0.194 149.214);
+}
+:root.dark[data-theme="green"] {
+  --primary: oklch(0.723 0.219 149.579);
+  --primary-foreground: oklch(0.266 0.065 152.934);
+  --ring: oklch(0.723 0.219 149.579);
+  --sidebar-primary: oklch(0.723 0.219 149.579);
+  --sidebar-primary-foreground: oklch(0.266 0.065 152.934);
+  --sidebar-ring: oklch(0.723 0.219 149.579);
+}
+
+:root[data-theme="teal"] {
+  --primary: oklch(0.6 0.118 184.704);
+  --primary-foreground: oklch(0.984 0.014 180.72);
+  --ring: oklch(0.6 0.118 184.704);
+  --sidebar-primary: oklch(0.6 0.118 184.704);
+  --sidebar-primary-foreground: oklch(0.984 0.014 180.72);
+  --sidebar-ring: oklch(0.6 0.118 184.704);
+}
+:root.dark[data-theme="teal"] {
+  --primary: oklch(0.704 0.14 182.503);
+  --primary-foreground: oklch(0.277 0.046 192.524);
+  --ring: oklch(0.704 0.14 182.503);
+  --sidebar-primary: oklch(0.704 0.14 182.503);
+  --sidebar-primary-foreground: oklch(0.277 0.046 192.524);
+  --sidebar-ring: oklch(0.704 0.14 182.503);
+}
+
+:root[data-theme="orange"] {
+  --primary: oklch(0.646 0.222 41.116);
+  --primary-foreground: oklch(0.98 0.016 73.684);
+  --ring: oklch(0.646 0.222 41.116);
+  --sidebar-primary: oklch(0.646 0.222 41.116);
+  --sidebar-primary-foreground: oklch(0.98 0.016 73.684);
+  --sidebar-ring: oklch(0.646 0.222 41.116);
+}
+:root.dark[data-theme="orange"] {
+  --primary: oklch(0.705 0.213 47.604);
+  --primary-foreground: oklch(0.98 0.016 73.684);
+  --ring: oklch(0.705 0.213 47.604);
+  --sidebar-primary: oklch(0.705 0.213 47.604);
+  --sidebar-primary-foreground: oklch(0.98 0.016 73.684);
+  --sidebar-ring: oklch(0.705 0.213 47.604);
+}
+
+:root[data-theme="amber"] {
+  --primary: oklch(0.769 0.188 70.08);
+  --primary-foreground: oklch(0.279 0.077 45.635);
+  --ring: oklch(0.769 0.188 70.08);
+  --sidebar-primary: oklch(0.769 0.188 70.08);
+  --sidebar-primary-foreground: oklch(0.279 0.077 45.635);
+  --sidebar-ring: oklch(0.769 0.188 70.08);
+}
+:root.dark[data-theme="amber"] {
+  --primary: oklch(0.828 0.189 84.429);
+  --primary-foreground: oklch(0.279 0.077 45.635);
+  --ring: oklch(0.828 0.189 84.429);
+  --sidebar-primary: oklch(0.828 0.189 84.429);
+  --sidebar-primary-foreground: oklch(0.279 0.077 45.635);
+  --sidebar-ring: oklch(0.828 0.189 84.429);
+}
+
+:root[data-theme="rose"] {
+  --primary: oklch(0.586 0.253 17.585);
+  --primary-foreground: oklch(0.969 0.015 12.422);
+  --ring: oklch(0.586 0.253 17.585);
+  --sidebar-primary: oklch(0.586 0.253 17.585);
+  --sidebar-primary-foreground: oklch(0.969 0.015 12.422);
+  --sidebar-ring: oklch(0.586 0.253 17.585);
+}
+:root.dark[data-theme="rose"] {
+  --primary: oklch(0.645 0.246 16.439);
+  --primary-foreground: oklch(0.969 0.015 12.422);
+  --ring: oklch(0.645 0.246 16.439);
+  --sidebar-primary: oklch(0.645 0.246 16.439);
+  --sidebar-primary-foreground: oklch(0.969 0.015 12.422);
+  --sidebar-ring: oklch(0.645 0.246 16.439);
+}

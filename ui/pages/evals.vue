@@ -1,4 +1,10 @@
 <script setup lang="ts">
+import { TriangleAlertIcon } from '@lucide/vue'
+import type { EvalRunSummary } from '~/composables/useApi'
+
+definePageMeta({ title: 'Evals' })
+useHead({ title: 'Evals' })
+
 const api = useApi()
 const { data, error } = await useAsyncData('eval-runs', () => api.evalRuns())
 
@@ -11,26 +17,28 @@ const compared = computed(() =>
 
 const METRICS = ['mrr', 'ndcg@5', 'recall@5', 'precision@5', 'hit@5'] as const
 
-function metric(run: any, key: string): string {
-  const v = run?.report?.overall?.[key]
-  return typeof v === 'number' ? v.toFixed(3) : '—'
+function value(run: EvalRunSummary, key: string): number | undefined {
+  const v = run.report?.overall?.[key]
+  return typeof v === 'number' ? v : undefined
+}
+/** Best value of a row, so the winner of a comparison stands out. */
+function best(key: string): number | undefined {
+  const vs = compared.value.map((r) => value(r, key)).filter((v): v is number => v !== undefined)
+  return compared.value.length > 1 && vs.length ? Math.max(...vs) : undefined
 }
 function toggle(tag: string) {
-  selected.value = selected.value.includes(tag)
-    ? selected.value.filter((t) => t !== tag)
-    : [...selected.value, tag]
+  selected.value = selected.value.includes(tag) ? selected.value.filter((t) => t !== tag) : [...selected.value, tag]
 }
 </script>
 
 <template>
   <div class="space-y-6">
-    <div>
-      <h1 class="text-2xl font-semibold tracking-tight">Evals</h1>
-      <p class="mt-1 text-sm text-muted-foreground">
-        Runs from <code class="text-xs">evals/runs/</code>. Absolute numbers depend on the golden set;
-        it is the delta between two runs on the same set that means something.
-      </p>
-    </div>
+    <PageHeader title="Evals">
+      <template #description>
+        Runs from <code class="text-xs">evals/runs/</code>. Absolute numbers depend on the golden set; it is the delta
+        between two runs on the same set that means something.
+      </template>
+    </PageHeader>
 
     <EmptyState v-if="error" title="Could not load eval runs" detail="GET /api/eval/runs failed." />
 
@@ -42,51 +50,61 @@ function toggle(tag: string) {
 
     <template v-else>
       <div class="flex flex-wrap gap-2">
-        <button
+        <Button
           v-for="r in runs"
           :key="r.tag"
-          class="rounded-md border px-2.5 py-1 text-xs"
-          :class="selected.includes(r.tag) ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'"
+          size="sm"
+          :variant="selected.includes(r.tag) ? 'default' : 'outline'"
+          class="font-mono text-xs"
           @click="toggle(r.tag)"
-        >{{ r.tag }}</button>
+        >
+          {{ r.tag }}
+        </Button>
       </div>
 
-      <div class="overflow-x-auto rounded-lg border">
-        <table class="w-full text-sm">
-          <thead class="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
-            <tr>
-              <th class="px-4 py-2">Metric</th>
-              <th v-for="r in compared" :key="r.tag" class="px-4 py-2 font-mono normal-case">{{ r.tag }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr class="border-t">
-              <td class="px-4 py-2 text-muted-foreground">questions</td>
-              <td v-for="r in compared" :key="r.tag" class="px-4 py-2 tabular-nums">
-                {{ r.report?.n_questions ?? '—' }}
-              </td>
-            </tr>
-            <tr v-for="m in METRICS" :key="m" class="border-t">
-              <td class="px-4 py-2 text-muted-foreground">{{ m }}</td>
-              <td v-for="r in compared" :key="r.tag" class="px-4 py-2 tabular-nums">{{ metric(r, m) }}</td>
-            </tr>
-            <tr class="border-t">
-              <td class="px-4 py-2 text-muted-foreground">p50</td>
-              <td v-for="r in compared" :key="r.tag" class="px-4 py-2 tabular-nums">
+      <Card class="py-0">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead class="pl-6">Metric</TableHead>
+              <TableHead v-for="r in compared" :key="r.tag" class="font-mono normal-case">{{ r.tag }}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            <TableRow>
+              <TableCell class="pl-6 text-muted-foreground">questions</TableCell>
+              <TableCell v-for="r in compared" :key="r.tag" class="tabular-nums">{{ r.report?.n_questions ?? '—' }}</TableCell>
+            </TableRow>
+            <TableRow v-for="m in METRICS" :key="m">
+              <TableCell class="pl-6 text-muted-foreground">{{ m }}</TableCell>
+              <TableCell
+                v-for="r in compared"
+                :key="r.tag"
+                class="tabular-nums"
+                :class="value(r, m) !== undefined && value(r, m) === best(m) && 'font-semibold text-success'"
+              >
+                {{ value(r, m)?.toFixed(3) ?? '—' }}
+              </TableCell>
+            </TableRow>
+            <TableRow>
+              <TableCell class="pl-6 text-muted-foreground">p50</TableCell>
+              <TableCell v-for="r in compared" :key="r.tag" class="tabular-nums">
                 {{ r.report?.latency_p50_ms ? `${Math.round(r.report.latency_p50_ms)} ms` : '—' }}
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+              </TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
+      </Card>
 
-      <div class="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-        <strong class="text-foreground">The harness cannot measure the grader.</strong>
-        It routes <code class="text-xs">code_search</code> to
-        <code class="text-xs">/api/search-code</code>, which never runs it, and a generated golden set is
-        mostly code_search. A grader A/B through the harness returns identical tables — that reads as
-        "no effect" when it means "never ran". See <code class="text-xs">docs/EVAL.md</code>.
-      </div>
+      <Alert>
+        <TriangleAlertIcon />
+        <AlertTitle>The harness cannot measure the grader</AlertTitle>
+        <AlertDescription>
+          It routes <code>code_search</code> to <code>/api/search-code</code>, which never runs it, and a generated golden
+          set is mostly code_search. A grader A/B through the harness returns identical tables — that reads as "no
+          effect" when it means "never ran". See <code>docs/EVAL.md</code>.
+        </AlertDescription>
+      </Alert>
     </template>
   </div>
 </template>
