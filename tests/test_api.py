@@ -223,6 +223,39 @@ async def test_search_request_ignores_unknown_project_field(app):
     assert "project" not in kwargs
 
 
+@pytest.mark.anyio
+async def test_search_returns_a_trace_only_when_asked(app):
+    spy = MagicMock(return_value=[])
+    app.state.search_service.search_code = spy
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        plain = (await client.post("/api/search-code", json={"query": "q"})).json()
+        traced = (await client.post("/api/search-code", json={"query": "q", "trace": True})).json()
+
+    assert "trace" not in plain
+    assert set(traced["trace"]) == {"total_ms", "stages", "candidates"}
+    assert spy.call_args_list[0].kwargs["trace"] is None
+    assert spy.call_args_list[1].kwargs["trace"] is not None
+
+
+@pytest.mark.anyio
+async def test_search_source_is_a_closed_set(app):
+    """Free text here would let any client write arbitrary labels into the log."""
+    spy = MagicMock(return_value=[])
+    app.state.search_service.search = spy
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        ok = await client.post("/api/search", json={"query": "q", "source": "playground", "use_cache": False})
+        bad = await client.post("/api/search", json={"query": "q", "source": "anything"})
+
+    assert ok.status_code == 200
+    assert spy.call_args.kwargs["source"] == "playground"
+    assert spy.call_args.kwargs["use_cache"] is False
+    assert bad.status_code == 422
+
+
 # ---------------------------------------------------------------------------
 # /api/search-memory
 # ---------------------------------------------------------------------------

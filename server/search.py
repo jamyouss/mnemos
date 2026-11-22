@@ -15,6 +15,7 @@ from qdrant_client.models import (
 )
 
 import time
+from typing import Any
 
 from core.cache import SemanticCache
 from core.collections import COLLECTIONS, DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME
@@ -30,6 +31,8 @@ from core.observability import QueryLogger
 from core.reranker import CrossEncoderReranker, mmr_select
 from core.rewriter import QueryRewriter
 from core.sparse import bm25_sparse
+
+from server.trace import RetrievalTrace
 
 
 # How many candidates each leg of the fusion pulls before RRF merges them.
@@ -164,10 +167,11 @@ class SearchService:
         sparse_vec: SparseVector,
         query_filter: Filter | None,
         limit: int,
+        trace: RetrievalTrace | None = None,
     ):
         """Run a single-collection hybrid query (dense + sparse) fused by RRF."""
         try:
-            return self._qdrant.query_points(
+            points = self._qdrant.query_points(
                 collection_name=collection,
                 prefetch=[
                     Prefetch(
@@ -189,6 +193,8 @@ class SearchService:
             ).points
         except Exception:
             # Legacy collections still on the unnamed-dense schema: fall back to dense-only.
+            if trace is not None:
+                trace.note("fusion", collection=collection, mode="dense-only (legacy schema)")
             return self._qdrant.query_points(
                 collection_name=collection,
                 query=dense_vec,
@@ -196,23 +202,52 @@ class SearchService:
                 limit=limit,
                 with_payload=True,
             ).points
+        if trace is not None:
+            # The fused query does not say where each hit stood on either side;
+            # asking each side separately is the only way to know.
+            legs = [
+                self._qdrant.query_points(
+                    collection_name=collection,
+                    query=vec,
+                    using=name,
+                    query_filter=query_filter,
+                    limit=_PREFETCH_LIMIT,
+                    with_payload=False,
+                ).points
+                for vec, name in ((dense_vec, DENSE_VECTOR_NAME), (sparse_vec, SPARSE_VECTOR_NAME))
+            ]
+            trace.legs(collection, [p.id for p in legs[0]], [p.id for p in legs[1]])
+        return points
+
+    def _rerank(self, query: str, candidates: list[tuple[str, Any]], top_k: int | None,
+                trace: RetrievalTrace | None):
+        """Run the cross-encoder; with a trace, time it and record each verdict."""
+        if trace is None:
+            return self._reranker.rerank(query, candidates, top_k=top_k)
+        with trace.stage("rerank", candidates=len(candidates)):
+            ranked = self._reranker.rerank(query, candidates, top_k=top_k)
+        for rank, s in enumerate(ranked, 1):
+            trace.annotate(s.payload, rerank_score=float(s.score), rerank_rank=rank)
+        return ranked
 
     def _rerank_and_select(
         self,
         query: str,
         results: list,
         limit: int,
+        trace: RetrievalTrace | None = None,
     ) -> list:
         """Apply the cross-encoder reranker (if enabled) and optional MMR top-K selection."""
         if not results:
             return results
 
         if self._reranker is None or not self._reranker.enabled:
+            if trace is not None:
+                trace.note("rerank", enabled=False)
             results.sort(key=lambda r: r.score, reverse=True)
             return results[:limit]
 
-        candidates = [(r.content, r) for r in results]
-        ranked = self._reranker.rerank(query, candidates, top_k=None)
+        ranked = self._rerank(query, [(r.content, r) for r in results], None, trace)
 
         ordered = [s.payload for s in ranked]
         # Map reranker score back onto the SearchResult so the API surfaces it.
@@ -227,11 +262,34 @@ class SearchService:
 
                 scored = [ScoredDoc(doc_id=i, score=r.score, payload=r) for i, r in enumerate(ordered)]
                 picked = mmr_select(scored, vectors, top_k=limit, lambda_=self._mmr_lambda)
+                if trace is not None:
+                    trace.note("mmr", enabled=True, picked=len(picked), lambda_=self._mmr_lambda)
                 return [s.payload for s in picked]
-            except Exception:
-                pass
+            except Exception as exc:
+                if trace is not None:
+                    trace.note("mmr", enabled=True, error=type(exc).__name__)
+        elif trace is not None:
+            trace.note("mmr", enabled=self._mmr_enabled, applied=False)
 
         return ordered[:limit]
+
+    def _embed(self, query: str, trace: RetrievalTrace | None, task: str | None = None):
+        """Dense and BM25 vectors of the query, timed when tracing."""
+        kwargs = {"task": task} if task else {}
+        if trace is None:
+            return self._embeddings.embed_query(query, **kwargs), bm25_sparse(query)
+        with trace.stage("embed", query=query):
+            return self._embeddings.embed_query(query, **kwargs), bm25_sparse(query)
+
+    def _query_collection(self, collection: str, dense_vec, sparse_vec, query_filter: Filter | None,
+                          limit: int, trace: RetrievalTrace | None):
+        """`_hybrid_query`, timed when tracing."""
+        if trace is None:
+            return self._hybrid_query(collection, dense_vec, sparse_vec, query_filter, limit)
+        with trace.stage("retrieve", collection=collection) as record:
+            hits = self._hybrid_query(collection, dense_vec, sparse_vec, query_filter, limit, trace)
+            record["candidates"] = len(hits)
+        return hits
 
     def _retrieve_all(
         self,
@@ -239,23 +297,27 @@ class SearchService:
         target_collections: list[str],
         query_filter: Filter | None,
         per_collection: int,
+        trace: RetrievalTrace | None = None,
+        via: str | None = None,
     ) -> list[SearchResult]:
-        dense_vec = self._embeddings.embed_query(query)
-        sparse_vec = bm25_sparse(query)
+        dense_vec, sparse_vec = self._embed(query, trace)
         out: list[SearchResult] = []
         for coll_name in target_collections:
-            hits = self._hybrid_query(coll_name, dense_vec, sparse_vec, query_filter, per_collection)
-            for hit in hits:
-                out.append(
-                    SearchResult(
-                        content=hit.payload.get("content", ""),
-                        file_path=hit.payload.get("file_path", ""),
-                        score=hit.score,
-                        chunk_type=hit.payload.get("chunk_type", ""),
-                        collection=coll_name,
-                        metadata=_filter_metadata(hit.payload),
-                    )
+            hits = self._query_collection(coll_name, dense_vec, sparse_vec, query_filter, per_collection, trace)
+            results = [
+                SearchResult(
+                    content=hit.payload.get("content", ""),
+                    file_path=hit.payload.get("file_path", ""),
+                    score=hit.score,
+                    chunk_type=hit.payload.get("chunk_type", ""),
+                    collection=coll_name,
+                    metadata=_filter_metadata(hit.payload),
                 )
+                for hit in hits
+            ]
+            if trace is not None:
+                trace.pool(coll_name, hits, results, via)
+            out.extend(results)
         return out
 
     @staticmethod
@@ -277,6 +339,7 @@ class SearchService:
         t_start: float,
         intent: str,
         extra: dict | None = None,
+        source: str | None = None,
     ) -> None:
         """Record one retrieval call, if the query log is on.
 
@@ -298,7 +361,7 @@ class SearchService:
             results,
             latency_ms=(time.perf_counter() - t_start) * 1000.0,
             intent=intent,
-            extra={**stages, **(extra or {})},
+            extra={**stages, **(extra or {}), **({"source": source} if source else {})},
         )
 
     def search(
@@ -311,8 +374,12 @@ class SearchService:
         tags_any: list[str] | None = None,
         tags_all: list[str] | None = None,
         mode: str = "preview",
+        use_cache: bool = True,
+        trace: RetrievalTrace | None = None,
+        source: str | None = None,
     ) -> list[SearchResult]:
         t_start = time.perf_counter()
+        cache_on = bool(self._cache and self._cache.enabled and use_cache)
 
         # --- 0. Cache lookup (Phase 4E) ---
         # Cache key includes the limit and filter set so that a more permissive
@@ -329,8 +396,11 @@ class SearchService:
             f"tagsAny={','.join(sorted(tags_any)) if tags_any else ''}:"
             f"tagsAll={','.join(sorted(tags_all)) if tags_all else ''}"
         )
-        if self._cache and self._cache.enabled:
+        if cache_on:
             cached = self._cache.lookup(query, namespace=cache_namespace)
+            if trace is not None:
+                trace.note("cache", hit=cached is not None,
+                           score=float(cached.score) if cached is not None else None)
             if cached is not None:
                 hit_results = [SearchResult(**r) for r in cached.payload]
                 if self._query_logger and self._query_logger.enabled:
@@ -339,9 +409,12 @@ class SearchService:
                         hit_results,
                         latency_ms=(time.perf_counter() - t_start) * 1000.0,
                         intent="search",
-                        extra={"cache_hit": True, "cache_score": cached.score},
+                        extra={"cache_hit": True, "cache_score": cached.score,
+                               **({"source": source} if source else {})},
                     )
                 return hit_results
+        elif trace is not None:
+            trace.note("cache", hit=False, skipped="bypassed" if use_cache is False else "disabled")
 
         default_pool = [c.name for c in COLLECTIONS if c.name != "mnemos_memory"]
         target_collections = collections or default_pool
@@ -366,34 +439,44 @@ class SearchService:
         per_collection = _HYBRID_TOP if (self._reranker and self._reranker.enabled) else limit
 
         # --- 1. Initial retrieval ---
-        all_results = self._retrieve_all(query, target_collections, query_filter, per_collection)
+        all_results = self._retrieve_all(query, target_collections, query_filter, per_collection, trace)
 
         # --- 2. CRAG corrective loop ---
         if self._grader and self._grader.enabled and all_results:
-            graded = self._grader.grade(query, [(r.content, r) for r in all_results])
+            if trace is None:
+                graded = self._grader.grade(query, [(r.content, r) for r in all_results])
+            else:
+                with trace.stage("grader", candidates=len(all_results)) as record:
+                    graded = self._grader.grade(query, [(r.content, r) for r in all_results])
+                    record["grades"] = {g: sum(1 for x in graded if x.grade == g) for g in {x.grade for x in graded}}
+                for g, r in zip(graded, all_results):
+                    trace.annotate(r, grade=g.grade)
             if self._grader.all_low(graded):
                 # Retrieval failed → try rewritten queries
                 if self._rewriter and self._rewriter.enabled:
-                    for alt in self._rewriter.rewrite(query):
-                        if alt == query:
-                            continue
+                    variants = [alt for alt in self._rewriter.rewrite(query) if alt != query]
+                    if trace is not None:
+                        trace.note("rewriter", variants=variants)
+                    for alt in variants:
                         all_results.extend(
-                            self._retrieve_all(alt, target_collections, query_filter, per_collection)
+                            self._retrieve_all(alt, target_collections, query_filter, per_collection, trace, via=alt)
                         )
                     all_results = self._dedupe_by_path(all_results)
             else:
                 # Drop the low-graded chunks before reranking
                 kept = [(g, r) for g, r in zip(graded, all_results) if g.grade != "low"]
                 all_results = [r for _, r in kept]
+        elif trace is not None:
+            trace.note("grader", enabled=False)
 
         # --- 3. Rerank + (optional) MMR ---
-        final = self._rerank_and_select(query, all_results, limit)
+        final = self._rerank_and_select(query, all_results, limit, trace)
 
         # --- 3b. Preview truncation (default) ---
         final = _apply_preview_mode(final, mode)
 
         # --- 4. Cache write-through ---
-        if self._cache and self._cache.enabled and final:
+        if cache_on and final:
             self._cache.store(query, final, namespace=cache_namespace)
 
         # --- 5. Observability ---
@@ -406,6 +489,7 @@ class SearchService:
                 "grader": bool(self._grader and self._grader.enabled),
                 "rewriter": bool(self._rewriter and self._rewriter.enabled),
             },
+            source,
         )
 
         return final
@@ -420,13 +504,14 @@ class SearchService:
         path_filter: str | None = None,
         limit: int = 3,
         mode: str = "preview",
+        trace: RetrievalTrace | None = None,
+        source: str | None = None,
     ) -> list[CodeSearchResult]:
         """Search the single `mnemos_code` collection; scope to a project or
         any other slice via the `tags` payload filter rather than per-project
         collections."""
         t_start = time.perf_counter()
-        dense_vec = self._embeddings.embed_query(query, task="code")
-        sparse_vec = bm25_sparse(query)
+        dense_vec, sparse_vec = self._embed(query, trace, task="code")
 
         must_conditions: list = []
         if tags_any:
@@ -443,7 +528,7 @@ class SearchService:
         query_filter = Filter(must=must_conditions) if must_conditions else None
 
         per_collection = _HYBRID_TOP if (self._reranker and self._reranker.enabled) else limit
-        hits = self._hybrid_query("mnemos_code", dense_vec, sparse_vec, query_filter, per_collection)
+        hits = self._query_collection("mnemos_code", dense_vec, sparse_vec, query_filter, per_collection, trace)
 
         all_results: list[CodeSearchResult] = [
             CodeSearchResult(
@@ -459,8 +544,10 @@ class SearchService:
             )
             for hit in hits
         ]
+        if trace is not None:
+            trace.pool("mnemos_code", hits, all_results)
 
-        final = _apply_preview_mode(self._rerank_and_select(query, all_results, limit), mode)
+        final = _apply_preview_mode(self._rerank_and_select(query, all_results, limit, trace), mode)
         self._log_query(
             query, final, t_start, "search_code",
             {
@@ -469,15 +556,16 @@ class SearchService:
                 "tags_any": tags_any or [],
                 "tags_all": tags_all or [],
             },
+            source,
         )
         return final
 
-    def search_skills(self, query: str, limit: int = 3) -> list[SkillResult]:
+    def search_skills(self, query: str, limit: int = 3, trace: RetrievalTrace | None = None,
+                      source: str | None = None) -> list[SkillResult]:
         t_start = time.perf_counter()
-        dense_vec = self._embeddings.embed_query(query)
-        sparse_vec = bm25_sparse(query)
+        dense_vec, sparse_vec = self._embed(query, trace)
         per_collection = _HYBRID_TOP if (self._reranker and self._reranker.enabled) else limit
-        hits = self._hybrid_query("mnemos_skills", dense_vec, sparse_vec, None, per_collection)
+        hits = self._query_collection("mnemos_skills", dense_vec, sparse_vec, None, per_collection, trace)
         results = [
             SkillResult(
                 skill_name=hit.payload.get("skill_name", ""),
@@ -487,16 +575,21 @@ class SearchService:
             )
             for hit in hits
         ]
+        if trace is not None:
+            trace.pool("mnemos_skills", hits, results)
         # Reranker uses .content; SkillResult has instructions_preview instead — wrap it.
         if self._reranker is not None and self._reranker.enabled and results:
             candidates = [(r.instructions_preview, r) for r in results]
-            ranked = self._reranker.rerank(query, candidates, top_k=limit)
+            ranked = self._rerank(query, candidates, limit, trace)
             final = [s.payload for s in ranked]
         else:
+            if trace is not None:
+                trace.note("rerank", enabled=False)
             final = results[:limit]
         self._log_query(
             query, final, t_start, "search_skills",
             {"collections": ["mnemos_skills"], "n_candidates": len(results)},
+            source,
         )
         return final
 
@@ -508,9 +601,10 @@ class SearchService:
         memory_type: str | None = None,
         limit: int = 5,
         mode: str = "preview",
+        trace: RetrievalTrace | None = None,
+        source: str | None = None,
     ) -> list[MemoryResult]:
-        dense_vec = self._embeddings.embed_query(query)
-        sparse_vec = bm25_sparse(query)
+        dense_vec, sparse_vec = self._embed(query, trace)
 
         t_start = time.perf_counter()
         must_conditions = [FieldCondition(key="status", match=MatchValue(value="approved"))]
@@ -524,7 +618,7 @@ class SearchService:
         query_filter = Filter(must=must_conditions)
 
         per_collection = _HYBRID_TOP if (self._reranker and self._reranker.enabled) else limit
-        hits = self._hybrid_query("mnemos_memory", dense_vec, sparse_vec, query_filter, per_collection)
+        hits = self._query_collection("mnemos_memory", dense_vec, sparse_vec, query_filter, per_collection, trace)
         results = [
             MemoryResult(
                 id=hit.payload.get("id", ""),
@@ -538,11 +632,15 @@ class SearchService:
             )
             for hit in hits
         ]
+        if trace is not None:
+            trace.pool("mnemos_memory", hits, results)
         if self._reranker is not None and self._reranker.enabled and results:
             candidates = [(r.content, r) for r in results]
-            ranked = self._reranker.rerank(query, candidates, top_k=limit)
+            ranked = self._rerank(query, candidates, limit, trace)
             final = _apply_preview_mode([s.payload for s in ranked], mode)
         else:
+            if trace is not None:
+                trace.note("rerank", enabled=False)
             final = _apply_preview_mode(results[:limit], mode)
         self._log_query(
             query, final, t_start, "search_memory",
@@ -551,5 +649,6 @@ class SearchService:
                 "n_candidates": len(results),
                 "memory_type": memory_type or "",
             },
+            source,
         )
         return final

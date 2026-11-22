@@ -6,7 +6,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from pydantic import BaseModel
@@ -23,6 +23,7 @@ from core.collections import COLLECTIONS, TAGS_PAYLOAD_FIELD
 from core.indexer import CHUNK_FACET_FIELDS, facet_fields
 from core.llm import LLMError
 from server.config import settings
+from server.trace import RetrievalTrace
 
 # Handlers are plain `def` on purpose: every one of them calls blocking code
 # (torch inference, the sync Qdrant client, LLM calls). FastAPI runs `def`
@@ -53,7 +54,16 @@ class IndexPushRequest(BaseModel):
     file_mtime: Optional[float] = None  # Source last-modified (epoch seconds); defaults to now.
 
 
-class SearchRequest(BaseModel):
+class _Diagnosable(BaseModel):
+    # Per-stage record of how the results were reached (Playground). Costs two
+    # extra Qdrant queries per collection, so it is never on by default.
+    trace: bool = False
+    # Tags the query-log entry so the dashboard can leave test traffic out.
+    # A closed set: free text here would let any client write into the log.
+    source: Optional[Literal["playground"]] = None
+
+
+class SearchRequest(_Diagnosable):
     query: str
     collections: Optional[List[str]] = None
     file_types: Optional[List[str]] = None
@@ -62,9 +72,11 @@ class SearchRequest(BaseModel):
     tags_any: Optional[List[str]] = None  # OR filter on payload `tags`.
     tags_all: Optional[List[str]] = None  # AND filter on payload `tags`.
     mode: str = "preview"                 # "preview" truncates chunks; "full" returns whole chunks.
+    # False skips the semantic cache both ways: no stale answer, nothing stored.
+    use_cache: bool = True
 
 
-class SearchCodeRequest(BaseModel):
+class SearchCodeRequest(_Diagnosable):
     query: str
     language: Optional[str] = None
     symbol_type: Optional[str] = None
@@ -75,7 +87,7 @@ class SearchCodeRequest(BaseModel):
     mode: str = "preview"
 
 
-class SearchSkillsRequest(BaseModel):
+class SearchSkillsRequest(_Diagnosable):
     query: str
     limit: int = 3
 
@@ -241,8 +253,17 @@ def index_facets(
 # ---------------------------------------------------------------------------
 
 
+def _respond(results: list, trace: RetrievalTrace | None, rows: list[dict] | None = None) -> dict:
+    """`{"results": …}`, plus `"trace"` when one was requested."""
+    body: dict = {"results": rows if rows is not None else [r.model_dump() for r in results]}
+    if trace is not None:
+        body["trace"] = trace.finish(results)
+    return body
+
+
 @api_router.post("/api/search")
 def search(body: SearchRequest, request: Request):
+    trace = RetrievalTrace() if body.trace else None
     results = request.app.state.search_service.search(
         query=body.query,
         collections=body.collections,
@@ -252,12 +273,16 @@ def search(body: SearchRequest, request: Request):
         tags_any=body.tags_any,
         tags_all=body.tags_all,
         mode=body.mode,
+        use_cache=body.use_cache,
+        trace=trace,
+        source=body.source,
     )
-    return {"results": [r.model_dump() for r in results]}
+    return _respond(results, trace)
 
 
 @api_router.post("/api/search-code")
 def search_code(body: SearchCodeRequest, request: Request):
+    trace = RetrievalTrace() if body.trace else None
     results = request.app.state.search_service.search_code(
         query=body.query,
         language=body.language,
@@ -267,20 +292,25 @@ def search_code(body: SearchCodeRequest, request: Request):
         tags_any=body.tags_any,
         tags_all=body.tags_all,
         mode=body.mode,
+        trace=trace,
+        source=body.source,
     )
-    return {"results": [r.model_dump() for r in results]}
+    return _respond(results, trace)
 
 
 @api_router.post("/api/search-skills")
 def search_skills(body: SearchSkillsRequest, request: Request):
+    trace = RetrievalTrace() if body.trace else None
     results = request.app.state.search_service.search_skills(
         query=body.query,
         limit=body.limit,
+        trace=trace,
+        source=body.source,
     )
-    return {"results": [r.model_dump() for r in results]}
+    return _respond(results, trace)
 
 
-class SearchMemoryRequest(BaseModel):
+class SearchMemoryRequest(_Diagnosable):
     query: str
     memory_type: Optional[str] = None
     limit: int = 5
@@ -291,6 +321,7 @@ class SearchMemoryRequest(BaseModel):
 
 @api_router.post("/api/search-memory")
 def search_memory(body: SearchMemoryRequest, request: Request):
+    trace = RetrievalTrace() if body.trace else None
     results = request.app.state.search_service.search_memory(
         query=body.query,
         memory_type=body.memory_type,
@@ -298,21 +329,22 @@ def search_memory(body: SearchMemoryRequest, request: Request):
         tags_any=body.tags_any,
         tags_all=body.tags_all,
         mode=body.mode,
+        trace=trace,
+        source=body.source,
     )
     # Map memory results to a search-result-compatible shape so eval/harness can consume them.
-    return {
-        "results": [
-            {
-                "file_path": f"memory://{r.id}",
-                "content": r.content,
-                "score": r.score,
-                "collection": "mnemos_memory",
-                "memory_type": r.memory_type,
-                "tags": r.tags,
-            }
-            for r in results
-        ]
-    }
+    rows = [
+        {
+            "file_path": f"memory://{r.id}",
+            "content": r.content,
+            "score": r.score,
+            "collection": "mnemos_memory",
+            "memory_type": r.memory_type,
+            "tags": r.tags,
+        }
+        for r in results
+    ]
+    return _respond(results, trace, rows)
 
 
 class EvalSampleRequest(BaseModel):
