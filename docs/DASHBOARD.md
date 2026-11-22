@@ -105,16 +105,6 @@ Memories are written **searchable**; this screen takes a wrong one back out
 rather than letting good ones in. Search returns `approved` entries only, so
 a rejected memory disappears from retrieval immediately.
 
-### Evals
-
-The runs in `evals/runs/` side by side. Absolute numbers depend on the golden
-set, so the delta between two runs on the same set is what carries meaning.
-
-The screen repeats the caveat from [EVAL.md](EVAL.md): the harness routes
-`code_search` to `/api/search-code`, which never runs the grader, and a
-generated golden set is mostly code_search. A grader A/B through the harness
-returns identical tables — that reads as "no effect" when it means "never ran".
-
 ### Configuration
 
 Every server setting, grouped by section, with **where its value comes from**
@@ -144,7 +134,6 @@ Two layers, the higher one winning:
 |-----|---------|------|
 | `MNEMOS_QUERY_LOG_ENABLED` | `false` | **Required for the Search screen.** Without it there is nothing to display |
 | `MNEMOS_QUERY_LOG_PATH` | `/data/state/query-log.jsonl` | Read by tailing, so the file can grow |
-| `MNEMOS_EVAL_RUNS_PATH` | `/app/evals/runs` | Bind-mounted read-only; runs are local artefacts and never baked into the image |
 | `MNEMOS_UI_PATH` | `/app/ui` | Absent → API only |
 | `MNEMOS_UI_CONFIG_WRITABLE` | `false` | Lets the Configuration page save overrides. See [CONFIGURATION.md](CONFIGURATION.md#dashboard-overrides) |
 | `MNEMOS_UI_THEME_PATH` | `/app/config/theme.css` | Instance theme served at `/theme.css`. See [CONFIGURATION.md](CONFIGURATION.md#instance-theme) |

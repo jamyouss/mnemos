@@ -66,12 +66,6 @@ export interface MemoryPage {
   limit: number
 }
 
-export interface EvalRunSummary {
-  tag: string
-  created_at?: string
-  report: Record<string, any>
-}
-
 export type ConfigApply = 'live' | 'restart' | 'reindex'
 export type ConfigSource = 'default' | 'env' | 'override'
 
@@ -188,11 +182,6 @@ export function useApi() {
         method: 'POST',
         body: JSON.stringify({ action }),
       }),
-
-    evalRuns: () => request<{ runs: EvalRunSummary[] }>('/api/eval/runs'),
-
-    evalRun: (tag: string) =>
-      request<Record<string, any>>(`/api/eval/runs?tag=${encodeURIComponent(tag)}`),
 
     memoryStats: () => request<MemoryStats>('/api/memory/stats'),
 

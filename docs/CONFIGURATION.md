@@ -335,7 +335,7 @@ that never source a shell profile, where an exported variable would be lost.
 | Var | Default | Description |
 |-----|--------|------|
 | `MNEMOS_QUERY_LOG_ENABLED` | `false` | Append every retrieval call to a JSONL log. **Required by the dashboard's Search screen** — without it there is nothing to display |
-| `MNEMOS_EVAL_RUNS_PATH` | `/app/evals/runs` | Where the dashboard reads eval runs. Bind-mounted read-only: runs are local artefacts, never baked into the image |
+| `MNEMOS_EVAL_RUNS_PATH` | `/app/evals/runs` | Where `GET /api/eval/runs` reads eval runs. Bind-mounted read-only: runs are local artefacts, never baked into the image |
 | `MNEMOS_UI_PATH` | `/app/ui` | Built dashboard. Absent → the server serves the API alone |
 | `MNEMOS_UI_THEME_PATH` | `/app/config/theme.css` | Instance stylesheet served at `/theme.css`, see [Instance theme](#instance-theme) |
 | `MNEMOS_QUERY_LOG_PATH` | `/data/state/query-log.jsonl` | Log location (inside the container) |
