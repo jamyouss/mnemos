@@ -191,3 +191,19 @@ def test_unreachable_mnemos_is_reported_without_touching_the_source():
     result = sync_scope(client, source="confluence", scope="ENG", items=items())
     assert result.error and "cannot list" in result.error
     assert consumed == []
+
+
+def test_a_skipped_item_is_counted_and_its_stale_copy_removed(mnemos):
+    from connectors.sync import SkipItem
+
+    mnemos.seed("confluence/ENG/1.md", 100.0, TAGS)
+
+    def too_big() -> str:
+        raise SkipItem("1.md: too big")
+
+    item = SourceItem(file_path="confluence/ENG/1.md", title="1", source_url="u", updated=200.0, content=too_big)
+    result = _sync(mnemos, [item])
+
+    assert (result.skipped, result.deleted, result.pushed) == (1, 1, 0)
+    assert result.ok
+    assert mnemos.deleted == ["confluence/ENG/1.md"]

@@ -16,7 +16,7 @@ MNEMOS_TIMEOUT = httpx.Timeout(300.0, connect=10.0)
 
 
 class MnemosClient:
-    """Push, list and delete files of ``mnemos_knowledge`` over HTTP.
+    """Push, list and delete files of one collection (``mnemos_knowledge`` by default) over HTTP.
 
     ``client`` carries the auth header (``Authorization: Bearer`` when
     ``MNEMOS_API_KEY`` is set); this class only knows the routes.
@@ -38,6 +38,10 @@ class MnemosClient:
     @property
     def collection(self) -> str:
         return self._collection
+
+    def for_collection(self, collection: str) -> MnemosClient:
+        """Same server and credentials, another collection."""
+        return MnemosClient(self._base, self._client, collection=collection, retry=self._retry)
 
     def list_files(self, tag: str) -> dict[str, float | None]:
         """Every file indexed under ``tag`` → its stored ``file_mtime``."""

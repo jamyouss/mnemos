@@ -6,12 +6,15 @@
  * validates with the ingester's own parser.
  */
 
-export type SourceType = 'confluence' | 'jira' | 'web'
+export type SourceType = 'confluence' | 'jira' | 'web' | 'git'
 export type Deployment = 'auto' | 'cloud' | 'datacenter'
+export type GitCollection = 'mnemos_code' | 'mnemos_knowledge'
 
-export const SOURCE_TYPES: SourceType[] = ['confluence', 'jira', 'web']
+export const SOURCE_TYPES: SourceType[] = ['confluence', 'jira', 'web', 'git']
 export const DEPLOYMENTS: Deployment[] = ['auto', 'cloud', 'datacenter']
+export const GIT_COLLECTIONS: GitCollection[] = ['mnemos_code', 'mnemos_knowledge']
 export const DEFAULT_MAX_PAGES = 200
+export const DEFAULT_MAX_FILE_KB = 512
 
 /** One source as stored in connectors.yaml: known keys only. */
 export interface ConnectorSource {
@@ -27,6 +30,11 @@ export interface ConnectorSource {
   jql?: string
   urls?: string[]
   max_pages?: number
+  branch?: string
+  paths?: string[]
+  exclude?: string[]
+  max_file_kb?: number
+  collection?: GitCollection
 }
 
 export interface SourceForm {
@@ -44,6 +52,11 @@ export interface SourceForm {
   jql: string
   urls: string
   max_pages: number | null
+  branch: string
+  paths: string
+  exclude: string
+  max_file_kb: number | null
+  collection: GitCollection
 }
 
 let nextId = 0
@@ -58,6 +71,7 @@ const DEFAULT_TOKEN_ENV: Record<SourceType, string> = {
   confluence: 'CONFLUENCE_TOKEN',
   jira: 'JIRA_TOKEN',
   web: '',
+  git: '',
 }
 
 export function newSource(type: SourceType): SourceForm {
@@ -78,6 +92,11 @@ export function toForm(source: ConnectorSource): SourceForm {
     jql: source.jql ?? '',
     urls: joinList(source.urls),
     max_pages: source.max_pages ?? DEFAULT_MAX_PAGES,
+    branch: source.branch ?? '',
+    paths: joinList(source.paths),
+    exclude: joinList(source.exclude),
+    max_file_kb: source.max_file_kb ?? DEFAULT_MAX_FILE_KB,
+    collection: source.collection ?? 'mnemos_code',
   }
 }
 
@@ -89,6 +108,18 @@ export function toPayload(form: SourceForm): ConnectorSource {
   if (form.type === 'web') {
     out.urls = splitList(form.urls)
     if (form.max_pages !== null && form.max_pages !== DEFAULT_MAX_PAGES) out.max_pages = form.max_pages
+  } else if (form.type === 'git') {
+    out.url = form.url.trim()
+    if (form.user.trim()) out.user = form.user.trim()
+    // Optional: a public repository needs no token.
+    if (form.token_env.trim()) out.token_env = form.token_env.trim()
+    if (form.branch.trim()) out.branch = form.branch.trim()
+    const paths = splitList(form.paths)
+    if (paths.length) out.paths = paths
+    const exclude = splitList(form.exclude)
+    if (exclude.length) out.exclude = exclude
+    if (form.max_file_kb !== null && form.max_file_kb !== DEFAULT_MAX_FILE_KB) out.max_file_kb = form.max_file_kb
+    if (form.collection !== 'mnemos_code') out.collection = form.collection
   } else {
     out.url = form.url.trim()
     if (form.user.trim()) out.user = form.user.trim()
@@ -105,9 +136,20 @@ export function toPayload(form: SourceForm): ConnectorSource {
 
 /**
  * The `<source>:<scope>` tags a source syncs under — its documents in
- * mnemos_knowledge. Mirrors `scope_key` / `scope_of` in packages/connectors.
+ * mnemos_knowledge (mnemos_code for most git sources). Mirrors `scope_key` /
+ * `scope_of` / `repo_scope` in packages/connectors.
  */
 export function scopeTags(source: ConnectorSource): string[] {
+  if (source.type === 'git') {
+    try {
+      const url = new URL((source.url ?? '').trim())
+      const path = url.pathname.replace(/^\/+|\/+$/g, '').replace(/\.git$/, '').replace(/\/+$/, '')
+      if (!['http:', 'https:'].includes(url.protocol) || !path) return []
+      return [`git:${url.host}/${path}`]
+    } catch {
+      return []
+    }
+  }
   if (source.type === 'web') {
     const hosts = new Set<string>()
     for (const url of source.urls ?? []) {

@@ -40,6 +40,11 @@ class ListingTruncated(Exception):
     """
 
 
+class SkipItem(Exception):
+    """Raised by a document's content callable: leave it out of the index
+    (too large, binary…). An already indexed copy is removed."""
+
+
 @dataclass(frozen=True)
 class SourceItem:
     """One document of a source.
@@ -66,6 +71,7 @@ class SyncResult:
     unchanged: int = 0
     deleted: int = 0
     failed: int = 0
+    skipped: int = 0
     truncated: bool = False
     error: str | None = None
 
@@ -128,18 +134,11 @@ def sync_scope(
 
     if listing_complete:
         for file_path in sorted(set(indexed) - seen):
-            try:
-                mnemos.delete(file_path)
-            except Exception as exc:  # noqa: BLE001
-                result.failed += 1
-                logger.error("[%s] delete %s failed: %s", scope_tag, file_path, exc)
-            else:
-                result.deleted += 1
-                logger.info("[%s] deleted %s", scope_tag, file_path)
+            _delete(mnemos, file_path, result)
 
     logger.info(
-        "[%s] pushed=%d unchanged=%d deleted=%d failed=%d",
-        scope_tag, result.pushed, result.unchanged, result.deleted, result.failed,
+        "[%s] pushed=%d unchanged=%d deleted=%d skipped=%d failed=%d",
+        scope_tag, result.pushed, result.unchanged, result.deleted, result.skipped, result.failed,
     )
     return result
 
@@ -158,9 +157,22 @@ def _sync_item(
         result.unchanged += 1
         return
     try:
+        content = item.markdown()
+    except SkipItem as exc:
+        result.skipped += 1
+        logger.info("[%s] skipped %s", result.scope_tag, exc)
+        # Seen, so the end-of-run sweep keeps it: drop a stale copy here.
+        if item.file_path in indexed:
+            _delete(mnemos, item.file_path, result)
+        return
+    except Exception as exc:  # noqa: BLE001 — one bad document must not stop the run
+        result.failed += 1
+        logger.error("[%s] render %s (%s) failed: %s", result.scope_tag, item.file_path, item.title, exc)
+        return
+    try:
         mnemos.push(
             file_path=item.file_path,
-            content=item.markdown(),
+            content=content,
             tags=tags,
             source_url=item.source_url,
             file_mtime=item.updated,
@@ -171,3 +183,14 @@ def _sync_item(
     else:
         result.pushed += 1
         logger.debug("[%s] pushed %s", result.scope_tag, item.file_path)
+
+
+def _delete(mnemos: MnemosClient, file_path: str, result: SyncResult) -> None:
+    try:
+        mnemos.delete(file_path)
+    except Exception as exc:  # noqa: BLE001
+        result.failed += 1
+        logger.error("[%s] delete %s failed: %s", result.scope_tag, file_path, exc)
+    else:
+        result.deleted += 1
+        logger.info("[%s] deleted %s", result.scope_tag, file_path)

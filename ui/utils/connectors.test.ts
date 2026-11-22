@@ -40,3 +40,22 @@ describe('scopeTags', () => {
     expect(scopeTags({ type: 'web', urls: ['docs.example'] })).toEqual([])
   })
 })
+
+describe('git sources', () => {
+  it('round-trips a stored git source and omits defaults', () => {
+    const stored: ConnectorSource = {
+      type: 'git', name: 'app', url: 'https://gitlab.example.com/g/app.git', token_env: 'GITLAB_TOKEN',
+      branch: 'develop', paths: ['docs/', 'src'], exclude: ['*.lock'], max_file_kb: 64, collection: 'mnemos_knowledge',
+    }
+    expect(toPayload(toForm(stored))).toEqual(stored)
+    // A public repository needs no token; default size and collection are not written.
+    expect(toPayload({ ...newSource('git'), url: 'https://github.com/acme/app' }))
+      .toEqual({ type: 'git', url: 'https://github.com/acme/app' })
+  })
+
+  it('syncs under the tag repo_scope computes', () => {
+    expect(scopeTags({ type: 'git', url: 'https://GitHub.com/acme/app.git' })).toEqual(['git:github.com/acme/app'])
+    expect(scopeTags({ type: 'git', url: 'https://git.local:8443/g/sub/r/' })).toEqual(['git:git.local:8443/g/sub/r'])
+    expect(scopeTags({ type: 'git', url: 'git@github.com:acme/app.git' })).toEqual([])
+  })
+})

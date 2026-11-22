@@ -53,7 +53,7 @@ mnemos/
   watcher/                # File watcher (watchdog)
   cli/                    # Click CLI client
   config/                 # projects.yaml, tenants.yaml (clés API), connectors.yaml (sources)
-  packages/connectors/    # Connecteurs (Confluence, Jira, web) → push API ; `mnemos ingest run|serve`
+  packages/connectors/    # Connecteurs (Confluence, Jira, web, git) → push API ; `mnemos ingest run|serve`
   scripts/hooks/          # Global git hooks (memory extraction + incremental indexing)
   tests/                  # pytest suite
   eval/                   # Eval harness (Phase 1.2, en cours)
@@ -69,8 +69,8 @@ mnemos/
 | `mnemos_skills` | `~/.claude/skills/` | `skills/` | — |
 | `mnemos_docs` | `~/.claude/docs/` | `docs/` | — |
 | `mnemos_memory` | API / git hooks | _(aucun)_ | via `tags` payload |
-| `mnemos_code` | codebase | _(tout le reste)_ | via `tags` payload (filtres `tags_any` / `tags_all`) |
-| `mnemos_knowledge` | connecteurs (Confluence, Jira, web) → push API | _(aucun)_ | via `tags` payload (`<source>`, `<source>:<scope>`, ex. `confluence:ENG`) |
+| `mnemos_code` | codebase + connecteur git (défaut) | _(tout le reste)_ | via `tags` payload (filtres `tags_any` / `tags_all`) |
+| `mnemos_knowledge` | connecteurs (Confluence, Jira, web, git avec `collection: mnemos_knowledge`) → push API | _(aucun)_ | via `tags` payload (`<source>`, `<source>:<scope>`, ex. `confluence:ENG`) |
 
 Une seule collection `mnemos_code` héberge **tous** les projets. Chaque chunk
 porte un champ `tags: list[str]` — le premier tag sert de label primaire

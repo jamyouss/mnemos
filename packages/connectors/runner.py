@@ -9,9 +9,9 @@ import os
 import threading
 from collections.abc import Callable, Collection
 
-from connectors import confluence, jira, transport, web
+from connectors import confluence, git, jira, transport, web
 from connectors.atlassian import auth_kwargs
-from connectors.config import ConfluenceConfig, ConnectorsConfig, SourceConfig, WebConfig
+from connectors.config import ConfluenceConfig, ConnectorsConfig, GitConfig, SourceConfig, WebConfig
 from connectors.mnemos import MnemosClient
 from connectors.sync import SyncResult, sync_scope
 
@@ -43,6 +43,17 @@ def run_sources(
 
 
 def _run_source(source: SourceConfig, mnemos: MnemosClient, full: bool) -> list[SyncResult]:
+    if isinstance(source, GitConfig):
+        scope = git.repo_scope(source.url)
+        repo = git.GitSource(
+            source.url, user=source.user, token=source.token, branch=source.branch,
+            paths=source.paths, exclude=source.exclude, max_file_kb=source.max_file_kb,
+        )
+        return [
+            sync_scope(mnemos.for_collection(source.collection), source=git.SOURCE, scope=scope,
+                       items=repo.items(scope), user_tags=source.tags, full=full)
+        ]
+
     if isinstance(source, WebConfig):
         with transport.make_client() as client:
             crawler = web.WebSource(client, max_pages=source.max_pages)

@@ -26,16 +26,17 @@ connectors_router = APIRouter()
 
 # Order the keys are written in, so a saved file reads like the example.
 _KEY_ORDER = (
-    "type", "name", "url", "user", "token_env", "deployment",
-    "spaces", "projects", "jql", "urls", "max_pages", "tags",
+    "type", "name", "url", "user", "token_env", "deployment", "branch",
+    "spaces", "projects", "jql", "urls", "max_pages",
+    "paths", "exclude", "max_file_kb", "collection", "tags",
 )
 
 _HEADER = """\
 # Knowledge connectors, read by `mnemos ingest serve` (see docs/CONNECTORS.md).
 # Written by the mnemos dashboard: hand edits are fine, but saving from the
 # Connectors page rewrites this file and drops comments.
-# Tokens never go here: each Atlassian source names the variable holding its
-# token (`token_env`), set in the ingester's environment.
+# Tokens never go here: a source that needs one names the variable holding
+# it (`token_env`), set in the ingester's environment.
 
 """
 

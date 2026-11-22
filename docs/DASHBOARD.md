@@ -151,10 +151,10 @@ override removes it. Details: [CONFIGURATION.md](CONFIGURATION.md#dashboard-over
 ### Connectors
 
 Edits `config/connectors.yaml`: the sync `interval` and one card per
-Confluence, Jira or web source, with the fields of
+Confluence, Jira, web or git source, with the fields of
 [CONNECTORS.md](CONNECTORS.md#configuration-file). Each card shows its scope
 tags (`jira:OPS`, `web:docs.example.com`) and how many chunks
-`mnemos_knowledge` holds under each — `not synced yet` is the answer to "did
+`mnemos_knowledge` (or `mnemos_code`, for a git source) holds under each — `not synced yet` is the answer to "did
 the ingester ever run?".
 
 The server validates with the ingester's own parser and refuses a file the

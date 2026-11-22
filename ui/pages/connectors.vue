@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Component } from 'vue'
-import { BookOpenIcon, GlobeIcon, InfoIcon, PlugIcon, PlusIcon, RotateCwIcon, TicketIcon, TriangleAlertIcon } from '@lucide/vue'
+import { BookOpenIcon, GitBranchIcon, GlobeIcon, InfoIcon, PlugIcon, PlusIcon, RotateCwIcon, TicketIcon, TriangleAlertIcon } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import { ApiError, type ConnectorsResponse } from '~/composables/useApi'
 import { newSource, toForm, toPayload, type SourceForm, type SourceType } from '~/utils/connectors'
@@ -10,14 +10,19 @@ useHead({ title: 'Connectors' })
 
 const api = useApi()
 const { data, error, refresh } = await useAsyncData('connectors', () => api.connectors())
-// Chunks per sync tag: whether a source has delivered anything yet. A
-// failure only hides the counts, it must not block editing.
-const { data: indexed } = await useAsyncData('knowledge-tags', () =>
-  api
-    .facets('mnemos_knowledge', 'tags', 1000)
-    .then((r) => Object.fromEntries(r.counts.map((c) => [c.value, c.count])) as Record<string, number>)
-    .catch(() => null),
-)
+// Chunks per sync tag: whether a source has delivered anything yet. Git
+// sources mostly land in mnemos_code. A failure only hides the counts, it
+// must not block editing.
+const { data: indexed } = await useAsyncData('connector-tags', async () => {
+  const results = await Promise.allSettled(
+    ['mnemos_knowledge', 'mnemos_code'].map((collection) => api.facets(collection, 'tags', 1000)),
+  )
+  const counts: Record<string, number> = {}
+  for (const r of results) {
+    if (r.status === 'fulfilled') for (const c of r.value.counts) counts[c.value] = (counts[c.value] ?? 0) + c.count
+  }
+  return results.some((r) => r.status === 'fulfilled') ? counts : null
+})
 
 const interval = ref('')
 const sources = ref<SourceForm[]>([])
@@ -44,6 +49,7 @@ const addable: { type: SourceType; label: string; icon: Component }[] = [
   { type: 'confluence', label: 'Confluence spaces', icon: BookOpenIcon },
   { type: 'jira', label: 'Jira projects', icon: TicketIcon },
   { type: 'web', label: 'Web site', icon: GlobeIcon },
+  { type: 'git', label: 'Git repository', icon: GitBranchIcon },
 ]
 
 function add(type: SourceType) {
@@ -81,8 +87,9 @@ onBeforeRouteLeave(() => {
   <div class="space-y-6 pb-20">
     <PageHeader title="Connectors">
       <template #description>
-        Confluence spaces, Jira projects and web sites the ingester (<code class="text-xs">mnemos ingest serve</code>) keeps in
-        sync inside <code class="text-xs">mnemos_knowledge</code>. Saved to
+        Confluence spaces, Jira projects, web sites and git repositories the ingester
+        (<code class="text-xs">mnemos ingest serve</code>) keeps in sync inside <code class="text-xs">mnemos_knowledge</code>
+        or <code class="text-xs">mnemos_code</code>. Saved to
         <code class="text-xs">{{ data?.path ?? 'connectors.yaml' }}</code>, which the ingester re-reads when it changes.
       </template>
       <template #actions>
@@ -160,12 +167,12 @@ onBeforeRouteLeave(() => {
         :icon="PlugIcon"
         :title="data.exists ? 'No source declared' : 'No connectors file yet'"
         :detail="editable
-          ? 'Add a Confluence space, a Jira project or a web site; saving creates the file.'
+          ? 'Add a Confluence space, a Jira project, a web site or a git repository; saving creates the file.'
           : 'Declare sources in config/connectors.yaml (template: config/connectors.example.yaml).'"
       />
 
       <p v-if="sources.length" class="text-xs text-muted-foreground">
-        Removing a source stops its syncs; what it already indexed stays in <code>mnemos_knowledge</code>.
+        Removing a source stops its syncs; what it already indexed stays in the index.
       </p>
     </template>
 

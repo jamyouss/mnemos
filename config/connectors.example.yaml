@@ -1,18 +1,20 @@
 # Knowledge connectors — what `mnemos ingest run` / `mnemos ingest serve` keep
-# in sync inside the `mnemos_knowledge` collection.
+# in sync inside `mnemos_knowledge` (documents) and `mnemos_code` (git
+# repositories, by default).
 #
-# Copy to config/connectors.yaml (gitignored) and adapt. See docs/CONNECTORS.md.
+# Copy to config/connectors.yaml (gitignored) and adapt, or edit it from the
+# dashboard's Connectors page. See docs/CONNECTORS.md.
 #
-# Secrets never go in this file: each Confluence / Jira source names the
-# environment variable that holds its token (`token_env`). A variable that is
-# not set stops the run before anything is synced.
+# Secrets never go in this file: a source that needs a token names the
+# environment variable that holds it (`token_env`). A variable that is not set
+# stops the run before anything is synced.
 
 # How often `mnemos ingest serve` resyncs after the start-up sync: 45s, 30m,
-# 6h, 1d… Omit it to sync only at start-up and on SIGHUP.
+# 6h, 1d… Omit it to sync only at start-up, on file change and on SIGHUP.
 interval: 6h
 
 sources:
-  # Every source: `type` (confluence | jira | web), optional `name` (defaults
+  # Every source: `type` (confluence | jira | web | git), optional `name` (defaults
   # to the type; must be unique — it is what `mnemos ingest run --only <name>`
   # selects) and optional `tags` added to every document.
 
@@ -36,3 +38,13 @@ sources:
     name: handbook
     urls: [https://docs.example.com/handbook/]   # crawl stays on the host, under this path
     max_pages: 200
+
+  - type: git
+    name: app
+    url: https://github.com/acme/app.git   # HTTPS, any host (GitHub, GitLab…)
+    # token_env: GITHUB_TOKEN              # private repository: read-only token
+    # branch: main                         # default: the remote's default branch
+    # paths: [docs/, services/api]         # default: the whole repository
+    # exclude: ["*.lock", "*/testdata/*"]
+    # max_file_kb: 512                     # larger (and binary) files are skipped
+    # collection: mnemos_code              # or mnemos_knowledge

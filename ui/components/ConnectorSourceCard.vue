@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { BookOpenIcon, GlobeIcon, KeyRoundIcon, TicketIcon, Trash2Icon } from '@lucide/vue'
-import { DEPLOYMENTS, scopeTags, toPayload, type SourceForm } from '~/utils/connectors'
+import { BookOpenIcon, GitBranchIcon, GlobeIcon, KeyRoundIcon, TicketIcon, Trash2Icon } from '@lucide/vue'
+import { DEPLOYMENTS, GIT_COLLECTIONS, scopeTags, toPayload, type SourceForm } from '~/utils/connectors'
 
 const source = defineModel<SourceForm>({ required: true })
 const props = defineProps<{
   editable: boolean
-  /** Chunks in mnemos_knowledge per tag; null while unknown. */
+  /** Chunks per tag in mnemos_knowledge and mnemos_code; null while unknown. */
   indexed: Record<string, number> | null
 }>()
 const emit = defineEmits<{ remove: [] }>()
@@ -14,6 +14,7 @@ const meta = {
   confluence: { label: 'Confluence', icon: BookOpenIcon, keys: 'Spaces', keysHint: 'Space keys, e.g. ENG, OPS', url: 'https://wiki.example.com or https://<site>.atlassian.net', token: 'CONFLUENCE_TOKEN' },
   jira: { label: 'Jira', icon: TicketIcon, keys: 'Projects', keysHint: 'Project keys, e.g. OPS', url: 'https://jira.example.com or https://<site>.atlassian.net', token: 'JIRA_TOKEN' },
   web: { label: 'Web site', icon: GlobeIcon, keys: '', keysHint: '', url: '', token: '' },
+  git: { label: 'Git repository', icon: GitBranchIcon, keys: '', keysHint: '', url: 'https://github.com/acme/app.git', token: 'GITHUB_TOKEN' },
 } as const
 
 const m = computed(() => meta[source.value.type])
@@ -67,6 +68,64 @@ const scopes = computed(() => scopeTags(toPayload(source.value)))
           <Label :for="id('urls')">Seed URLs</Label>
           <Input :id="id('urls')" v-model="source.urls" class="font-mono text-xs" placeholder="https://docs.example.com/handbook/" :disabled="!editable" />
           <p class="text-xs text-muted-foreground">Comma- or space-separated. The crawl stays on each host, under each URL's path.</p>
+        </div>
+      </template>
+
+      <template v-else-if="source.type === 'git'">
+        <div class="space-y-1.5">
+          <Label :for="id('collection')">Collection</Label>
+          <Select v-model="source.collection" :disabled="!editable">
+            <SelectTrigger :id="id('collection')" class="w-full"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem v-for="c in GIT_COLLECTIONS" :key="c" :value="c">{{ c }}</SelectItem>
+            </SelectContent>
+          </Select>
+          <p class="text-xs text-muted-foreground"><code>mnemos_code</code>: found by code search. <code>mnemos_knowledge</code>: next to Confluence and Jira.</p>
+        </div>
+        <div class="space-y-1.5 md:col-span-2">
+          <Label :for="id('url')">Repository URL</Label>
+          <Input :id="id('url')" v-model="source.url" class="font-mono text-xs" :placeholder="m.url" :disabled="!editable" />
+          <p class="text-xs text-muted-foreground">HTTPS, on any host: GitHub, GitLab, Gitea, self-hosted.</p>
+        </div>
+        <div class="space-y-1.5">
+          <Label :for="id('token')" class="flex items-center gap-1.5">
+            <KeyRoundIcon class="size-3.5" /> Token variable <span class="font-normal text-muted-foreground">(optional)</span>
+          </Label>
+          <Input :id="id('token')" v-model="source.token_env" class="font-mono text-xs" :placeholder="m.token" :disabled="!editable" />
+          <p class="text-xs text-muted-foreground">
+            Variable holding a read-only token in the ingester's environment (<code>.env</code>). Blank for a public repository.
+          </p>
+        </div>
+        <div class="space-y-1.5">
+          <Label :for="id('user')">User <span class="font-normal text-muted-foreground">(optional)</span></Label>
+          <Input :id="id('user')" v-model="source.user" placeholder="oauth2" :disabled="!editable" />
+          <p class="text-xs text-muted-foreground">Sent with the token. <code>oauth2</code> suits GitLab and GitHub.</p>
+        </div>
+        <div class="space-y-1.5">
+          <Label :for="id('branch')">Branch <span class="font-normal text-muted-foreground">(optional)</span></Label>
+          <Input :id="id('branch')" v-model="source.branch" class="font-mono text-xs" placeholder="default branch" :disabled="!editable" />
+        </div>
+        <div class="space-y-1.5">
+          <Label :for="id('maxkb')">Max file size (KB)</Label>
+          <Input
+            :id="id('maxkb')"
+            type="number"
+            min="1"
+            :model-value="source.max_file_kb ?? undefined"
+            :disabled="!editable"
+            @update:model-value="(v) => (source.max_file_kb = v === '' ? null : Number(v))"
+          />
+          <p class="text-xs text-muted-foreground">Larger files, and binary ones, are skipped.</p>
+        </div>
+        <div class="space-y-1.5">
+          <Label :for="id('paths')">Paths <span class="font-normal text-muted-foreground">(optional)</span></Label>
+          <Input :id="id('paths')" v-model="source.paths" class="font-mono text-xs" placeholder="docs/, services/api" :disabled="!editable" />
+          <p class="text-xs text-muted-foreground">Only files under these repository paths. Blank: the whole repository.</p>
+        </div>
+        <div class="space-y-1.5">
+          <Label :for="id('exclude')">Exclude <span class="font-normal text-muted-foreground">(optional)</span></Label>
+          <Input :id="id('exclude')" v-model="source.exclude" class="font-mono text-xs" placeholder="*.lock, */testdata/*" :disabled="!editable" />
+          <p class="text-xs text-muted-foreground">Globs on the repository path; <code>*</code> crosses <code>/</code>. The server's own filter applies too.</p>
         </div>
       </template>
 

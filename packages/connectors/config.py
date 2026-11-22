@@ -1,9 +1,10 @@
-"""`config/connectors.yaml`: which Confluence spaces, Jira projects and web
-sites to keep in sync, read by `mnemos ingest run` and `mnemos ingest serve`.
+"""`config/connectors.yaml`: which Confluence spaces, Jira projects, web
+sites and git repositories to keep in sync, read by `mnemos ingest run` and
+`mnemos ingest serve`.
 
-Secrets never live in the file: an Atlassian source names the environment
-variable holding its token (`token_env`), resolved at load time so a missing
-credential fails before anything is synced.
+Secrets never live in the file: a source that needs a token names the
+environment variable holding it (`token_env`), resolved at load time so a
+missing credential fails before anything is synced.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from pathlib import Path
 
 import yaml
 
+from connectors import git
 from connectors.web import group_seeds
 
 DEFAULT_MAX_PAGES = 200
@@ -66,7 +68,22 @@ class WebConfig:
     type: str = "web"
 
 
-SourceConfig = ConfluenceConfig | JiraConfig | WebConfig
+@dataclass(frozen=True)
+class GitConfig:
+    name: str
+    url: str
+    token: str  # empty: public repository, or the host's credential helper
+    user: str | None
+    branch: str | None
+    paths: tuple[str, ...]
+    exclude: tuple[str, ...]
+    max_file_kb: int
+    collection: str
+    tags: tuple[str, ...]
+    type: str = "git"
+
+
+SourceConfig = ConfluenceConfig | JiraConfig | WebConfig | GitConfig
 
 
 @dataclass(frozen=True)
@@ -90,6 +107,9 @@ SOURCE_KEYS = {
     "confluence": _COMMON_KEYS | {"url", "user", "token_env", "deployment", "spaces"},
     "jira": _COMMON_KEYS | {"url", "user", "token_env", "deployment", "projects", "jql"},
     "web": _COMMON_KEYS | {"urls", "max_pages"},
+    "git": _COMMON_KEYS | {
+        "url", "user", "token_env", "branch", "paths", "exclude", "max_file_kb", "collection",
+    },
 }
 
 
@@ -163,7 +183,9 @@ def _parse_source(
         return None
     kind = entry.get("type")
     if kind not in SOURCE_KEYS:
-        problems.append(f"sources[{index}]: unknown type {kind!r} (expected confluence, jira or web)")
+        problems.append(
+            f"sources[{index}]: unknown type {kind!r} (expected {', '.join(SOURCE_KEYS)})"
+        )
         return None
 
     name = str(entry.get("name") or kind)
@@ -183,7 +205,29 @@ def _parse_source(
             return ()
         return tuple(str(v).strip() for v in items)
 
+    def optional_string(key: str) -> str | None:
+        value = entry.get(key)
+        if value is not None and (not isinstance(value, str) or not value.strip()):
+            problems.append(f"{where}: {key!r} must be a non-empty string")
+            return None
+        return value.strip() if value is not None else None
+
+    def resolve_token(*, required: bool) -> str:
+        token_env = entry.get("token_env")
+        if token_env is None and not required:
+            return ""
+        if not isinstance(token_env, str) or not token_env:
+            problems.append(f"{where}: missing 'token_env' (name of the variable holding the token)")
+            return ""
+        if environ is None:
+            return ""
+        token = environ.get(token_env, "").strip()
+        if not token:
+            problems.append(f"{where}: environment variable {token_env} is not set")
+        return token
+
     tags = strings("tags", required=False)
+    user = optional_string("user")
 
     if kind == "web":
         urls = strings("urls", required=True)
@@ -199,22 +243,38 @@ def _parse_source(
         return WebConfig(name=name, urls=urls, max_pages=max_pages, tags=tags)
 
     url = entry.get("url")
+
+    if kind == "git":
+        if not isinstance(url, str):
+            problems.append(f"{where}: 'url' must be an http(s) repository URL")
+        else:
+            try:
+                git.repo_scope(url)
+            except ValueError as exc:
+                problems.append(f"{where}: {exc}")
+        token = resolve_token(required=False)
+        branch = optional_string("branch")
+        paths = strings("paths", required=False)
+        exclude = strings("exclude", required=False)
+        max_file_kb = entry.get("max_file_kb", git.DEFAULT_MAX_FILE_KB)
+        if isinstance(max_file_kb, bool) or not isinstance(max_file_kb, int) or max_file_kb < 1:
+            problems.append(f"{where}: 'max_file_kb' must be a positive integer")
+        collection = entry.get("collection", git.DEFAULT_COLLECTION)
+        if collection not in git.COLLECTIONS:
+            problems.append(f"{where}: 'collection' must be one of {', '.join(git.COLLECTIONS)}")
+        if len(problems) > before:
+            return None
+        return GitConfig(
+            name=name, url=url.strip(), token=token, user=user, branch=branch, paths=paths,
+            exclude=exclude, max_file_kb=max_file_kb, collection=collection, tags=tags,
+        )
+
     if not isinstance(url, str) or not url.startswith(("http://", "https://")):
         problems.append(f"{where}: 'url' must be an http(s) URL")
     deployment = entry.get("deployment", "auto")
     if deployment not in _DEPLOYMENTS:
         problems.append(f"{where}: 'deployment' must be one of {', '.join(_DEPLOYMENTS)}")
-    token = ""
-    token_env = entry.get("token_env")
-    if not isinstance(token_env, str) or not token_env:
-        problems.append(f"{where}: missing 'token_env' (name of the variable holding the token)")
-    elif environ is not None:
-        token = environ.get(token_env, "").strip()
-        if not token:
-            problems.append(f"{where}: environment variable {token_env} is not set")
-    user = entry.get("user")
-    if user is not None and not isinstance(user, str):
-        problems.append(f"{where}: 'user' must be a string")
+    token = resolve_token(required=True)
 
     if kind == "confluence":
         spaces = strings("spaces", required=True)

@@ -178,7 +178,7 @@ What's distinctive about the bundle Mnemos ships:
 - **9 MCP tools** — `mnemos_search`, `mnemos_search_code`, `mnemos_memory`,
   `mnemos_reindex`, …
 - **API-key auth** — Bearer keys (`MNEMOS_AUTH_ENABLED`), push API, GitHub
-  Actions workflow, connectors for Confluence, Jira and web pages
+  Actions workflow, connectors for Confluence, Jira, web pages and remote git repositories
 - **Pluggable LLM** — Ollama, Anthropic API (prompt caching!), or any
   OpenAI-compatible endpoint (vLLM, LM Studio, Groq, Together, OpenRouter…)
 - **Observability** — Optional JSONL query log for debug + A/B analysis
@@ -247,7 +247,7 @@ is being searched, what has been remembered, and how retrieval scored. See
 | **Results history** | [`docs/EVAL.md`](docs/EVAL.md) | Measured numbers per phase |
 | **Roadmap** | [`docs/ROADMAP.md`](docs/ROADMAP.md) | What's next, design decisions |
 | **Deployment** | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Authentication, push API, CI/CD |
-| **Connectors** | [`docs/CONNECTORS.md`](docs/CONNECTORS.md) | Confluence, Jira and web → `mnemos_knowledge` |
+| **Connectors** | [`docs/CONNECTORS.md`](docs/CONNECTORS.md) | Confluence, Jira and web → `mnemos_knowledge`; git repositories → `mnemos_code` |
 | **Agent guide** | [`CLAUDE.md`](CLAUDE.md) | Instructions for Claude Code when touching this repo |
 
 ---

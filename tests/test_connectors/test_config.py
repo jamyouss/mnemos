@@ -152,7 +152,7 @@ def test_the_shipped_example_is_valid():
 
     example = Path(__file__).parents[2] / "config" / "connectors.example.yaml"
     config = load_config(example, environ={"CONFLUENCE_TOKEN": "x", "JIRA_TOKEN": "y"})
-    assert {s.type for s in config.sources} == {"confluence", "jira", "web"}
+    assert {s.type for s in config.sources} == {"confluence", "jira", "web", "git"}
 
 
 def test_without_an_environment_token_names_are_checked_but_not_resolved():
@@ -170,3 +170,45 @@ def test_without_an_environment_token_names_are_checked_but_not_resolved():
     assert exc.value.problems == [
         "sources[0] (jira): missing 'token_env' (name of the variable holding the token)"
     ]
+
+
+def test_git_source_defaults_and_optional_token(tmp_path):
+    from connectors.config import GitConfig
+
+    config = _load(tmp_path, """
+        sources:
+          - type: git
+            url: https://github.com/acme/public.git
+          - type: git
+            name: private
+            url: https://gitlab.example.com/group/app
+            token_env: TRACKER_TOKEN
+            branch: develop
+            paths: [docs/, src]
+            exclude: ["*.lock"]
+            max_file_kb: 64
+            collection: mnemos_knowledge
+    """)
+    public, private = config.sources
+    assert public == GitConfig(
+        name="git", url="https://github.com/acme/public.git", token="", user=None, branch=None,
+        paths=(), exclude=(), max_file_kb=512, collection="mnemos_code", tags=(),
+    )
+    assert (private.token, private.branch, private.paths, private.collection) == (
+        "jira-pat", "develop", ("docs/", "src"), "mnemos_knowledge",
+    )
+
+
+def test_git_source_problems_are_listed(tmp_path):
+    with pytest.raises(ConfigError) as exc:
+        _load(tmp_path, """
+            sources:
+              - type: git
+                url: git@github.com:acme/app.git
+                collection: mnemos_memory
+                max_file_kb: 0
+        """)
+    problems = exc.value.problems
+    assert any("Not an http(s) repository URL" in p for p in problems)
+    assert "sources[0] (git): 'collection' must be one of mnemos_code, mnemos_knowledge" in problems
+    assert "sources[0] (git): 'max_file_kb' must be a positive integer" in problems

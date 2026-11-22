@@ -950,7 +950,13 @@ _full_option = click.option(
 )
 
 
-def _run_sync(source: str, scopes: list[tuple[str, object]], tags: str | None, full: bool) -> None:
+def _run_sync(
+    source: str,
+    scopes: list[tuple[str, object]],
+    tags: str | None,
+    full: bool,
+    collection: str = "mnemos_knowledge",
+) -> None:
     """Sync each ``(scope, items)`` pair, print the counts, exit 1 on any failure."""
     from connectors.mnemos import MNEMOS_TIMEOUT, MnemosClient
     from connectors.sync import sync_scope
@@ -958,7 +964,7 @@ def _run_sync(source: str, scopes: list[tuple[str, object]], tags: str | None, f
 
     user_tags = _parse_tags(tags) if tags else []
     with make_client(headers=_headers(), timeout=MNEMOS_TIMEOUT) as http:
-        mnemos = MnemosClient(_base_url(), http)
+        mnemos = MnemosClient(_base_url(), http, collection=collection)
         results = [
             sync_scope(mnemos, source=source, scope=scope, items=items, user_tags=user_tags, full=full)
             for scope, items in scopes
@@ -976,9 +982,13 @@ def _print_sync_results(title: str, results: list) -> None:
     table.add_column("Note")
     for r in results:
         # First line only: httpx appends a "For more information" link to every status error.
-        note = f"[red]{r.error.splitlines()[0]}[/red]" if r.error else ("[yellow]truncated, nothing deleted[/yellow]" if r.truncated else "")
+        notes = [f"[red]{r.error.splitlines()[0]}[/red]"] if r.error else []
+        if r.truncated:
+            notes.append("[yellow]truncated, nothing deleted[/yellow]")
+        if r.skipped:
+            notes.append(f"{r.skipped} skipped (binary or too large)")
         failed = f"[red]{r.failed}[/red]" if r.failed else "0"
-        table.add_row(r.scope_tag, str(r.pushed), str(r.unchanged), str(r.deleted), failed, note)
+        table.add_row(r.scope_tag, str(r.pushed), str(r.unchanged), str(r.deleted), failed, "; ".join(notes))
     console.print(table)
 
 
@@ -1056,6 +1066,43 @@ def ingest_web(urls: tuple[str, ...], max_pages: int, tags: str | None, full: bo
     with make_client() as client:
         source = WebSource(client, max_pages=max_pages)
         _run_sync(SOURCE, [(scope, source.items(scope, seeds)) for scope, seeds in groups.items()], tags, full)
+
+
+@ingest.command("git")
+@click.argument("url")
+@click.option("--branch", default=None, help="Branch to sync. Default: the remote's default branch.")
+@click.option("--path", "paths", multiple=True, help="Only files under this repository path (repeatable).")
+@click.option("--exclude", multiple=True, help="Glob on the repository path to leave out, e.g. '*.lock' (repeatable; '*' crosses '/').")
+@click.option("--max-file-kb", default=512, show_default=True, type=click.IntRange(min=1), help="Larger files are skipped.")
+@click.option("--collection", type=click.Choice(["mnemos_code", "mnemos_knowledge"]), default="mnemos_code", show_default=True)
+@click.option("--user", envvar="GIT_USER", default=None, help="User name sent with the token (default oauth2) [env GIT_USER].")
+@click.option("--token", envvar="GIT_TOKEN", default=None, help="Access token; omit for a public repository [env GIT_TOKEN].")
+@_tags_option
+@_full_option
+def ingest_git(
+    url: str,
+    branch: str | None,
+    paths: tuple[str, ...],
+    exclude: tuple[str, ...],
+    max_file_kb: int,
+    collection: str,
+    user: str | None,
+    token: str | None,
+    tags: str | None,
+    full: bool,
+) -> None:
+    """Sync the files of a remote git repository (GitHub, GitLab, any HTTPS host)."""
+    from connectors.git import SOURCE, GitSource, repo_scope
+
+    try:
+        scope = repo_scope(url)
+    except ValueError as exc:
+        raise click.BadParameter(str(exc), param_hint="URL") from exc
+
+    source = GitSource(
+        url, user=user, token=token, branch=branch, paths=paths, exclude=exclude, max_file_kb=max_file_kb
+    )
+    _run_sync(SOURCE, [(scope, source.items(scope))], tags, full, collection=collection)
 
 
 _config_option = click.option(

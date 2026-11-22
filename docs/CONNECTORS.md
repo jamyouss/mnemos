@@ -1,21 +1,22 @@
 # Knowledge connectors
 
-`mnemos ingest` pulls knowledge that does not live in a git checkout —
-Confluence pages, Jira issues, web documentation — into the
-`mnemos_knowledge` collection, so agents find it with `mnemos_search`
-(`collections: ["mnemos_knowledge"]`) next to code and memories.
+`mnemos ingest` pulls knowledge that does not live in a local checkout —
+Confluence pages, Jira issues, web documentation, remote git repositories —
+into Mnemos: `mnemos_knowledge` for documents, `mnemos_code` (by default) for
+repositories, so agents find them with `mnemos_search` / `mnemos_search_code`
+next to local code and memories.
 
 ```
-mnemos ingest run | serve        (config/connectors.yaml)
-mnemos ingest confluence|jira|web  (one source, from flags)
-   │  source REST API / HTTP crawl        (httpx, retries, proxy-aware)
+mnemos ingest run | serve              (config/connectors.yaml)
+mnemos ingest confluence|jira|web|git  (one source, from flags)
+   │  source REST API / HTTP crawl / git clone   (retries, proxy-aware)
    ▼
-connector → Markdown documents (# title, metadata, body)
+connector → Markdown documents (# title, metadata, body) · git: files as they are
    │
    ▼
-sync engine ── GET  /api/index/mnemos_knowledge/files?tag=<source>:<scope>
+sync engine ── GET  /api/index/<collection>/files?tag=<source>:<scope>
             ── POST /api/index                     (new / changed documents)
-            ── DELETE /api/index/mnemos_knowledge/<file_path>   (gone at the source)
+            ── DELETE /api/index/<collection>/<file_path>   (gone at the source)
    ▼
 Mnemos server (chunk → embed → Qdrant)
 ```
@@ -41,7 +42,8 @@ Options shared by every `ingest` command:
 | `mnemos ingest -v …` | Log each pushed / deleted document |
 
 Each command prints a table — pushed / unchanged / deleted / failed per
-scope — and **exits 1 if anything failed**, so a scheduler flags the run.
+scope, plus skipped files in the note — and **exits 1 if anything failed**,
+so a scheduler flags the run.
 
 ## Configuration file
 
@@ -70,14 +72,24 @@ sources:
     name: handbook
     urls: [https://docs.example.com/handbook/]
     max_pages: 200
+  - type: git
+    name: app
+    url: https://github.com/acme/app.git
+    # token_env: GITHUB_TOKEN    # private repository: read-only token
+    # branch: main               # default: the remote's default branch
+    # paths: [docs/, services/]  # default: the whole repository
+    # exclude: ["*.lock"]
+    # max_file_kb: 512
+    # collection: mnemos_code    # or mnemos_knowledge
 ```
 
 Keys mirror the command-line options of each source below (`spaces` /
 `projects` / `urls` are the repeatable `--space` / `--project` / URL
 arguments). Tokens never go in the file: `token_env` names the variable, which
-must be set when the file is loaded — a missing one, an unknown key, a typo in
-`type` or a duplicate `name` stops the run before anything is synced, with
-every problem listed at once.
+must be set when the file is loaded (optional for git: a public repository
+needs none) — a missing one, an unknown key, a typo in `type` or a duplicate
+`name` stops the run before anything is synced, with every problem listed at
+once.
 
 The path is `--config`, else `MNEMOS_CONNECTORS_CONFIG`, else
 `config/connectors.yaml` (relative to the working directory; `/app/config/`
@@ -250,6 +262,54 @@ Crawl rules:
 - `updated` is the `Last-Modified` header. Pages served without it are
   re-pushed on every run (re-embedding cost: keep the scope tight).
 
+## Git repositories
+
+```bash
+mnemos ingest git https://github.com/acme/app.git
+GIT_TOKEN=glpat-… mnemos ingest git https://gitlab.example.com/group/app --branch develop \
+    --path docs/ --path services/api --exclude '*.lock' --collection mnemos_knowledge
+```
+
+| Option | Meaning |
+|---|---|
+| `URL` | HTTPS repository URL, any host (GitHub, GitLab, Gitea, self-hosted). SSH URLs are refused |
+| `--branch` | Branch to sync (default: the remote's default branch) |
+| `--path` | Only files under this repository path (repeatable) |
+| `--exclude` | `fnmatch` glob on the repository path, `*` crossing `/` — `*.lock`, `*/testdata/*` (repeatable) |
+| `--max-file-kb` | Larger files are skipped (default 512) |
+| `--collection` | `mnemos_code` (default: AST chunking, found by `mnemos_search_code`) or `mnemos_knowledge` |
+| `--token` / `GIT_TOKEN` | Access token; omit for a public repository |
+| `--user` / `GIT_USER` | User name sent with the token (default `oauth2`, which GitLab expects and GitHub ignores) |
+
+How a run works:
+
+- **Blobless clone** (`git clone --filter=blob:none`) into a temporary
+  directory: commits and trees, no file contents. One `git log` dates every
+  file by the last commit touching it — that date is the sync's
+  `file_mtime`, so a file whose last commit did not change is skipped
+  without being downloaded. Contents are fetched one by one, only for what
+  is pushed. The clone is deleted at the end of the run; nothing persists.
+- **Files**: regular files of the branch's HEAD only — no symlinks, no
+  submodules. Binary extensions (images, archives, fonts, office
+  documents…) are never fetched; a fetched file over `max_file_kb`, or with
+  a NUL byte in its first 8 KB, is skipped — and its indexed copy removed
+  if it had one. The server's path filter applies on top: `node_modules/`,
+  `vendor/`, `dist/`, lockfiles… stay out as for a local checkout.
+- **Token**: sent as an `Authorization` header scoped to the repository's
+  origin, through `GIT_CONFIG_*` environment variables — never in a URL,
+  on the command line or in `.git/config`. Use a read-only token
+  (GitHub fine-grained *Contents: read*; GitLab `read_repository`). Without
+  a token, git's own credential helper applies (handy for `ingest git` on a
+  workstation). `SSL_CERT_FILE` is passed on to git as `GIT_SSL_CAINFO`.
+- **Paths and tags**: `git/<host>/<owner~repo>/<path in repo>`, tags
+  `[*--tags, "git", "git:<host>/<owner>/<repo>"]`. Owner and repository share
+  one path segment so that a repository called `build` or `vendor` is not
+  dropped by the server's path filter. Results link to the file on GitHub
+  (`/blob/<branch>/`) or GitLab (`/-/blob/<branch>/`); on other forges, to
+  the repository.
+- A repository also mounted locally and indexed by the watcher would be
+  indexed twice, under two paths: pick one.
+
 ## Conventions
 
 | Source | `file_path` | Tags |
@@ -257,6 +317,7 @@ Crawl rules:
 | Confluence | `confluence/<SPACEKEY>/<page_id>.md` | `[*--tags, "confluence", "confluence:<SPACEKEY>"]` |
 | Jira | `jira/<PROJECTKEY>/<ISSUEKEY>.md` | `[*--tags, "jira", "jira:<PROJECTKEY>"]` |
 | Web | `web/<host>/<sha1(normalized url)[:16]>.md` | `[*--tags, "web", "web:<host>"]` |
+| Git | `git/<host>/<owner~repo>/<path in repo>` | `[*--tags, "git", "git:<host>/<owner>/<repo>"]` |
 
 - The `<source>:<scope>` tag is the **sync key**: the files endpoint is
   queried with it. Keep it stable — renaming a scope means re-ingesting.
@@ -267,9 +328,11 @@ Crawl rules:
 - For the same reason a single-label host (`http://build/`) gets a
   trailing dot in its path segment — `web/build./…` — while its tag stays
   `web:build`. Dotted hosts and `host:port` are used as-is.
-- Every document is Markdown: `# <title>`, a `- Field: value` metadata
-  list (always starting with `Source`), then the body. The server chunks it
-  by headings and returns `metadata.source_url` with each hit.
+- Every Confluence, Jira and web document is Markdown: `# <title>`, a
+  `- Field: value` metadata list (always starting with `Source`), then the
+  body. Git files are pushed as they are, so the server picks the chunker by
+  extension (Go AST, Vue SFC, Markdown headings…). Every hit carries
+  `metadata.source_url`.
 
 Filter on these tags at query time, e.g. `tags_any: ["confluence:ENG"]` or
 `mnemos search "rollback" --collection mnemos_knowledge --tags jira:OPS`.

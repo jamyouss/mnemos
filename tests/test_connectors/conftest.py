@@ -20,7 +20,9 @@ NO_WAIT = RetryPolicy(attempts=3, sleep=lambda _s: None)
 
 @dataclass
 class FakeMnemos:
-    """The three knowledge endpoints of the server, backed by a dict."""
+    """The three index endpoints of the server for one collection, backed by a dict."""
+
+    collection: str = "mnemos_knowledge"
 
     files: dict[str, dict] = field(default_factory=dict)
     pushed: list[dict] = field(default_factory=list)
@@ -34,13 +36,15 @@ class FakeMnemos:
     def handle(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
         path = request.url.path
-        prefix = "/api/index/mnemos_knowledge/"
+        prefix = f"/api/index/{self.collection}/"
         if request.method == "GET" and path == prefix + "files":
             tag = request.url.params["tag"]
             files = {p: f["file_mtime"] for p, f in self.files.items() if tag in f["tags"]}
-            return httpx.Response(200, json={"collection": "mnemos_knowledge", "tag": tag, "files": files})
+            return httpx.Response(200, json={"collection": self.collection, "tag": tag, "files": files})
         if request.method == "POST" and path == "/api/index":
             body = json.loads(request.content)
+            if body["collection"] != self.collection:
+                return httpx.Response(400, json={"detail": f"unexpected collection {body['collection']}"})
             if body["file_path"] in self.fail_push_for:
                 return httpx.Response(400, json={"detail": "rejected"})
             self.pushed.append(body)
