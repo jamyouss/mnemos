@@ -20,7 +20,6 @@ venv/
 .env
 .env.*
 !.env.example
-!.env.minimal.example
 data/
 !data/.gitkeep
 !data/**/.gitkeep

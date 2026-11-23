@@ -55,7 +55,7 @@ running this image standalone:
 ```bash
 git clone https://github.com/jamyouss/mnemos.git
 cd mnemos
-cp .env.minimal.example .env
+cp .env.example .env   # then set MNEMOS_CODEBASE_HOST_PATH
 docker compose up -d
 ```
 
