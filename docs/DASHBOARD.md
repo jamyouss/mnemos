@@ -142,28 +142,57 @@ Every server setting, grouped by section, with **where its value comes from**
 (`default`, `env`, `override`) and **when a change applies** (`live`,
 `restart`, `reindex`). Changes are reviewed as a diff before they are sent.
 
-Read-only unless the server runs with `MNEMOS_UI_CONFIG_WRITABLE=true`.
-Secrets, URLs, paths and the embedding model are never editable here, and the
-API key is never sent to the browser. Saved values are overrides in
-`<state dir>/settings.json` and win over `.env`; the reset button next to an
-override removes it. Details: [CONFIGURATION.md](CONFIGURATION.md#dashboard-overrides).
+Admin keys only. Read-only unless the server runs with
+`MNEMOS_UI_CONFIG_WRITABLE=true`. Secrets, URLs, paths and the embedding model
+are never editable here, and the API key is never sent to the browser. Saved
+values are overrides stored in the database, applied by every server pod, and
+win over `.env`; the reset button next to an override removes it. A save
+checks the revision the page loaded: if someone saved in between, the server
+answers `409` and the page reloads. Details:
+[CONFIGURATION.md](CONFIGURATION.md#dashboard-overrides).
 
 ### Connectors
 
-Edits `config/connectors.yaml`: the sync `interval` and one card per
+Edits the server's `connectors` configuration: the sync `interval` and one card per
 Confluence, Jira, web or git source, with the fields of
 [CONNECTORS.md](CONNECTORS.md#configuration-file). Each card shows its scope
 tags (`jira:OPS`, `web:docs.example.com`) and how many chunks
 `mnemos_knowledge` (or `mnemos_code`, for a git source) holds under each — `not synced yet` is the answer to "did
 the ingester ever run?".
 
-The server validates with the ingester's own parser and refuses a file the
-ingester would reject, listing every problem; a hand-edited file that is
-already broken is flagged the same way on load. Tokens are never shown or
-sent: a card names the variable (`token_env`) that holds one in the
-ingester's environment. The ingester watches the file and resyncs within
-seconds of a save. Read-only unless `MNEMOS_UI_CONFIG_WRITABLE=true`; details
-in [CONNECTORS.md](CONNECTORS.md#from-the-dashboard).
+The server validates with the ingester's own parser and refuses a
+configuration the ingester would reject, listing every problem; one that is
+already broken (an imported file, for instance) is flagged the same way on
+load. Tokens are never shown or sent: a card names the variable (`token_env`)
+that holds one in the ingester's environment. An ingester reading the server
+resyncs within seconds of a save. Saves use the same revision check as
+Configuration (`409` → reload). Visible to admin keys and keys with
+`write: "*"`; saving needs an admin key and `MNEMOS_UI_CONFIG_WRITABLE=true`.
+Details in [CONNECTORS.md](CONNECTORS.md#from-the-dashboard).
+
+### Projects
+
+Edits the `path → tags` mapping and the per-prefix ignore rules
+(`exclude_dirs`, `exclude_exts`) described in
+[CONFIGURATION.md](CONFIGURATION.md#tags--scoping-chunks-across-projects).
+The server refuses an empty or absolute prefix, a duplicate prefix and an
+entry without tags (`422`, every problem listed). A save applies to every pod
+within `MNEMOS_CONFIG_POLL_SECONDS`, from the next indexing event on; already
+indexed chunks keep their tags until reindexed. Same visibility, save rules
+and revision check as Connectors.
+
+### Tenants
+
+Admin keys only. Lists the API keys' tenants with their role and `read` /
+`write` scopes (`*` or a list of tags); creates a tenant, edits its scopes,
+rotates or revokes its key. A new or rotated key is shown **once**, then only
+its SHA-256 is kept. A revoked key stops working on every pod within
+`MNEMOS_CONFIG_POLL_SECONDS`. The last admin cannot be removed or demoted.
+Saving needs `MNEMOS_UI_CONFIG_WRITABLE=true`. Scope rules:
+[DEPLOYMENT.md](DEPLOYMENT.md#tenants-and-scopes).
+
+The sidebar hides what the key cannot open: Search, Configuration and Tenants
+need an admin key; Connectors and Projects need admin or `write: "*"`.
 
 ### Appearance
 
@@ -183,8 +212,8 @@ Two layers, the higher one winning:
 | `MNEMOS_QUERY_LOG_ENABLED` | `false` | **Required for the Search screen.** Without it there is nothing to display |
 | `MNEMOS_QUERY_LOG_PATH` | `/data/state/query-log.jsonl` | Read by tailing, so the file can grow |
 | `MNEMOS_UI_PATH` | `/app/ui` | Absent → API only |
-| `MNEMOS_UI_CONFIG_WRITABLE` | `false` | Lets the Configuration page save overrides and the Connectors page save `connectors.yaml`. See [CONFIGURATION.md](CONFIGURATION.md#dashboard-overrides) |
-| `MNEMOS_CONNECTORS_CONFIG` | `/app/config/connectors.yaml` | File the Connectors page edits |
+| `MNEMOS_UI_CONFIG_WRITABLE` | `false` | Lets the Configuration, Connectors, Projects and Tenants pages save. See [CONFIGURATION.md](CONFIGURATION.md#dashboard-overrides) |
+| `MNEMOS_CONFIG_POLL_SECONDS` | `5` | How fast a save made through one server pod reaches the others |
 | `MNEMOS_UI_THEME_PATH` | `/app/config/theme.css` | Instance theme served at `/theme.css`. See [CONFIGURATION.md](CONFIGURATION.md#instance-theme) |
 
 ## Not included
@@ -195,6 +224,7 @@ kept in the browser's localStorage (`mnemos.apiKey`).
 
 **No writing memories, no triggering a reindex.** The CLI and the MCP tools
 write; this screen prunes, which was the missing gesture. And a button that
-starts hours of LLM work needs guard rails that do not exist yet. Settings and
-the connectors file are the exceptions, behind an opt-in flag; the dashboard
-edits what the ingester syncs, it never runs a sync itself.
+starts hours of LLM work needs guard rails that do not exist yet. The shared
+configuration (settings, connectors, projects, tenants) is the exception,
+behind an opt-in flag; the dashboard edits what the ingester syncs, it never
+runs a sync itself.

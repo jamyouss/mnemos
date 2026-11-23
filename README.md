@@ -177,8 +177,12 @@ What's distinctive about the bundle Mnemos ships:
 - **MCP Streamable HTTP** — Native protocol, no shim
 - **9 MCP tools** — `mnemos_search`, `mnemos_search_code`, `mnemos_memory`,
   `mnemos_reindex`, …
-- **API-key auth** — Bearer keys (`MNEMOS_AUTH_ENABLED`), push API, GitHub
-  Actions workflow, connectors for Confluence, Jira, web pages and remote git repositories
+- **API-key auth with per-tag scopes** — Bearer keys (`MNEMOS_AUTH_ENABLED`)
+  scoped by tag for read and write, push API, GitHub Actions workflow,
+  connectors for Confluence, Jira, web pages and remote git repositories
+- **Shared configuration** — connectors, projects, settings and API keys
+  stored in Qdrant and edited from the dashboard; every server replica picks
+  a change up within seconds
 - **Pluggable LLM** — Ollama, Anthropic API (prompt caching!), or any
   OpenAI-compatible endpoint (vLLM, LM Studio, Groq, Together, OpenRouter…)
 - **Observability** — Optional JSONL query log for debug + A/B analysis

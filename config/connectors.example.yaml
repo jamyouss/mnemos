@@ -2,8 +2,11 @@
 # in sync inside `mnemos_knowledge` (documents) and `mnemos_code` (git
 # repositories, by default).
 #
-# Copy to config/connectors.yaml (gitignored) and adapt, or edit it from the
-# dashboard's Connectors page. See docs/CONNECTORS.md.
+# Import template: copy to config/connectors.yaml (gitignored) and adapt
+# BEFORE the first server start. The server imports it once, when the database
+# holds no connectors, then ignores it; afterwards edit the sources from the
+# dashboard's Connectors page. `mnemos ingest run|serve --config FILE` still
+# reads a file like this one directly. See docs/CONNECTORS.md.
 #
 # Secrets never go in this file: a source that needs a token names the
 # environment variable that holds it (`token_env`). A variable that is not set

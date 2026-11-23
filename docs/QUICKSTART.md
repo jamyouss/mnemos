@@ -122,8 +122,9 @@ The `--recreate` flag drops the collection before reindexing. **You need it
 once per collection** to migrate to the hybrid (named-vector) schema. After
 that, drop the flag for incremental re-runs. The `--tags` list is stored in
 each chunk's `tags` payload — searches scope with `--tags` (OR) and
-`--tags-all` (AND). Without `--tags`, Mnemos derives tags from
-`config/projects.yaml` (or cumulative path segments by default). See
+`--tags-all` (AND). Without `--tags`, Mnemos derives tags from the projects
+mapping (imported from `config/projects.yaml` at the first start, then edited
+from the dashboard) or cumulative path segments by default. See
 [`CONFIGURATION.md`](CONFIGURATION.md#tags--scoping-chunks-across-projects).
 
 Monitor progress:

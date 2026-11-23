@@ -20,9 +20,10 @@ service serving multiple teams.
               ┌───────────────────┼─────────────────────┐
               ▼                   ▼                     ▼
          ┌─────────┐         ┌──────────┐         ┌──────────┐
-         │ Qdrant  │         │  Ollama   │         │ API keys │
-         │ persist │         │ (or API) │         │   file   │
-         └─────────┘         └──────────┘         └──────────┘
+         │ Qdrant  │         │  Ollama   │         │ config + │
+         │ persist │         │ (or API) │         │ API keys │
+         └─────────┘         └──────────┘         │ (Qdrant) │
+                                                  └──────────┘
 ```
 
 Components:
@@ -31,8 +32,12 @@ Components:
   an API key (`QDRANT_API_KEY`): whoever reaches an open Qdrant reads and
   rewrites every collection without going through the server's API keys.
 - **LLM provider** — Ollama on the host, or a cloud API.
-- **API keys** — `config/tenants.yaml`, read once at startup (restart
-  `rag-server` to apply changes).
+- **Configuration and API keys** — stored in Qdrant (`mnemos_config`
+  collection): connectors, projects, settings overrides, tenants. Edited from
+  the dashboard or the API; every pod applies a change within
+  `MNEMOS_CONFIG_POLL_SECONDS` (default 5). Files in `config/` are only
+  imported at the first start. See
+  [`CONFIGURATION.md`](CONFIGURATION.md#shared-configuration).
 - **Hooks** — devs run `scripts/install-hooks.sh` locally (per-developer);
   the server doesn't host them. Four hooks: `pre-push` / `post-commit` for
   memory extraction, `post-merge` / `post-checkout` for incremental indexing.
@@ -76,8 +81,8 @@ mnemos.internal {
 
 ## Authentication
 
-The bundled `docker-compose.prod.yml` turns API-key auth on and mounts the
-keys file:
+The bundled `docker-compose.prod.yml` turns API-key auth on and mounts
+`config/tenants.yaml` as the bootstrap source for the first tenants:
 
 ```bash
 cp config/tenants.example.yaml config/tenants.yaml   # then replace CHANGE_ME
@@ -94,35 +99,57 @@ NetworkPolicy that only lets the Mnemos pods reach Qdrant.
 
 `config/tenants.yaml` is gitignored on purpose — it holds your real API
 keys. The template at `config/tenants.example.yaml` is what ships with
-the repo; you copy it once and keep your local copy out of source control.
+the repo. It is only an import source: at the first start, when the database
+holds no tenant, each entry becomes an admin tenant with every scope. Instead
+of the file you can set `MNEMOS_BOOTSTRAP_ADMIN_KEY`, which creates one tenant
+`admin` with that key. With auth on and neither, the server refuses to start.
+After the first start, manage keys from the dashboard's Tenants page (or the
+API below) and delete the file and the variable.
 
 With `MNEMOS_AUTH_ENABLED=true`:
 - Every path under `/api`, `/internal` and `/mcp` requires an
   `Authorization: Bearer <api-key>` header. A missing or unknown key gets a
   `401` with `WWW-Authenticate: Bearer`. `/health` and the dashboard's static
   files stay open.
-- Keys are compared in constant time.
-- A tenant is an identity, nothing more: every tenant reads and writes the
-  same collections. There is no collection isolation and no quota.
+- Keys are stored as SHA-256 hashes only; the server looks up the hash of the
+  presented key.
+- Each tenant has scopes (next section) that restrict what it reads and writes.
 
 No codebase is mounted on a shared server, so content arrives through the
 push API (CI, git hooks, connectors) rather than filesystem reindexing.
 
-### `config/tenants.yaml`
+### Tenants and scopes
 
-```yaml
-tenants:
-  team_a:
-    api_key: "…"
-  ci:
-    api_key: "…"
-```
+A tenant has an `admin` flag and two tag scopes, `read` and `write`, each
+either `"*"` (every tag) or a list of tags. An empty `write` list makes a
+read-only key.
 
-The path is `MNEMOS_TENANTS_PATH` (default `/data/config/tenants.yaml`). The
-file is read once at startup: rotate a key by editing it and restarting
-`rag-server`. The server refuses to start when auth is enabled and the file
-is missing, lists no tenant, has an empty or `CHANGE_ME` key, or gives the
-same key to two tenants.
+| Operation | Rule |
+|-----------|------|
+| Search, list, facets on `mnemos_code`, `mnemos_knowledge`, `mnemos_memory` | Only items sharing at least one tag with `read` (a parent tag such as `acme` covers every chunk tagged with it) |
+| Skills and docs | Readable by every tenant; writable only with `write: "*"` |
+| Push with tags resolved by the server (no `tags` in the body) | One resolved tag in `write` is enough |
+| Push or memory with tags declared by the client (`tags` override, memories, connector pages) | Every tag must be in `write` |
+| `/api/reindex`, `/internal/reindex`, `/api/memory/extract`, MCP `mnemos_reindex` | `write: "*"` |
+| Query log, `/api/eval/*`, settings, tenants | `admin` |
+| `GET /api/connectors`, `GET /api/projects` | `admin` or `write: "*"` (the ingester's and scripts' key) |
+
+A refused operation answers `403` (an `Error: …` text over MCP).
+
+Tenant API (admin key; writes also need `MNEMOS_UI_CONFIG_WRITABLE=true`):
+
+| Request | Effect |
+|---------|--------|
+| `GET /api/whoami` | Any key: its name, `admin`, `read`, `write` |
+| `GET /api/tenants` | List tenants (never the key or its hash) |
+| `POST /api/tenants` `{name, admin, read, write}` | Create; returns `api_key`, shown once |
+| `PATCH /api/tenants/{name}` `{admin?, read?, write?}` | Change role or scopes |
+| `POST /api/tenants/{name}/rotate` | New key, returned once; the old one stops working |
+| `DELETE /api/tenants/{name}` | Revoke |
+
+Mutations accept an optional `revision` (`409` if the tenants changed since).
+Removing or demoting the last admin answers `409`. A revoked or rotated key
+stops working on every pod within `MNEMOS_CONFIG_POLL_SECONDS`.
 
 ### Client configuration
 
@@ -197,9 +224,9 @@ curl "https://mnemos.example.com/api/index/mnemos_knowledge/files?tag=confluence
   -H "Authorization: Bearer $MNEMOS_API_KEY"
 ```
 
-The optional `tags` array overrides the auto-detected list from
-`config/projects.yaml`. When omitted, the server resolves tags from the
-file path. See [`CONFIGURATION.md`](CONFIGURATION.md#tags--scoping-chunks-across-projects).
+The optional `tags` array overrides the tags resolved from the projects
+mapping, and then every tag must be in the key's `write` scope. When omitted,
+the server resolves tags from the file path. See [`CONFIGURATION.md`](CONFIGURATION.md#tags--scoping-chunks-across-projects).
 `mnemos_knowledge` uses `<source>` and `<source>:<scope>` tags
 (`confluence:ENG`, `jira:OPS`, `web:docs.example.com`); the connectors in
 [`CONNECTORS.md`](CONNECTORS.md) set them for you.
@@ -262,7 +289,20 @@ Restore by stopping the stack, replacing the volume contents, and restarting.
 
 ## Scaling
 
-Mnemos is not (yet) horizontally sharded. To scale up:
+Mnemos is not (yet) horizontally sharded, but `rag-server` runs as several
+replicas: all configuration lives in Qdrant and each pod polls it every
+`MNEMOS_CONFIG_POLL_SECONDS`, so a dashboard save on one pod reaches the
+others within seconds. Two saves of the same page race on a `revision`
+check (`409`, the dashboard reloads); the check and the write are not atomic
+in Qdrant, which only matters for two admins saving in the same millisecond.
+
+The ingester (`mnemos ingest serve`) must run **once**, not per server pod:
+a single-replica Deployment with `strategy: Recreate`, or a CronJob running
+`mnemos ingest run` with `concurrencyPolicy: Forbid`. Never a sidecar of a
+multi-replica `rag-server`: each replica would sync every source. It reads
+its sources from `GET /api/connectors`, so no ConfigMap is needed.
+
+To scale up:
 
 | Bottleneck | Scaling lever |
 |------------|--------------|
@@ -310,11 +350,12 @@ jq -c '. | select(.cache_hit != null)' /data/state/query-log.jsonl \
       `QDRANT_API_KEY` set on both Qdrant and the server.
 - [ ] API keys stored in a secret manager (HashiCorp Vault, GitHub Secrets,
       AWS Secrets Manager), **never** committed to git (`config/tenants.yaml`
-      is gitignored); no `CHANGE_ME` key left (the server refuses to start).
+      is gitignored; delete it after the first start); no `CHANGE_ME` key left
+      (the server refuses to start).
 - [ ] TLS in front (Caddy, nginx, ALB, …) — the rag-server only does
       plain HTTP, and API keys travel in the `Authorization` header.
-- [ ] One key per client (team, CI, connector) so a leaked key can be
-      revoked alone; restart `rag-server` after editing the keys file.
+- [ ] One key per client (team, CI, connector), scoped to its tags, so a
+      leaked key can be revoked alone from the Tenants page.
 - [ ] `MNEMOS_LLM_API_KEY` rotated periodically.
 - [ ] Read-only mounts for `CODEBASE_PATH` and `CLAUDE_CONFIG_PATH` (already
       `:ro` in the default compose file).

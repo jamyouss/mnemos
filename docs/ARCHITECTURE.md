@@ -89,7 +89,7 @@ For the active improvement plan, see [ROADMAP.md](ROADMAP.md).
 | `embedding_migration.py` | Moves every collection to a new model: `sync` re-embeds stored `content` into `<name>__<model>_<dim>`, `switch` serves the old name as an alias of it |
 | `sparse.py` | BM25 encoder — camelCase/snake split, stable 31-bit hash |
 | `contextual.py` | LLM-generated preamble per chunk (Anthropic-style) |
-| `indexer.py` | Orchestrator: skip check → chunk → contextualise → embed → upsert. `should_skip()` unions the built-in policy, the per-prefix rules from `config/projects.yaml` and any caller extras — the one place that resolution happens. |
+| `indexer.py` | Orchestrator: skip check → chunk → contextualise → embed → upsert. `should_skip()` unions the built-in policy, the per-prefix rules from the projects mapping and any caller extras — the one place that resolution happens. |
 | `collections.py` | Collection registry; named-vector schema constants |
 
 The dashboard (`ui/`, Nuxt SPA) is built in a separate Docker stage and served
@@ -215,8 +215,8 @@ Memory entries add: `id`, `memory_type`, `status`, `topic`, `created_at`.
 and `mnemos_memory`. `mnemos_knowledge` chunks also carry `source_url` (the
 wiki page, ticket or web page they came from) and use `<source>` /
 `<source>:<scope>` tags set by the connectors.
-For `mnemos_code`, the mapping `path → tags` comes from `config/projects.yaml`, with a default
-cumulative-segment fallback when the file is absent. See
+For `mnemos_code`, the mapping `path → tags` comes from the projects mapping (stored in
+`mnemos_config`), with a default cumulative-segment fallback when no prefix matches. See
 [`CONFIGURATION.md`](CONFIGURATION.md#tags--scoping-chunks-across-projects).
 
 ## Ignored paths
@@ -251,7 +251,7 @@ without further change.
 
 **Built-in vs configured.** The lists above are global policy: things that are
 never source anywhere. Noise that is specific to one project — an `exports/`
-directory, a generated `.csv` — belongs in `config/projects.yaml` instead, as
+directory, a generated `.csv` — belongs in the projects mapping instead, as
 per-prefix `exclude_dirs` / `exclude_exts`. See
 [CONFIGURATION](CONFIGURATION.md#per-project-ignore-rules). The two add up;
 neither can re-allow what the other denies.
@@ -260,11 +260,11 @@ Note what is deliberately *not* denied globally: tabular data. Mnemos is not
 only a code RAG, and a default-deny loses data silently — nothing in the
 results says a file was never indexed. Noise, by contrast, is visible and
 fixable. `chunkers/tabular_chunker.py` makes an indexed CSV actually
-retrievable; `config/projects.yaml` turns it off where it is not wanted.
+retrievable; the projects mapping turns it off where it is not wanted.
 
 ## Configuration model
 
-All knobs are **environment variables**. Defaults are conservative:
+Process knobs are **environment variables**. Defaults are conservative:
 - Hybrid retrieval is **on** by default (it's just the new collection schema).
 - Every advanced feature (contextual, reranker, grader, rewriter, cache, query log) is **off** by default.
 
@@ -273,6 +273,15 @@ shell or in `docker-compose.yml`. No rebuild is needed for a flag flip —
 just restart the rag-server container.
 
 See [`.env.example`](../.env.example) for the full surface.
+
+Shared configuration — connectors, projects (`path → tags`), dashboard
+settings overrides, tenants — lives in Qdrant, in the `mnemos_config`
+collection (one vectorless point per key, with a `revision`; not searchable,
+outside the collection registry). `server/config_bootstrap.py` imports the
+`config/` files once for each absent key at the first start;
+`server/config_sync.py` polls the revisions every `MNEMOS_CONFIG_POLL_SECONDS`
+and re-applies what moved on each pod. Overrides of the editable settings win
+over the env vars. See [`CONFIGURATION.md`](CONFIGURATION.md#shared-configuration).
 
 ## Testing
 

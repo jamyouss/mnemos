@@ -1,12 +1,16 @@
-# API keys for MNEMOS_AUTH_ENABLED=true. Copy to config/tenants.yaml (gitignored).
+# Bootstrap API keys for MNEMOS_AUTH_ENABLED=true. Copy to config/tenants.yaml
+# (gitignored) BEFORE the first server start.
 #
-# A tenant is an identity only: one name, one api_key. Every tenant reads and
-# writes the same collections — there is no per-tenant isolation or quota.
+# Import template: when the database holds no tenant, the server imports each
+# entry once as an admin tenant with every read and write scope, then ignores
+# this file. Afterwards create, scope, rotate and revoke keys from the
+# dashboard's Tenants page or /api/tenants (only SHA-256 hashes are stored).
+# Alternative to this file: MNEMOS_BOOTSTRAP_ADMIN_KEY.
 # Clients send the key as `Authorization: Bearer <api_key>`.
 #
-# The file is read once at startup: restart rag-server to apply changes.
-# The server refuses to start with an empty or CHANGE_ME key, or one key
-# shared by two tenants. Never commit real keys.
+# The import refuses an empty or CHANGE_ME key, or one key shared by two
+# tenants (with auth on, the server then refuses to start). Never commit
+# real keys.
 
 tenants:
   team_a:

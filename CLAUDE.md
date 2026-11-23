@@ -52,7 +52,7 @@ mnemos/
   server/                 # FastAPI + MCP server (port 8100)
   watcher/                # File watcher (watchdog)
   cli/                    # Click CLI client
-  config/                 # projects.yaml, tenants.yaml (clés API), connectors.yaml (sources)
+  config/                 # modèles *.example.yaml : sources d'import au 1er démarrage (la config vit dans Qdrant), theme.css
   packages/connectors/    # Connecteurs (Confluence, Jira, web, git) → push API ; `mnemos ingest run|serve`
   scripts/hooks/          # Global git hooks (memory extraction + incremental indexing)
   tests/                  # pytest suite
@@ -71,14 +71,15 @@ mnemos/
 | `mnemos_memory` | API / git hooks | _(aucun)_ | via `tags` payload |
 | `mnemos_code` | codebase + connecteur git (défaut) | _(tout le reste)_ | via `tags` payload (filtres `tags_any` / `tags_all`) |
 | `mnemos_knowledge` | connecteurs (Confluence, Jira, web, git avec `collection: mnemos_knowledge`) → push API | _(aucun)_ | via `tags` payload (`<source>`, `<source>:<scope>`, ex. `confluence:ENG`) |
+| `mnemos_config` | config partagée (connectors, projects, settings, tenants) | — | **non cherchable** : sans vecteur, hors `COLLECTIONS` (constante `CONFIG_COLLECTION`) |
 
 Une seule collection `mnemos_code` héberge **tous** les projets. Chaque chunk
 porte un champ `tags: list[str]` — le premier tag sert de label primaire
 (display), les suivants sont des labels transverses (parent, techno, équipe).
 
-Le mapping `path → tags` est défini dans `config/projects.yaml` (template
-`config/projects.example.yaml`). Sans ce fichier, Mnemos émet par défaut les
-segments cumulatifs du path (`foo/bar/baz/file.go` →
+Le mapping `path → tags` vit dans la config `projects` (Qdrant, page Projects
+du dashboard, `/api/projects`). Sans préfixe correspondant, Mnemos émet par
+défaut les segments cumulatifs du path (`foo/bar/baz/file.go` →
 `["foo", "foo/bar", "foo/bar/baz"]`).
 
 Côté requête, deux filtres sont exposés partout (CLI, REST, MCP) :
@@ -94,6 +95,22 @@ mnemos search-code "auth"  --tags-all acme,vue3       # AND
 mnemos_search_code(query="auth", tags_any=["acme-front-app-ecommerce", "acme-front-lib-auth"])
 mnemos_search_code(query="auth", tags_all=["acme", "vue3"])
 ```
+
+### Configuration partagée et tenants
+
+- Connectors, projects, overrides de settings et tenants sont dans
+  `mnemos_config` (un point par clé, avec `revision`). Les fichiers `config/*.yaml`
+  et `<state_dir>/settings.json` ne sont lus **qu'une fois**, au 1er démarrage,
+  pour chaque clé absente (`server/config_bootstrap.py`). Ensuite la base fait foi.
+- Chaque pod relit les révisions toutes les `MNEMOS_CONFIG_POLL_SECONDS` (5 s)
+  et ré-applique (`server/config_sync.py`). Écriture concurrente : `revision`
+  envoyée → 409 si elle a bougé ; sans `revision`, le dernier écrit gagne.
+- Tenants : rôle `admin` + scopes de tags `read` / `write` (`"*"` = tout), clés
+  stockées en SHA-256. Règles dans `server/principal.py` (contrat, ne pas
+  dériver) : lecture = un tag partagé ; écriture tags résolus = un tag,
+  tags déclarés = tous ; skills/docs écrits seulement en write-all.
+- Auth activée sans tenant (ni `tenants.yaml` ni `MNEMOS_BOOTSTRAP_ADMIN_KEY`)
+  → refus de démarrer.
 
 ### MCP Tools exposés (9)
 
@@ -200,18 +217,18 @@ Conventions tests :
 ### Modifications du filtrage par projet
 `core.path_filter` porte la politique **globale** — ce qui n'est jamais du
 source, nulle part. Le bruit propre à un projet (`exports/`, un `.csv` généré)
-va dans `config/projects.yaml`, en `exclude_dirs` / `exclude_exts` par préfixe.
+va dans la config `projects`, en `exclude_dirs` / `exclude_exts` par préfixe.
 
 1. `should_skip_path` reste une **fonction pure**. Ne jamais y charger de
    config : la résolution par préfixe vit dans `Indexer._resolve_excludes`,
-   calquée sur `_resolve_tags`.
+   calquée sur `resolve_tags`.
 2. Tout call site qui décide « faut-il ignorer ce fichier ? » passe par
    `Indexer.should_skip`, jamais par `should_skip_path` en direct — c'est le
    seul endroit qui unit built-in + config + extras.
 3. Les trois sources **s'additionnent**. Rien ne peut ré-autoriser ce qu'une
    règle built-in refuse.
-4. Le watcher pré-filtre sur les built-ins seuls : `config/` n'est pas monté
-   dans son conteneur. La correction est garantie côté serveur par
+4. Le watcher pré-filtre sur les built-ins seuls : il ne lit pas la config
+   `projects`. La correction est garantie côté serveur par
    `index_file`, le coût est un aller-retour HTTP gâché.
 
 ### Modifications du filtre d'indexation (`core.path_filter`)
@@ -255,7 +272,7 @@ Règles :
    le serveur filtre (`Indexer.index_file` est le chokepoint défensif). Seules
    les limites de *transport* vivent côté hook (taille max, fichier binaire).
 3. Les tags ne sont **pas** envoyés par le hook : le serveur les résout depuis
-   `config/projects.yaml` via le chemin container.
+   la config `projects` via le chemin container.
 4. Tout changement se teste dans `tests/test_hooks_incremental.py` (vrai repo
    git temporaire + stub HTTP, les hooks shell sont exécutés pour de vrai).
 

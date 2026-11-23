@@ -1,7 +1,10 @@
-# Mnemos — path → tags mapping (config/projects.yaml).
+# Mnemos — path → tags mapping, import template (config/projects.yaml).
 #
 # Copy this file to `config/projects.yaml` (gitignored) and adapt it to your
-# layout. Without this file, Mnemos emits cumulative path segments as tags
+# layout BEFORE the first server start: the server imports it once, when the
+# database holds no projects mapping, then ignores it. Afterwards edit the
+# mapping from the dashboard's Projects page or `PUT /api/projects`.
+# Without a matching prefix, Mnemos emits cumulative path segments as tags
 # by default (`foo/bar/baz/file.go` → `[foo, foo/bar, foo/bar/baz]`) — usable
 # but coarse-grained. Custom tags let you express both the project hierarchy
 # and cross-cutting labels (techno, client, team) for richer filtering.

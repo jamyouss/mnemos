@@ -102,7 +102,7 @@ mnemos reindex --recreate --full --workers 4 \
        --path /data/codebase/myproject \
        --tags myproject,go
 
-# Subsequent incremental: just re-index a single file (tags inherited from projects.yaml)
+# Subsequent incremental: just re-index a single file (tags from the projects mapping)
 mnemos reindex --collection mnemos_code \
        --path /data/codebase/myproject/services/handler.go
 ```
@@ -111,23 +111,23 @@ mnemos reindex --collection mnemos_code \
 |------|-------------|
 | `--collection` (required) | Collection name (e.g. `mnemos_code`, `mnemos_docs`) |
 | `--path` | Container path of a file or directory |
-| `--tags` | Comma-separated tags applied to every file under `--path`. Overrides the auto-detected list from `config/projects.yaml`. First tag is the primary (display label). |
+| `--tags` | Comma-separated tags applied to every file under `--path`. Overrides the tags resolved from the server's projects mapping. First tag is the primary (display label). |
 | `--full` | Recursively walk `--path`. Without `--full`, only the path itself is indexed. |
 | `--recreate` | Drop + recreate the collection before indexing. Required to migrate to hybrid. |
 | `--workers` | Parallel worker threads (use 4 with contextual chunking on) |
 | `--exclude-ext` | Extra extension to skip **for this run**, repeatable, leading dot optional (`--exclude-ext .proto --exclude-ext csv`) |
 | `--exclude-dir` | Extra directory name to skip **for this run**, repeatable, matched anywhere in the path (`--exclude-dir mocks`) |
 
-Both exclude flags **add to** the built-in deny list and to whatever
-`config/projects.yaml` declares — they never replace either. They also last
+Both exclude flags **add to** the built-in deny list and to whatever the
+projects mapping declares — they never replace either. They also last
 only for the run: the watcher and the push API do not see them, so a file
 excluded by a flag comes back on the next change. For a rule that sticks, put
-it in `config/projects.yaml` — see
+it in the projects mapping (dashboard Projects page) — see
 [`CONFIGURATION.md`](CONFIGURATION.md#per-project-ignore-rules).
 
-Without `--tags`, Mnemos resolves tags from `config/projects.yaml` (longest
-path-prefix wins). Without that file either, it falls back to cumulative
-path segments. See [`CONFIGURATION.md`](CONFIGURATION.md#tags--scoping-chunks-across-projects).
+Without `--tags`, Mnemos resolves tags from the projects mapping stored on
+the server (longest path-prefix wins). Without a matching entry, it falls
+back to cumulative path segments. See [`CONFIGURATION.md`](CONFIGURATION.md#tags--scoping-chunks-across-projects).
 
 The reindex runs as a **background task** server-side. The CLI returns
 immediately with `reindex_started`. Watch progress with `mnemos status`.

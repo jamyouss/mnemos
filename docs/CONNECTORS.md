@@ -7,7 +7,7 @@ repositories, so agents find them with `mnemos_search` / `mnemos_search_code`
 next to local code and memories.
 
 ```
-mnemos ingest run | serve              (config/connectors.yaml)
+mnemos ingest run | serve              (server's connectors, or --config FILE)
 mnemos ingest confluence|jira|web|git  (one source, from flags)
    │  source REST API / HTTP crawl / git clone   (retries, proxy-aware)
    ▼
@@ -47,8 +47,14 @@ so a scheduler flags the run.
 
 ## Configuration file
 
-Declare every source once in `config/connectors.yaml` (gitignored; start from
-[`config/connectors.example.yaml`](../config/connectors.example.yaml)):
+Every source is declared once in the server's `connectors` configuration,
+stored in Qdrant and shared by every server pod (see
+[`CONFIGURATION.md`](CONFIGURATION.md#shared-configuration)). Edit it from the
+dashboard's Connectors page or `PUT /api/connectors`. At the first start the
+server imports `config/connectors.yaml` (`MNEMOS_CONNECTORS_CONFIG`; start
+from [`config/connectors.example.yaml`](../config/connectors.example.yaml))
+if the database holds no connectors yet; after that the file is ignored by
+the server. The shape is the same in the file and the API:
 
 ```yaml
 interval: 6h                     # `ingest serve` resync period: 45s, 30m, 6h, 1d
@@ -85,36 +91,38 @@ sources:
 
 Keys mirror the command-line options of each source below (`spaces` /
 `projects` / `urls` are the repeatable `--space` / `--project` / URL
-arguments). Tokens never go in the file: `token_env` names the variable, which
-must be set when the file is loaded (optional for git: a public repository
+arguments). Tokens never go in the configuration: `token_env` names the
+variable, which must be set in the ingester's environment when it loads the
+sources (optional for git: a public repository
 needs none) — a missing one, an unknown key, a typo in `type` or a duplicate
 `name` stops the run before anything is synced, with every problem listed at
 once.
 
-The path is `--config`, else `MNEMOS_CONNECTORS_CONFIG`, else
-`config/connectors.yaml` (relative to the working directory; `/app/config/`
-in the `jamyouss/mnemos-cli` image).
+Where `mnemos ingest run` / `serve` read the sources: `--config FILE`, else
+`MNEMOS_CONNECTORS_CONFIG`, else the server's `GET /api/connectors` (on
+`MNEMOS_URL`, with an `MNEMOS_API_KEY` that has the admin role or
+`write: "*"`). A file is for one-off or local runs; deployed ingesters read
+the server.
 
 ### From the dashboard
 
 The **Connectors** page of the dashboard (`http://localhost:8100/connectors`)
-edits the same file: one card per source, the `interval`, and per scope tag
+edits that configuration: one card per source, the `interval`, and per scope tag
 how many chunks `mnemos_knowledge` holds — `not synced yet` until the ingester
 has delivered something. The server validates with the ingester's own parser
-before writing, so a save the ingester would reject is refused with every
-problem listed, and nothing is written.
+before saving, so a save the ingester would reject is refused (`422`) with
+every problem listed, and nothing is stored. A save carries the revision the
+page loaded; if someone saved in between, it answers `409` and the page
+reloads.
 
-- **Writing** needs `MNEMOS_UI_CONFIG_WRITABLE=true` on the server; otherwise
-  the page is read-only. The compose file mounts `./config` writable into
-  `rag-server` for this, and as a directory (not the file) into `ingester`, so
-  it sees the atomic replace.
+- **Writing** needs `MNEMOS_UI_CONFIG_WRITABLE=true` on the server and an
+  admin key; otherwise the page is read-only.
 - **Tokens** never pass through the server: a card only names the variable
   (`token_env`), set in the ingester's environment. The server cannot check
   that it is set — the ingester reports a missing one at its next sync.
-- Saving **rewrites the file and drops its comments**. Through a symlink that
-  resolves inside the container, the target is written and the link kept.
-- The `ingester` picks the change up within seconds (it watches the file).
-  A new `interval` still needs `docker compose restart ingester`.
+- An `ingest serve` reading the server picks the change up within 5 s (it
+  polls the revision) and resyncs. A new `interval` still needs
+  `docker compose restart ingester`.
 - Removing a source stops its syncs; what it already indexed stays.
 
 ### Sync once: `mnemos ingest run`
@@ -131,17 +139,17 @@ the others still run; the command exits 1 if anything failed.
 ### Sync at start-up, then on a timer: `mnemos ingest serve`
 
 `serve` is the long-running form: it syncs every source as soon as it starts,
-then every `interval`, when the file changes (checked every 5 s), and
-immediately on `SIGHUP`:
+then every `interval`, when the configuration changes (the server's revision,
+or the `--config` file, checked every 5 s), and immediately on `SIGHUP`:
 
 | To… | Do |
 |---|---|
-| resync now | `docker compose kill -s HUP ingester` · `kubectl exec <pod> -c ingester -- kill -HUP 1` |
+| resync now | `docker compose kill -s HUP ingester` · `kubectl exec deploy/mnemos-ingester -- kill -HUP 1` |
 | resync one source, or with `--full` | `mnemos ingest run --only <name> [--full]` from anywhere |
-| apply an edited `connectors.yaml` | nothing: the change triggers a sync within seconds, and the file is re-read before every sync (a broken edit is reported and the previous version kept). A changed `interval` needs a restart |
+| apply an edited configuration | nothing: a save (or an edit of the `--config` file) triggers a sync within seconds, and the sources are re-read before every sync (a broken one is reported and the previous version kept). A changed `interval` needs a restart |
 | stop | `SIGTERM` — the service exits at once; an interrupted sync resumes at the next run |
 
-Without `interval`, `serve` syncs at start-up, on file change and on `SIGHUP` only.
+Without `interval`, `serve` syncs at start-up, on configuration change and on `SIGHUP` only.
 
 ## Confluence
 
@@ -372,42 +380,53 @@ The `jamyouss/mnemos-cli` image packages the CLI and the connectors
 `interval`). With Docker Compose, the bundled `ingester` service is opt-in:
 
 ```bash
-cp config/connectors.example.yaml config/connectors.yaml   # then edit it
+# sources: dashboard Connectors page (or config/connectors.yaml before the first start)
 # tokens (CONFLUENCE_TOKEN, …) and MNEMOS_API_KEY go in .env
 docker compose --profile connectors up -d
 docker compose logs -f ingester
 ```
 
-On Kubernetes, run it as one more container next to the server (or its own
-Deployment), with the file from a ConfigMap and the tokens from a Secret:
+On Kubernetes, run it as its own single-replica Deployment with
+`strategy: Recreate` — never as a sidecar of a multi-replica server, where
+every replica would sync every source. It reads the sources from the server,
+so no ConfigMap; the tokens come from a Secret:
 
 ```yaml
-- name: ingester
-  image: jamyouss/mnemos-cli:latest
-  args: ["ingest", "serve"]                     # reads /app/config/connectors.yaml
-  env:
-    - name: MNEMOS_URL
-      value: http://127.0.0.1:8100              # same pod; else the Service URL
-  envFrom:
-    - secretRef:
-        name: mnemos-ingest                     # MNEMOS_API_KEY + every token_env
-  volumeMounts:
-    - name: connectors-config                   # ConfigMap with key connectors.yaml
-      mountPath: /app/config
-      readOnly: true
-  resources:
-    requests: { cpu: 50m, memory: 128Mi }
-    limits: { memory: 512Mi }
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mnemos-ingester
+spec:
+  replicas: 1
+  strategy: { type: Recreate }      # never two ingesters at once
+  selector: { matchLabels: { app: mnemos-ingester } }
+  template:
+    metadata: { labels: { app: mnemos-ingester } }
+    spec:
+      containers:
+        - name: ingester
+          image: jamyouss/mnemos-cli:latest
+          args: ["ingest", "serve"]                 # sources from GET /api/connectors
+          env:
+            - name: MNEMOS_URL
+              value: http://mnemos-server.mnemos.svc:8100
+          envFrom:
+            - secretRef:
+                name: mnemos-ingest                 # MNEMOS_API_KEY (write "*") + every token_env
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 512Mi }
 ```
 
-**Or a scheduler running one-shot commands** — `ingest run` with the same
-file, or the per-source commands with flags.
+**Or a scheduler running one-shot commands** — `ingest run` (sources from the
+server), or the per-source commands with flags. On Kubernetes use a CronJob
+with `concurrencyPolicy: Forbid`.
 
 Plain cron on a host with Docker:
 
 ```cron
 # m h dom mon dow
-15 2 * * * docker run --rm --env-file /etc/mnemos/ingest.env -v /etc/mnemos/connectors.yaml:/app/config/connectors.yaml:ro jamyouss/mnemos-cli ingest run
+15 2 * * * docker run --rm --env-file /etc/mnemos/ingest.env jamyouss/mnemos-cli ingest run
 30 3 * * 0 docker run --rm --env-file /etc/mnemos/ingest.env jamyouss/mnemos-cli ingest web https://docs.example.com/guide/
 ```
 

@@ -35,13 +35,15 @@ services:
       CLAUDE_CONFIG_PATH: /data/claude-config
       MNEMOS_AUTH_ENABLED: "false"
       MNEMOS_STATE_DIR: /data/state
-      # Let the dashboard's config page write overrides to
-      # /data/state/settings.json. With auth off, anyone reaching :8100 can
-      # then change retrieval settings.
+      # Let the dashboard save the shared configuration (settings overrides,
+      # connectors, projects, tenants), stored in Qdrant. With auth off,
+      # anyone reaching :8100 can then change it.
       MNEMOS_UI_CONFIG_WRITABLE: "${MNEMOS_UI_CONFIG_WRITABLE:-false}"
-      # Index only what config/projects.yaml declares. The watcher walks the
-      # whole codebase mount and has no idea which repos you meant to index,
-      # so this is the only place that scope can be enforced.
+      # How often this server checks Qdrant for configuration saved elsewhere.
+      MNEMOS_CONFIG_POLL_SECONDS: "${MNEMOS_CONFIG_POLL_SECONDS:-5}"
+      # Index only the prefixes the projects mapping declares. The watcher
+      # walks the whole codebase mount and has no idea which repos you meant
+      # to index, so this is the only place that scope can be enforced.
       MNEMOS_INDEX_ONLY_DECLARED_PATHS: "${MNEMOS_INDEX_ONLY_DECLARED_PATHS:-false}"
       # LLM (ollama | anthropic | openai). See .env.example for full reference.
       MNEMOS_LLM_PROVIDER: "${MNEMOS_LLM_PROVIDER:-ollama}"
@@ -83,13 +85,11 @@ services:
       - ${MNEMOS_CODEBASE_HOST_PATH:-./data/codebase}:/data/codebase:ro
       # Optional: mount your Claude config (skills, docs) for agent indexing.
       - ${MNEMOS_CLAUDE_CONFIG_HOST_PATH:-./data/claude-config}:/data/claude-config:ro
-      # Path -> tags mapping. Bind-mounted (not only baked into the image at
-      # build time) so edits to config/projects.yaml apply on a restart,
-      # without rebuilding or republishing the server image.
-      # Writable because the dashboard's Connectors page saves
-      # config/connectors.yaml here (only with MNEMOS_UI_CONFIG_WRITABLE);
-      # the server writes no other file in it.
-      - ./config:/app/config
+      # Import sources (connectors.yaml, projects.yaml), read once at the
+      # first start for each configuration absent from Qdrant, and the
+      # instance theme.css. Read-only: the configuration lives in Qdrant and
+      # the server writes nothing here.
+      - ./config:/app/config:ro
       # projects.yaml is mounted as a file, not left to the directory mount
       # above, so it can be a symlink into a dotfiles repo. Docker resolves a
       # bind-mount source on the host; a symlink *inside* a mounted directory
@@ -132,27 +132,25 @@ services:
       rag-server:
         condition: service_healthy
 
-  # Knowledge connectors (Confluence, Jira, web) from config/connectors.yaml:
-  # syncs at start-up, then every `interval`. Opt-in:
-  #   cp config/connectors.example.yaml config/connectors.yaml
+  # Knowledge connectors (Confluence, Jira, web, git): reads the sources from
+  # the server (GET /api/connectors, edited on the dashboard's Connectors
+  # page), syncs at start-up, then every `interval`, and within 5 s of a
+  # saved change. Opt-in:
   #   docker compose --profile connectors up -d
   # Resync now: docker compose kill -s HUP ingester
+  # One ingester only: never scale this service.
   ingester:
     image: ${MNEMOS_CLI_IMAGE:-jamyouss/mnemos-cli:latest}
     restart: unless-stopped
     pull_policy: ${MNEMOS_PULL_POLICY:-missing}
-    command: ["ingest", "serve", "--config", "/app/config/connectors.yaml"]
-    # Tokens named by `token_env` in connectors.yaml (CONFLUENCE_TOKEN, …) and
-    # MNEMOS_API_KEY come from .env.
+    command: ["ingest", "serve"]
+    # Tokens named by `token_env` (CONFLUENCE_TOKEN, …) and MNEMOS_API_KEY come
+    # from .env. With auth on, the key needs the admin role or write "*".
     env_file:
       - path: .env
         required: false
     environment:
       MNEMOS_URL: http://rag-server:8100
-    volumes:
-      # The directory, not the file: the dashboard replaces connectors.yaml
-      # atomically, and a file bind mount would keep the old inode.
-      - ./config:/app/config:ro
     depends_on:
       rag-server:
         condition: service_healthy

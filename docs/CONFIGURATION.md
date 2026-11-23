@@ -102,12 +102,16 @@ filtering at query time.
 
 1. **CLI override** — `mnemos reindex --tags webshop,globex,go` applies the same
    list to every file under `--path`.
-2. **YAML mapping** — `config/projects.yaml` declares `path-prefix → tags`.
-   Longest-matching prefix wins.
+2. **Projects mapping** — the `projects` configuration declares
+   `path-prefix → tags`. Longest-matching prefix wins.
 3. **Default fallback** — cumulative path segments
    (`foo/bar/baz/file.go` → `["foo", "foo/bar", "foo/bar/baz"]`).
 
-`config/projects.yaml` (copy from `config/projects.example.yaml`, gitignored):
+The mapping is stored in the database ([Shared configuration](#shared-configuration))
+and edited from the dashboard's Projects page or `PUT /api/projects`. At the
+first start the server imports `MNEMOS_PROJECTS_CONFIG_PATH`
+(`config/projects.yaml`, copied from `config/projects.example.yaml`) if the
+database holds no mapping yet. Same shape in the file and the API:
 
 ```yaml
 paths:
@@ -143,7 +147,7 @@ Both forms may be mixed freely; the list shorthand stays valid and means
 "tags only", so an existing config needs no migration.
 
 **The three sources add up.** A file is skipped if the built-in policy
-(`core.path_filter`), the rules resolved from this file, or the per-run
+(`core.path_filter`), the rules resolved from this mapping, or the per-run
 `--exclude-ext` / `--exclude-dir` flags reject it. None of them overrides
 another, and there is no way to re-allow something a built-in rule denies.
 
@@ -157,9 +161,9 @@ reindex and the push API alike. That is what makes them durable, where the
 CLI flags are not.
 
 > **One caveat.** The watcher pre-filters with the built-in list only, before
-> POSTing to the server: it runs in its own container, where `config/` is not
-> mounted, so it cannot read this file. A file excluded here is still rejected
-> server-side — correctness holds — but the watcher wastes a round-trip on it.
+> POSTing to the server: it does not read the projects mapping. A file
+> excluded here is still rejected server-side — correctness holds — but the
+> watcher wastes a round-trip on it.
 
 ### Deriving the hook lists
 
@@ -168,7 +172,8 @@ because they are POSIX shell and must keep working with the server down.
 Maintaining them by hand meant two sources of truth for one decision — which
 of your projects mnemos cares about — free to drift apart.
 
-Generate them from `projects.yaml` instead:
+Generate them from the projects mapping instead (read from `GET /api/projects`
+on `MNEMOS_URL` with `MNEMOS_API_KEY`, a key with admin or write-all scope):
 
 ```bash
 ./scripts/install-hooks.sh --global \
@@ -203,7 +208,7 @@ anything under the codebase mount that no declared prefix covers is skipped,
 whichever ingestion path offered it. Skills and docs live under a different
 mount root and are never affected.
 
-Off by default, so an absent or empty `projects.yaml` keeps indexing
+Off by default, so an absent or empty projects mapping keeps indexing
 everything rather than silently indexing nothing.
 
 To clear what a mount indexed before you turned it on:
@@ -226,7 +231,8 @@ mnemos_search_code(query="auth", tags_any=["acme-front-app-ecommerce", "acme-fro
 mnemos_search_code(query="auth", tags_all=["acme", "vue3"])
 ```
 
-Changes to `config/projects.yaml` take effect on the next indexing event.
+A saved projects mapping applies on every pod within
+`MNEMOS_CONFIG_POLL_SECONDS`, from the next indexing event on.
 Re-tag an existing project with:
 
 ```bash
@@ -363,66 +369,92 @@ Each line is a flat JSON object:
 | Var | Default | Description |
 |-----|--------|------|
 | `MNEMOS_AUTH_ENABLED` | `false` | Require `Authorization: Bearer <api-key>` on every `/api`, `/internal` and `/mcp` path. `/health` and the dashboard files stay open |
-| `MNEMOS_TENANTS_PATH` | `/data/config/tenants.yaml` | API keys, read once at startup (restart to apply changes) |
+| `MNEMOS_TENANTS_PATH` | `/data/config/tenants.yaml` | Import source: read once, at the first start, when the database holds no tenant. Ignored afterwards |
+| `MNEMOS_BOOTSTRAP_ADMIN_KEY` | _(unset)_ | No tenant in the database and no tenants file → the first start creates tenant `admin` with this key |
 | `QDRANT_API_KEY` | _(unset)_ | Required with auth on, see [Storage](#storage-and-embeddings): API keys protect nothing if Qdrant itself is open |
-| `MNEMOS_API_KEY` | _(unset)_ | Client side: the key sent by the CLI, watcher, `scripts/reindex-all.py` and git hooks |
+| `MNEMOS_API_KEY` | _(unset)_ | Client side: the key sent by the CLI, watcher, ingester, `scripts/*` and git hooks |
 
-Keys live in `config/tenants.yaml` (gitignored — copy
-`config/tenants.example.yaml` and replace the `CHANGE_ME` keys). A tenant is
-an identity only: all tenants share the same collections. See
+Tenants live in the database (see [Shared configuration](#shared-configuration)).
+Each has an `admin` role plus `read` and `write` tag scopes (`"*"` = every tag);
+keys are stored as SHA-256 only and managed from the dashboard's Tenants page or
+`/api/tenants`. With `MNEMOS_AUTH_ENABLED=true` and no tenant at all, the server
+refuses to start. Scope rules and endpoints:
 [`DEPLOYMENT.md`](DEPLOYMENT.md#authentication).
 
 ## Knowledge connectors
 
 Confluence spaces, Jira projects and web sites synced into `mnemos_knowledge`
-are declared in `config/connectors.yaml` (gitignored — copy
-`config/connectors.example.yaml`). The tokens stay in environment variables
-named by each source's `token_env`.
+are declared in the `connectors` configuration, stored in the database and
+edited from the dashboard's Connectors page (`PUT /api/connectors`). The
+tokens stay in environment variables named by each source's `token_env`.
 
 | Var | Default | Description |
 |-----|--------|------|
-| `MNEMOS_CONNECTORS_CONFIG` | `config/connectors.yaml` (CLI) · `/app/config/connectors.yaml` (server) | File read by `mnemos ingest run` / `mnemos ingest serve`, and edited by the dashboard's Connectors page |
+| `MNEMOS_CONNECTORS_CONFIG` | _(unset)_ (CLI) · `/app/config/connectors.yaml` (server) | Server: import source, read once at the first start when the database holds no connectors. CLI: when set (like `--config`), `mnemos ingest run` / `serve` read this file instead of the server |
 
 `mnemos ingest serve` (the opt-in `ingester` compose service) syncs at
-start-up, then every `interval`, when the file changes, and on `SIGHUP`. The
-server only edits the file (with `MNEMOS_UI_CONFIG_WRITABLE=true`); it never
-syncs and never sees the tokens. See
+start-up, then every `interval`. Without `--config` it reads the sources from
+`GET /api/connectors` (key with admin or write-all scope) and resyncs within
+5 s of a saved change. The server never syncs and never sees the tokens. See
 [`CONNECTORS.md`](CONNECTORS.md#configuration-file).
+
+## Shared configuration
+
+Connectors, projects (`path → tags`), dashboard settings overrides and tenants
+live in the Qdrant collection `mnemos_config` (one document per key, not
+searchable). Every server pod reads the same documents.
+
+| Var | Default | Description |
+|-----|--------|------|
+| `MNEMOS_CONFIG_POLL_SECONDS` | `5` | How often each pod checks the database for configuration changes |
+
+- **First start.** For each key absent from the database, the server imports
+  its file once: `MNEMOS_CONNECTORS_CONFIG`, `MNEMOS_PROJECTS_CONFIG_PATH`,
+  `$MNEMOS_STATE_DIR/settings.json`, `MNEMOS_TENANTS_PATH` (or
+  `MNEMOS_BOOTSTRAP_ADMIN_KEY`). Missing file → nothing imported. After that
+  the database is the source of truth and the files are ignored; editing them
+  changes nothing.
+- **Propagation.** The pod that saves applies at once; every other pod picks
+  the change up within `MNEMOS_CONFIG_POLL_SECONDS`. A failed poll is logged
+  and retried; the last good configuration stays in force.
+- **Concurrent saves.** Each document carries a `revision`. A save that sends
+  the revision it loaded and finds another one answers `409` with the current
+  revision (the dashboard reloads). A save without `revision` overwrites
+  (last write wins).
 
 ## Dashboard overrides
 
 | Var | Default | Description |
 |-----|--------|------|
-| `MNEMOS_UI_CONFIG_WRITABLE` | `false` | Let the dashboard save: settings overrides (`PATCH`/`DELETE /api/config`) and `connectors.yaml` (`PUT /api/connectors`). Off → both pages are read-only and writes answer `403` |
+| `MNEMOS_UI_CONFIG_WRITABLE` | `false` | Let the dashboard save the shared configuration: settings overrides (`PATCH`/`DELETE /api/config`), connectors, projects and tenants. Off → those pages are read-only and writes answer `403` |
 
 The dashboard edits a fixed set of settings — retrieval flags, cache, CRAG,
 query log, contextual chunking, dedup, LLM provider/model, declared-paths
 indexing. Everything else (API key, URLs, Qdrant, paths, auth, the embedding
 model) stays env-only. `server/settings_registry.py` is the list.
 
-**Precedence: override > env var > default.** Overrides are stored as
-`{key: value}` JSON in `$MNEMOS_STATE_DIR/settings.json` (the `rag_state`
-volume, `/data/state/settings.json` in compose), written atomically. They are
-applied every time the server starts, so an override keeps winning over the
-env var in `.env` until it is removed — from the page, or by deleting the key
-from the file. A corrupt file, or a key that is unknown or not editable, is
-logged as a warning and ignored; the server still boots.
+**Precedence: override > env var > default.** Overrides are stored in the
+database (`settings` key, see [Shared configuration](#shared-configuration))
+and applied on every pod, so an override keeps winning over the env var in
+`.env` until it is removed from the page. A key that is unknown or not
+editable is logged as a warning and ignored.
 
 How a change applies depends on the setting (`apply` in `GET /api/config`):
 
 | `apply` | Effect |
 |---------|--------|
 | `live` | The running components switch at once, no restart |
-| `restart` | Saved, effective at the next start; listed in `pending_restart` until then |
+| `restart` | Saved, effective at each pod's next start; listed in `pending_restart` until then |
 | `reindex` | Needs a re-embedding (the embedding model — env only, see below) |
 
 `MNEMOS_LLM_API_KEY` is never returned by the API, not even masked: the page
 only learns whether it is set.
 
-> **Security.** `/api/config` and `/api/connectors` sit behind the API key when
-> `MNEMOS_AUTH_ENABLED=true`. With auth off and `MNEMOS_UI_CONFIG_WRITABLE=true`,
-> anyone who can reach port 8100 can change retrieval settings and point the
-> ingester at other sites. Turn auth on first on anything but a private machine.
+> **Security.** `/api/config`, `/api/connectors`, `/api/projects` and
+> `/api/tenants` sit behind the API key when `MNEMOS_AUTH_ENABLED=true`. With
+> auth off and `MNEMOS_UI_CONFIG_WRITABLE=true`, anyone who can reach port
+> 8100 can change retrieval settings, create API keys and point the ingester
+> at other sites. Turn auth on first on anything but a private machine.
 
 ## Instance theme
 
@@ -444,8 +476,8 @@ file is read on every request: reload the page, no restart.
 ## How to apply a config change
 
 For most flags it's just an env var + a container restart (or the dashboard,
-for [the editable ones](#dashboard-overrides) — an override in
-`settings.json` wins over the env var):
+for [the editable ones](#dashboard-overrides) — a saved override wins over the
+env var):
 
 ```bash
 MNEMOS_RERANKER_ENABLED=true docker compose up -d rag-server

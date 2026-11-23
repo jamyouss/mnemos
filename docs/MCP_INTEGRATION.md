@@ -206,9 +206,9 @@ claude mcp add --transport http mnemos https://mnemos.example.com/mcp \
 ```
 
 In a JSON config, add `"headers": {"Authorization": "Bearer <api-key>"}` to
-the server entry. Keys live in `config/tenants.yaml` (copied from
-`config/tenants.example.yaml`); every key sees the same collections. See
-[`DEPLOYMENT.md`](DEPLOYMENT.md#authentication).
+the server entry. Keys are tenants managed from the dashboard's Tenants page
+(or `/api/tenants`); each key reads only the tags in its `read` scope. See
+[`DEPLOYMENT.md`](DEPLOYMENT.md#tenants-and-scopes).
 
 ## Debugging the MCP connection
 

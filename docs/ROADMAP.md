@@ -56,12 +56,13 @@ for per-phase numbers.
   heading-based (Markdown), fallback windowed.
 - ✅ **Single `mnemos_code` collection** with tag-based scoping — every chunk
   carries `tags: list[str]`, search filters via `tags_any` (OR) and `tags_all`
-  (AND). Mapping `path → tags` declared in `config/projects.yaml`, with a
-  cumulative-segment fallback when absent. `--tags` flag on `mnemos reindex`
+  (AND). Mapping `path → tags` declared in the projects configuration (stored
+  in Qdrant, edited from the dashboard), with a cumulative-segment fallback.
+  `--tags` flag on `mnemos reindex`
   overrides per-run.
 - ✅ **Tags-based scoping (replaces single `project` filter)** — ✅ shipped 2026-05-18.
   Chunks carry `tags: list[str]`; search filters with `tags_any` (OR) and `tags_all` (AND).
-  See [CONFIGURATION.md](CONFIGURATION.md) for the `projects.yaml` schema.
+  See [CONFIGURATION.md](CONFIGURATION.md) for the projects mapping schema.
 - ✅ **Watcher** — `watchdog` with 2 s debounce, incremental push to the
   server.
 > ⚠️ The watcher only survives a large codebase thanks to the inotify prune
@@ -91,8 +92,12 @@ for per-phase numbers.
   `MNEMOS_LLM_PROVIDER`.
 - ✅ **MCP Streamable HTTP server** with 9 tools.
 - ✅ **API-key authentication** — `MNEMOS_AUTH_ENABLED=true` requires a
-  bearer key from `config/tenants.yaml` on `/api`, `/internal` and `/mcp`.
-  Tenants are identities only: no per-tenant isolation, no quotas.
+  bearer key on `/api`, `/internal` and `/mcp`. Tenants carry an admin role
+  and per-tag `read` / `write` scopes; no quotas.
+- ✅ **Configuration in Qdrant** (`mnemos_config`) — connectors, projects,
+  settings overrides and tenants shared by every server pod, propagated
+  within `MNEMOS_CONFIG_POLL_SECONDS`; `config/` files are first-start
+  import sources only.
 - ✅ **`mnemos_knowledge` collection + connectors** — Confluence, Jira and web
   pushed through the API, tagged `<source>:<scope>`, with `source_url`.
 - ✅ **Observability** (`MNEMOS_QUERY_LOG_ENABLED`) — JSONL query log with
