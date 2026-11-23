@@ -3,10 +3,11 @@
 
 The ignore policy only gates *new* indexing. When a rule is added — a
 built-in in `core.path_filter`, or per-prefix `exclude_dirs` / `exclude_exts`
-in `config/projects.yaml` — every chunk ingested before it stays in Qdrant and
-keeps competing in search results. `reindex-all.py --recreate` would clear
-them, but it re-embeds the entire corpus to do it. This walks the collection
-and deletes just the points the current policy would now reject.
+in the server's projects config (`GET /api/projects`) — every chunk ingested
+before it stays in Qdrant and keeps competing in search results.
+`reindex-all.py --recreate` would clear them, but it re-embeds the entire
+corpus to do it. This walks the collection and deletes just the points the
+current policy would now reject.
 
 It calls `core.indexer.resolve_skip`, the same function the ingest path uses,
 so the purge can never disagree with what indexing would do.
@@ -14,6 +15,9 @@ so the purge can never disagree with what indexing would do.
 Usage:
     ./scripts/purge-filtered.py --dry-run       # report only (default)
     ./scripts/purge-filtered.py --apply         # actually delete
+
+The project rules come from the Mnemos server (MNEMOS_URL, MNEMOS_API_KEY as
+bearer: an admin key or one with write on every tag).
 
 Take a snapshot first (drop the header when Qdrant runs without a key):
     curl -X POST -H "api-key: $QDRANT_API_KEY" http://localhost:6333/collections/mnemos_code/snapshots
@@ -30,12 +34,13 @@ from pathlib import Path
 from urllib import error, request
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "packages"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from core.indexer import resolve_skip  # noqa: E402
-from core.projects import load_path_excludes, load_path_tags  # noqa: E402
+from core.projects import PathExcludes, path_excludes_from, path_tags_from  # noqa: E402
+from mnemos_projects import ProjectsUnavailable, fetch_projects, mnemos_url  # noqa: E402
 
 DEFAULT_QDRANT = "http://localhost:6333"
-DEFAULT_PROJECTS_CONFIG = Path(__file__).resolve().parent.parent / "config" / "projects.yaml"
 DEFAULT_CODEBASE_ROOT = "/data/codebase"
 SCROLL_PAGE = 4000
 DELETE_BATCH = 1000
@@ -75,13 +80,19 @@ def scroll_all(qdrant: str, collection: str) -> list[tuple[str, str]]:
             return out
 
 
+def project_rules(base_url: str) -> tuple[PathExcludes, list[str]]:
+    """Per-prefix exclude rules and every declared prefix, from the server."""
+    raw = fetch_projects(base_url)
+    return path_excludes_from(raw), list(path_tags_from(raw, origin=f"{base_url}/api/projects"))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--qdrant", default=DEFAULT_QDRANT)
     parser.add_argument("--collection", default="mnemos_code")
     parser.add_argument(
-        "--projects-config", default=str(DEFAULT_PROJECTS_CONFIG),
-        help="projects.yaml carrying the per-prefix exclude rules.",
+        "--mnemos-url", default=mnemos_url(),
+        help="Mnemos server holding the projects config (default: env MNEMOS_URL or http://localhost:8100).",
     )
     parser.add_argument(
         "--codebase-root", default=DEFAULT_CODEBASE_ROOT,
@@ -89,12 +100,19 @@ def main() -> int:
     )
     parser.add_argument(
         "--only-declared", action="store_true",
-        help="Also drop anything under the codebase mount that no prefix in "
-             "projects.yaml declares. Mirrors MNEMOS_INDEX_ONLY_DECLARED_PATHS.",
+        help="Also drop anything under the codebase mount that no declared "
+             "project prefix covers. Mirrors MNEMOS_INDEX_ONLY_DECLARED_PATHS.",
     )
     parser.add_argument("--apply", action="store_true", help="Delete. Without it, report only.")
     parser.add_argument("--dry-run", action="store_true", help="Explicit no-op (the default).")
     args = parser.parse_args()
+
+    try:
+        excludes, prefixes = project_rules(args.mnemos_url)
+    except ProjectsUnavailable as exc:
+        print(exc, file=sys.stderr)
+        return 2
+    declared = prefixes if args.only_declared else None
 
     try:
         rows = scroll_all(args.qdrant, args.collection)
@@ -102,8 +120,6 @@ def main() -> int:
         print(f"Qdrant unreachable at {args.qdrant}: {exc}", file=sys.stderr)
         return 2
 
-    excludes = load_path_excludes(args.projects_config)
-    declared = list(load_path_tags(args.projects_config)) if args.only_declared else None
     doomed = [
         (pid, fp) for pid, fp in rows
         if fp and resolve_skip(fp, args.codebase_root, excludes, declared_prefixes=declared)
@@ -111,7 +127,7 @@ def main() -> int:
     orphans = [pid for pid, fp in rows if not fp]
 
     print(f"collection      : {args.collection}")
-    print(f"règles projet   : {len(excludes)} préfixe(s) depuis {args.projects_config}")
+    print(f"règles projet   : {len(excludes)} préfixe(s) depuis {args.mnemos_url}/api/projects")
     print(f"chunks totaux   : {len(rows)}")
     print(f"à supprimer     : {len(doomed)}  ({100 * len(doomed) / max(len(rows), 1):.1f}%)")
     if orphans:

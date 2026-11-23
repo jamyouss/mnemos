@@ -12,10 +12,12 @@
 #   --codebase-root <path>  Host dir bind-mounted at /data/codebase (default: ~/code).
 #                           Persisted to ~/.config/mnemos/config so hooks launched
 #                           from GUI clients and IDEs pick it up too.
-#   --from-projects         Derive both repo lists from config/projects.yaml instead
-#                           of maintaining them by hand. Requires --codebase-root.
-#                           Refuses to clobber a hand-edited list; pass --force-derive
-#                           to overwrite anyway.
+#   --from-projects         Derive both repo lists from the server's projects config
+#                           (GET /api/projects on $MNEMOS_URL, default
+#                           http://localhost:8100; $MNEMOS_API_KEY sent when set)
+#                           instead of maintaining them by hand. The server must be
+#                           up. Requires --codebase-root. Refuses to clobber a
+#                           hand-edited list; pass --force-derive to overwrite anyway.
 #   --force-derive          Allow --from-projects to overwrite hand-written lists.
 #   --trigger <mode>      Set MNEMOS_HOOK_TRIGGER (pre-push|post-commit|both, default: pre-push)
 #
@@ -115,13 +117,13 @@ if [ -n "$CODEBASE_ROOT" ]; then
     echo "Codebase root set to $ABS_ROOT ($SETTINGS_CONFIG)"
 fi
 
-# 5. Derive the repo lists from projects.yaml
+# 5. Derive the repo lists from the server's projects config
 if [ "$FROM_PROJECTS" = true ]; then
     if [ -z "$CODEBASE_ROOT" ]; then
         echo "--from-projects needs --codebase-root" >&2
         exit 1
     fi
-    # A list somebody wrote by hand carries intent the YAML does not; never
+    # A list somebody wrote by hand carries intent the projects config does not; never
     # silently discard it.
     for f in "$REPOS_CONFIG" "$INDEX_REPOS_CONFIG"; do
         if [ -s "$f" ] && ! grep -qF "$GENERATED_MARKER" "$f" \

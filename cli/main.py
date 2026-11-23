@@ -1109,18 +1109,49 @@ _config_option = click.option(
     "--config",
     "config_path",
     envvar="MNEMOS_CONNECTORS_CONFIG",
-    default="config/connectors.yaml",
-    show_default=True,
+    default=None,
     type=click.Path(dir_okay=False),
-    help="Connectors file (template: config/connectors.example.yaml) [env MNEMOS_CONNECTORS_CONFIG].",
+    help="Read the sources from this file (template: config/connectors.example.yaml) instead "
+    "of the server's /api/connectors [env MNEMOS_CONNECTORS_CONFIG].",
 )
 
 
-def _load_connectors(config_path: str):
-    from connectors.config import ConfigError, load_config
+def _server_connectors() -> dict:
+    """The server's /api/connectors snapshot; ConfigError when it cannot be read."""
+    from connectors.config import ConfigError
+    from connectors.transport import get_json, make_client
+
+    url = f"{_base_url()}/api/connectors"
+    try:
+        with make_client(headers=_headers(), timeout=10) as http:
+            body = get_json(http, url)
+    except (httpx.HTTPError, ValueError) as exc:
+        # First line only: httpx appends a "For more information" link to every status error.
+        raise ConfigError(f"cannot read the connectors from {url}: {str(exc).splitlines()[0]}") from exc
+    if not isinstance(body, dict) or not isinstance(body.get("revision"), int):
+        raise ConfigError(f"{url}: not a connectors snapshot")
+    return body
+
+
+def _read_connectors(config_path: str | None):
+    """`(revision, config)` from the file when given (revision None), else from the server.
+
+    Raise ConfigError when the configuration cannot be read or is invalid.
+    """
+    from connectors.config import load_config, parse_config
+
+    if config_path:
+        return None, load_config(config_path)
+    body = _server_connectors()
+    raw = {"interval": body.get("interval"), "sources": body.get("sources")}
+    return body["revision"], parse_config(raw, os.environ, origin="server")
+
+
+def _load_connectors(config_path: str | None):
+    from connectors.config import ConfigError
 
     try:
-        return load_config(config_path)
+        return _read_connectors(config_path)
     except ConfigError as exc:
         raise click.ClickException(str(exc)) from exc
 
@@ -1138,9 +1169,9 @@ def _sync_config(config, only: set[str] | None = None, full: bool = False) -> li
 @_config_option
 @click.option("--only", multiple=True, help="Sync only this source `name` (repeatable).")
 @_full_option
-def ingest_run(config_path: str, only: tuple[str, ...], full: bool) -> None:
-    """Sync every source declared in the connectors file, once."""
-    config = _load_connectors(config_path)
+def ingest_run(config_path: str | None, only: tuple[str, ...], full: bool) -> None:
+    """Sync every declared source once: the server's connectors, or --config's."""
+    _, config = _load_connectors(config_path)
     unknown = sorted(set(only) - {s.name for s in config.sources})
     if unknown:
         names = ", ".join(s.name for s in config.sources)
@@ -1154,28 +1185,30 @@ def ingest_run(config_path: str, only: tuple[str, ...], full: bool) -> None:
 
 @ingest.command("serve")
 @_config_option
-def ingest_serve(config_path: str) -> None:
-    """Sync at start-up, then every `interval` of the connectors file.
+def ingest_serve(config_path: str | None) -> None:
+    """Sync at start-up, then every `interval` of the connectors config.
 
-    Send SIGHUP to resync now (`docker compose kill -s HUP ingester`,
-    `kill -HUP 1` in a pod); editing the file does too, within seconds. The
-    file is re-read before every run; a broken edit keeps the previous
-    version. A changed `interval` needs a restart.
+    Without --config the sources come from the server (/api/connectors) and a
+    save from the dashboard resyncs within seconds; with --config, editing the
+    file does. Send SIGHUP to resync now (`docker compose kill -s HUP
+    ingester`, `kill -HUP 1` in a pod). The config is re-read before every
+    run; a broken or unreachable one keeps the previous version. A changed
+    `interval` needs a restart.
     """
     import signal
     import threading
     from datetime import datetime
 
     import connectors.runner
-    from connectors.config import ConfigError, load_config
+    from connectors.config import ConfigError
 
-    config = _load_connectors(config_path)
+    revision, config = _load_connectors(config_path)
     trigger, stop = threading.Event(), threading.Event()
 
     def run_once() -> None:
         nonlocal config
         try:
-            config = load_config(config_path)
+            _, config = _read_connectors(config_path)
         except ConfigError as exc:
             console.print(f"[red]{exc}[/red]\n[yellow]keeping the previous configuration[/yellow]")
         _print_sync_results(f"Sync {datetime.now():%Y-%m-%d %H:%M:%S}", _sync_config(config))
@@ -1187,16 +1220,25 @@ def ingest_serve(config_path: str) -> None:
         # Syncs are idempotent: dropping one half-way only defers work to the next run.
         raise SystemExit(0)
 
+    if config_path:
+        origin = config_path
+        watcher = threading.Thread(
+            target=connectors.runner.watch_file, args=(config_path, trigger, stop), daemon=True
+        )
+    else:
+        origin = f"{_base_url()}/api/connectors"
+        watcher = threading.Thread(
+            target=connectors.runner.watch_revision,
+            args=(lambda: _server_connectors()["revision"], revision, trigger, stop),
+            daemon=True,
+        )
     previous = {sig: signal.signal(sig, handler) for sig, handler in
                 ((signal.SIGHUP, resync), (signal.SIGTERM, shutdown))}
-    watcher = threading.Thread(
-        target=connectors.runner.watch_file, args=(config_path, trigger, stop), daemon=True
-    )
     watcher.start()
     every = f"every {config.interval}s, " if config.interval else ""
     console.print(
-        f"Serving {len(config.sources)} source(s) from {config_path}: "
-        f"sync now, then {every}on file change and on SIGHUP."
+        f"Serving {len(config.sources)} source(s) from {origin}: "
+        f"sync now, then {every}on config change and on SIGHUP."
     )
     try:
         connectors.runner.serve(run_once, interval=config.interval, trigger=trigger, stop=stop)

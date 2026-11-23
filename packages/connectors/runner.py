@@ -1,6 +1,6 @@
 """Run the sources of a connectors config: once (`mnemos ingest run`) or as a
-long-lived service that syncs at start-up, then on a timer or on demand
-(`mnemos ingest serve`)."""
+long-lived service that syncs at start-up, then on a timer, on a config change
+or on demand (`mnemos ingest serve`)."""
 
 from __future__ import annotations
 
@@ -107,9 +107,9 @@ def serve(
 def watch_file(path: str, trigger: threading.Event, stop: threading.Event, *, poll: float = 5.0) -> None:
     """Set `trigger` each time `path` changes, until `stop` is set.
 
-    Lets an edit — by hand or from the dashboard — sync within seconds rather
-    than at the next `interval`. The inode is part of the signature: the
-    dashboard replaces the file atomically, which may keep mtime and size.
+    Lets an edit sync within seconds rather than at the next `interval`. The
+    inode is part of the signature: editors and config tooling replace files
+    atomically, which may keep mtime and size.
     """
 
     def signature() -> tuple[int, int, int] | None:
@@ -125,4 +125,32 @@ def watch_file(path: str, trigger: threading.Event, stop: threading.Event, *, po
         if current != last:
             last = current
             logger.info("%s changed: resyncing", path)
+            trigger.set()
+
+
+def watch_revision(
+    read_revision: Callable[[], int],
+    initial: int,
+    trigger: threading.Event,
+    stop: threading.Event,
+    *,
+    poll: float = 5.0,
+) -> None:
+    """Set `trigger` each time `read_revision()` moves away from the last value
+    seen (starting at `initial`), until `stop` is set.
+
+    The server-side twin of `watch_file`: a dashboard save bumps the stored
+    revision. A read that raises is logged and retried at the next poll; it
+    never triggers, so an unreachable server does not cause resyncs.
+    """
+    last = initial
+    while not stop.wait(poll):
+        try:
+            current = read_revision()
+        except Exception as exc:  # noqa: BLE001 — the watcher must outlive a server outage
+            logger.warning("cannot read the connectors revision: %s", exc)
+            continue
+        if current != last:
+            logger.info("connectors revision %s -> %s: resyncing", last, current)
+            last = current
             trigger.set()

@@ -14,12 +14,47 @@ from .conftest import MNEMOS_URL, FakeMnemos, Router
 JIRA = "https://jira.example.com"
 
 
+class ConnectorsApi:
+    """`GET /api/connectors` of the server, as the dashboard leaves it."""
+
+    def __init__(self) -> None:
+        self.revision = 1
+        self.status = 200
+        self.interval: str | None = None
+        self.sources: list[dict] = [_server_jira("demo")]
+        self.requests: list[httpx.Request] = []
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        if self.status != 200:
+            return httpx.Response(self.status, json={"detail": "Forbidden"})
+        return httpx.Response(200, json={
+            "revision": self.revision, "writable": True, "interval": self.interval,
+            "sources": self.sources, "problems": [],
+        })
+
+
+def _server_jira(*projects: str) -> dict:
+    return {
+        "type": "jira", "name": "tracker", "url": JIRA, "token_env": "TRACKER_TOKEN",
+        "projects": list(projects), "tags": ["team-a"],
+    }
+
+
 @pytest.fixture
-def wired(monkeypatch, mnemos: FakeMnemos, router: Router):
-    """Route every client the CLI builds: mnemos.test → FakeMnemos, the rest → router."""
+def connectors_api() -> ConnectorsApi:
+    return ConnectorsApi()
+
+
+@pytest.fixture
+def wired(monkeypatch, mnemos: FakeMnemos, router: Router, connectors_api: ConnectorsApi):
+    """Route every client the CLI builds: mnemos.test → FakeMnemos (and the
+    connectors API), the rest → router."""
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.host == "mnemos.test":
+            if request.url.path == "/api/connectors":
+                return connectors_api.handle(request)
             return mnemos.handle(request)
         return router(request)
 
@@ -31,7 +66,10 @@ def wired(monkeypatch, mnemos: FakeMnemos, router: Router):
     monkeypatch.setattr(connectors.transport, "make_client", make_client)
     monkeypatch.setenv("MNEMOS_URL", MNEMOS_URL)
     monkeypatch.setenv("MNEMOS_API_KEY", "mnemos-key")
-    for var in ("JIRA_URL", "JIRA_USER", "JIRA_TOKEN", "CONFLUENCE_URL", "CONFLUENCE_USER", "CONFLUENCE_TOKEN"):
+    for var in (
+        "JIRA_URL", "JIRA_USER", "JIRA_TOKEN", "CONFLUENCE_URL", "CONFLUENCE_USER", "CONFLUENCE_TOKEN",
+        "MNEMOS_CONNECTORS_CONFIG",
+    ):
         monkeypatch.delenv(var, raising=False)
     return mnemos, router
 
@@ -200,3 +238,98 @@ def test_ingest_serve_refuses_to_start_on_a_bad_config(wired, tmp_path):
     result = CliRunner().invoke(cli, ["ingest", "serve", "--config", str(tmp_path / "absent.yaml")])
     assert result.exit_code == 1
     assert "not found" in result.output
+
+
+# ---------------------------------------------------------------------------
+# server config: `ingest run` / `ingest serve` without --config
+# ---------------------------------------------------------------------------
+
+
+def _jira_search_by_project(router: Router) -> None:
+    router.add(f"{JIRA}/rest/api/2/search", lambda r: httpx.Response(200, json={
+        "startAt": 0, "maxResults": 100, "total": 1,
+        "issues": [_issue("OPS-1" if "OPS" in r.url.params["jql"] else "DEMO-1")],
+    }))
+
+
+def test_ingest_run_reads_the_sources_from_the_server(wired, monkeypatch, connectors_api):
+    mnemos, router = wired
+    _jira_search_by_project(router)
+    monkeypatch.setenv("TRACKER_TOKEN", "jira-pat")
+
+    result = CliRunner().invoke(cli, ["ingest", "run"])
+
+    assert result.exit_code == 0, result.output
+    assert mnemos.pushed_paths == ["jira/DEMO/DEMO-1.md"]
+    assert mnemos.pushed[0]["tags"] == ["team-a", "jira", "jira:DEMO"]
+    assert [r.headers["Authorization"] for r in connectors_api.requests] == ["Bearer mnemos-key"]
+
+
+def test_ingest_run_fails_clearly_when_the_server_config_is_unreadable(wired, monkeypatch, connectors_api):
+    mnemos, _ = wired
+    connectors_api.status = 403
+    monkeypatch.setenv("TRACKER_TOKEN", "jira-pat")
+
+    result = CliRunner().invoke(cli, ["ingest", "run"])
+
+    assert result.exit_code == 1
+    assert f"cannot read the connectors from {MNEMOS_URL}/api/connectors" in result.output
+    assert "403" in result.output
+    assert mnemos.requests == []
+
+
+def test_ingest_run_rejects_an_invalid_server_config(wired, monkeypatch, connectors_api):
+    mnemos, _ = wired
+    monkeypatch.setenv("TRACKER_TOKEN", "jira-pat")
+    connectors_api.sources = []
+
+    result = CliRunner().invoke(cli, ["ingest", "run"])
+
+    assert result.exit_code == 1
+    assert "server:" in result.output and "no source declared" in result.output
+    assert mnemos.requests == []
+
+
+def test_ingest_serve_follows_the_server_config_and_keeps_it_through_failures(wired, monkeypatch, connectors_api):
+    import connectors.runner
+
+    mnemos, router = wired
+    _jira_search_by_project(router)
+    monkeypatch.setenv("TRACKER_TOKEN", "jira-pat")
+    watched: list[tuple] = []
+
+    def fake_watch_revision(read_revision, initial, trigger, stop, *, poll=5.0):
+        watched.append((read_revision, initial))
+
+    def fake_serve(run_once, *, interval, trigger, stop):
+        run_once()                                   # start-up sync: DEMO
+        connectors_api.revision, connectors_api.sources = 2, [_server_jira("ops")]
+        run_once()                                   # after a dashboard save: OPS
+        connectors_api.status = 403
+        run_once()                                   # server refuses: still OPS
+        connectors_api.status, connectors_api.sources = 200, []
+        run_once()                                   # broken save: still OPS
+
+    monkeypatch.setattr(connectors.runner, "watch_revision", fake_watch_revision)
+    monkeypatch.setattr(connectors.runner, "serve", fake_serve)
+
+    result = CliRunner().invoke(cli, ["ingest", "serve"])
+
+    assert result.exit_code == 0, result.output
+    assert f"{MNEMOS_URL}/api/connectors" in result.output
+    assert result.output.count("keeping the previous configuration") == 2
+    jqls = [r.url.params["jql"] for r in router.requests if r.url.path == "/rest/api/2/search"]
+    assert len(jqls) == 4
+    assert "DEMO" in jqls[0] and all("OPS" in jql for jql in jqls[1:])
+    # The watcher starts from the revision loaded at start-up and reads the live one.
+    read_revision, initial = watched[0]
+    assert initial == 1
+    connectors_api.revision = 7
+    assert read_revision() == 7
+
+
+def test_ingest_serve_refuses_to_start_without_a_server_config(wired, connectors_api):
+    connectors_api.status = 403
+    result = CliRunner().invoke(cli, ["ingest", "serve"])
+    assert result.exit_code == 1
+    assert "cannot read the connectors" in result.output

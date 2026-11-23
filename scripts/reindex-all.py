@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Reindex everything: Claude skills/docs + every project declared in
-`config/projects.yaml`.
+"""Reindex everything: Claude skills/docs + every project declared in the
+server's projects config (`GET /api/projects`, the dashboard's Projects page).
 
 Typical use:
     # First time after a schema migration (drops + recreates collections):
@@ -21,24 +21,27 @@ NOTE on async reindex:
 
 Prerequisites:
     * Mnemos server running (default http://localhost:8100, override via
-      MNEMOS_URL).
+      MNEMOS_URL). With auth on, MNEMOS_API_KEY must be an admin key or one
+      with write on every tag.
     * Codebase mount inside the container at `/data/codebase` and Claude
       config at `/data/claude-config` (the docker-compose defaults).
-    * Pyyaml installed (already a Mnemos dependency).
 """
 from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import sys
 import time
 from pathlib import Path
 from urllib import error, request
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-PROJECTS_YAML = REPO_ROOT / "config" / "projects.yaml"
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "packages"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from core.projects import path_tags_from  # noqa: E402
+from mnemos_projects import ProjectsUnavailable, auth_headers, fetch_projects, mnemos_url  # noqa: E402
+
 CODEBASE_PREFIX = "/data/codebase"
 CLAUDE_CONFIG_PREFIX = "/data/claude-config"
 
@@ -59,19 +62,13 @@ def log(msg: str, *, level: str = "info") -> None:
     print(f"{prefix}{msg}", flush=True)
 
 
-def _auth_headers() -> dict[str, str]:
-    """Bearer header for servers running with MNEMOS_AUTH_ENABLED=true."""
-    key = os.environ.get("MNEMOS_API_KEY", "").strip()
-    return {"Authorization": f"Bearer {key}"} if key else {}
-
-
 def post_json(url: str, payload: dict, timeout: int = 60) -> dict:
     data = json.dumps(payload).encode("utf-8")
     req = request.Request(
         url,
         data=data,
         method="POST",
-        headers={"content-type": "application/json", **_auth_headers()},
+        headers={"content-type": "application/json", **auth_headers()},
     )
     with request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
@@ -88,23 +85,12 @@ def check_server(base_url: str) -> None:
         sys.exit(2)
 
 
-def load_paths(yaml_path: Path) -> dict[str, list[str]]:
-    try:
-        import yaml
-    except ImportError:
-        log("PyYAML not installed (pip install pyyaml).", level="err")
-        sys.exit(2)
-    if not yaml_path.exists():
-        log(f"{yaml_path} not found — nothing to reindex on the code side.", level="warn")
-        return {}
-    with yaml_path.open("r", encoding="utf-8") as fh:
-        raw = yaml.safe_load(fh) or {}
-    paths = raw.get("paths") or {}
-    out: dict[str, list[str]] = {}
-    for prefix, tags in paths.items():
-        if isinstance(tags, list) and tags:
-            out[str(prefix).rstrip("/")] = [str(t).strip() for t in tags if str(t).strip()]
-    return out
+def load_paths(base_url: str) -> dict[str, list[str]]:
+    """Prefix (no trailing slash) → tags, from the server's projects config."""
+    return {
+        prefix.rstrip("/"): tags
+        for prefix, tags in path_tags_from(fetch_projects(base_url), origin=f"{base_url}/api/projects").items()
+    }
 
 
 def reindex_one(
@@ -142,7 +128,7 @@ def wait_for_count_growth(base_url: str, collection: str, *, min_seconds: int = 
     last_count = -1
     while time.monotonic() < deadline:
         try:
-            status_req = request.Request(f"{base_url}/api/status", headers=_auth_headers())
+            status_req = request.Request(f"{base_url}/api/status", headers=auth_headers())
             with request.urlopen(status_req, timeout=5) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
             last_count = (
@@ -161,7 +147,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
         "--mnemos-url",
-        default=os.environ.get("MNEMOS_URL", "http://localhost:8100"),
+        default=mnemos_url(),
         help="Mnemos server URL (default: env MNEMOS_URL or http://localhost:8100).",
     )
     parser.add_argument(
@@ -187,7 +173,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--filter", default=None,
-        help="Regex applied to YAML path prefixes — only matching ones are reindexed.",
+        help="Regex applied to the project path prefixes — only matching ones are reindexed.",
     )
     parser.add_argument(
         "--dry-run", action="store_true",
@@ -210,10 +196,16 @@ def main() -> int:
     if not args.skip_docs:
         claude_jobs.append(("mnemos_docs", f"{CLAUDE_CONFIG_PREFIX}/docs"))
 
-    # 2) Code paths from projects.yaml
+    # 2) Code paths from the server's projects config
     code_jobs: list[tuple[str, list[str]]] = []
     if not args.skip_code:
-        paths = load_paths(PROJECTS_YAML)
+        try:
+            paths = load_paths(base_url)
+        except ProjectsUnavailable as exc:
+            log(str(exc), level="err")
+            return 2
+        if not paths:
+            log("No project declared on the server — nothing to reindex on the code side.", level="warn")
         for rel, tags in paths.items():
             container_path = f"{CODEBASE_PREFIX}/{rel}"
             if pattern and not pattern.search(rel):
@@ -221,7 +213,7 @@ def main() -> int:
             code_jobs.append((container_path, tags))
 
     log(f"  Skills + docs:   {len(claude_jobs)} job(s)")
-    log(f"  Code paths:      {len(code_jobs)} job(s) from {PROJECTS_YAML.name}")
+    log(f"  Code paths:      {len(code_jobs)} job(s) from {base_url}/api/projects")
     if args.recreate:
         log("  --recreate ON — first call per collection will drop the collection", level="warn")
 

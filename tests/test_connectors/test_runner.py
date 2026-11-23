@@ -7,7 +7,7 @@ import pytest
 
 import connectors.transport
 from connectors.config import ConnectorsConfig, JiraConfig, WebConfig
-from connectors.runner import run_sources, serve, watch_file
+from connectors.runner import run_sources, serve, watch_file, watch_revision
 
 from .conftest import FakeMnemos, Router
 
@@ -184,3 +184,51 @@ def test_watch_file_triggers_on_an_atomic_replace(tmp_path):
     finally:
         stop.set()
         thread.join()
+
+
+def test_watch_revision_triggers_on_a_new_revision_only():
+    trigger, stop = threading.Event(), threading.Event()
+    # Same revision, a failed read, same again, then a dashboard save.
+    answers = iter([3, RuntimeError("server down"), 3, 4])
+    triggered_before_the_save: list[bool] = []
+
+    def read_revision() -> int:
+        answer = next(answers, 4)
+        if answer == 4 and not triggered_before_the_save:
+            triggered_before_the_save.append(trigger.is_set())
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    thread = threading.Thread(
+        target=watch_revision, args=(read_revision, 3, trigger, stop), kwargs={"poll": 0.01}
+    )
+    thread.start()
+    try:
+        assert trigger.wait(2)
+        assert triggered_before_the_save == [False]
+        trigger.clear()
+        assert not trigger.wait(0.1)  # revision 4 stays put: no second resync
+    finally:
+        stop.set()
+        thread.join()
+
+
+def test_watch_revision_survives_a_server_outage():
+    trigger, stop = threading.Event(), threading.Event()
+    reads: list[int] = []
+
+    def read_revision() -> int:
+        reads.append(1)
+        raise RuntimeError("connection refused")
+
+    thread = threading.Thread(
+        target=watch_revision, args=(read_revision, 1, trigger, stop), kwargs={"poll": 0.01}
+    )
+    thread.start()
+    try:
+        assert not trigger.wait(0.1)
+    finally:
+        stop.set()
+        thread.join()
+    assert len(reads) > 1  # kept polling after the first failure
