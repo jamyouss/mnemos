@@ -293,7 +293,7 @@ via MCP, and refuses to bind you to any particular LLM provider.
 
 ## 🤝 Contributing
 
-PRs welcome. The codebase is small and well-tested (179 unit tests). Start
+PRs welcome. The codebase is small and well-tested (~950 tests). Start
 with the architecture doc, then poke around `packages/core/` — every
 retrieval feature is a single file with its own tests.
 
@@ -308,17 +308,20 @@ pytest tests/
 
 ## 🛣️ Next milestone
 
-The current default-on production setup (hybrid + reranker + cache)
-delivers **+47 % MRR** over plain dense retrieval on our golden set. The next
-iteration tightens the corners:
+Only hybrid retrieval (dense + BM25) is on by default. Every other stage —
+reranker, MMR, cache, grader, rewriter, contextual chunking — ships wired but
+off, behind a flag you can flip from the dashboard. The cross-encoder
+reranker is the biggest measured gain (**+47 % MRR** over plain dense on our
+golden set) but costs ~14 s per query on CPU. The next iteration turns
+measurements into defaults:
 
 | Item | Why it matters | Status |
 |------|---------------|--------|
 | **GPU host for the reranker** | `bge-reranker-base` on CPU takes ~14 s p50; on GPU it's ~250 ms. Unlocks the reranker as a default-on feature, not an opt-in. | 🔜 |
-| **CRAG rewriter with a fast LLM** (Anthropic Haiku, Groq) | The rewriter ships wired but stays off by default — on local Ollama grader+rewriter pushes per-query latency past 100 s. With a cloud LLM it should land at +5–10 % recall on vague queries. | 🔜 |
-| **`contextual chunking` retry** with the cleaned golden set | First attempt showed no gain because the golden was noisy. The clean golden ships in v0.1.0; contextual via Anthropic API (prompt caching) deserves a second measurement. | 🔜 |
-| **MMR diversification** | Wired in the roadmap but never landed. ~20 lines to add after the reranker, should help when several near-duplicate files dominate the top-K. | 🔜 |
-| **A/B-testing infra** | Feature flags per tenant + 10 % sampling on variants, so future retrieval changes can ship with data, not vibes. | 🔜 |
+| **CRAG grader + rewriter on a fast LLM** (Anthropic Haiku, Groq) | Both ship wired but off — on local Ollama they push per-query latency past 100 s. With a cloud LLM they should land at +5–10 % recall on vague queries. | 🔜 |
+| **Contextual chunking, second measurement** | The first run, on a noisy golden set, showed no gain. Worth measuring again on the cleaned set, through the Anthropic API with prompt caching. | 🔜 |
+| **MMR, measured** | Ships wired but off. Turn it on by default only if it cuts near-duplicates in the top 5 without hurting NDCG@5. | 🔜 |
+| **A/B-testing infra** | Sampling on variants per tenant, so future retrieval changes ship with data, not vibes. | 🔜 |
 
 Track this list and the rolling design notes in
 [`docs/ROADMAP.md`](docs/ROADMAP.md).

@@ -112,9 +112,9 @@ for per-phase numbers.
 ## Backlog
 
 ### 🔜 Retrieval quality
-- **MMR diversification** — Implementer dans le tracé original mais jamais
-  shippé. ~20 lignes, lambda configurable, après le reranker. Aide quand
-  plusieurs near-duplicates dominent le top-K.
+- **MMR diversification — mesure** — Shippé wired, off par défaut
+  (`MNEMOS_MMR_ENABLED`). Reste à mesurer : l'activer par défaut seulement
+  s'il réduit les near-duplicates du top-K sans dégrader NDCG@5.
 - **Contextual chunking — retry with the cleaned golden** — Le premier
   passage (golden bruité) ne montrait pas de gain. Le golden est désormais
   propre, à mesurer via Anthropic API (prompt caching).
@@ -133,10 +133,10 @@ for per-phase numbers.
 - **A/B testing infra** — Feature flags par tenant, 10 % de sampling sur les
   variantes, log dédié pour mesurer l'impact des changements retrieval en
   conditions réelles.
-- **Authn richer than API key** — OAuth/OIDC, scoping fin par projet,
-  rotation automatique.
-- **Isolation par tenant et quotas** — Aujourd'hui toutes les clés voient les
-  mêmes collections, sans limite de volume.
+- **Authn richer than API key** — OAuth/OIDC, rotation automatique des clés
+  (les scopes par projet et la clé root existent déjà).
+- **Quotas par tenant** — Les tenants ont des scopes de lecture/écriture par
+  tag, mais aucune limite de volume ni de débit.
 - **Helm chart** — Pour les déploiements Kubernetes.
 
 ### 🔜 Écosystème
