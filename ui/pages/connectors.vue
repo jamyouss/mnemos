@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Component } from 'vue'
-import { BookOpenIcon, GitBranchIcon, GlobeIcon, PlugIcon, PlusIcon, RotateCwIcon, TicketIcon, TriangleAlertIcon } from '@lucide/vue'
+import { BookOpenIcon, GitBranchIcon, GlobeIcon, PlugIcon, PlusIcon, RefreshCwIcon, TicketIcon, TriangleAlertIcon } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import { ApiError, type ConnectorsResponse } from '~/composables/useApi'
 import { newSource, toForm, toPayload, type SourceForm, type SourceType } from '~/utils/connectors'
@@ -76,8 +76,8 @@ async function save() {
     })
     toast.success('Connectors saved', {
       description: intervalChanged
-        ? 'The ingester resyncs within seconds; restart it for the new interval (docker compose restart ingester).'
-        : 'The ingester picks up the change and resyncs within seconds.',
+        ? 'Sources resync within seconds; the new interval applies after the sync service restarts.'
+        : 'The sync service picks up the change and resyncs within seconds.',
     })
   } catch (e) {
     if (e instanceof ApiError && e.body?.problems) rejected.value = e.body.problems
@@ -96,10 +96,8 @@ onBeforeRouteLeave(() => {
   <div class="space-y-6 pb-20">
     <PageHeader title="Connectors">
       <template #description>
-        Confluence spaces, Jira projects, web sites and git repositories the ingester
-        (<code class="text-xs">mnemos ingest serve</code>) keeps in sync inside <code class="text-xs">mnemos_knowledge</code>
-        or <code class="text-xs">mnemos_code</code>. Stored in the database; the ingester checks the server every few
-        seconds and resyncs when they change. Tokens stay in the ingester's environment.
+        Confluence spaces, Jira projects, web sites and git repositories kept in sync with the index. Tokens stay on
+        the sync service, never here.
       </template>
       <template #actions>
         <DropdownMenu v-if="editable">
@@ -112,13 +110,13 @@ onBeforeRouteLeave(() => {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        <Button variant="outline" size="sm" @click="refresh()"><RotateCwIcon /> Reload</Button>
+        <Button variant="outline" size="sm" @click="refresh()"><RefreshCwIcon /> Refresh</Button>
       </template>
     </PageHeader>
 
     <AdminOnly v-if="me && !readable" :me="me" what="The connector configuration" />
 
-    <EmptyState v-else-if="error" title="Could not load the connectors" :detail="error.message" />
+    <EmptyState v-else-if="error" tone="error" title="Could not load the connectors" :detail="error.message" />
 
     <template v-else-if="data">
       <ReadOnlyAlert :writable="data.writable" :me="me" />
@@ -135,12 +133,12 @@ onBeforeRouteLeave(() => {
 
       <Alert v-else-if="data.problems.length" variant="destructive">
         <TriangleAlertIcon />
-        <AlertTitle>The ingester rejects this configuration</AlertTitle>
+        <AlertTitle>The sync service rejects this configuration</AlertTitle>
         <AlertDescription>
           <ul class="list-disc space-y-0.5 pl-4 font-mono text-xs">
             <li v-for="p in data.problems" :key="p">{{ p }}</li>
           </ul>
-          <p class="mt-2">Until it is fixed, a running ingester keeps its previous configuration. Saving replaces it with this form.</p>
+          <p class="mt-2">Until it is fixed, the sync service keeps its previous configuration. Saving replaces it with this form.</p>
         </AlertDescription>
       </Alert>
 
@@ -148,12 +146,13 @@ onBeforeRouteLeave(() => {
         <CardHeader>
           <CardTitle>Schedule</CardTitle>
           <CardDescription>
-            Resync period after the start-up sync: <code>45s</code>, <code>30m</code>, <code>6h</code>, <code>1d</code>. Blank: only
-            at start-up, when the sources change here and on SIGHUP. A new interval needs an ingester restart.
+            How often sources are resynced: <code>45s</code>, <code>30m</code>, <code>6h</code>, <code>1d</code>. Leave blank
+            to sync only when sources change. A new interval needs a restart of the sync service.
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          <Input v-model="interval" class="w-40 font-mono" placeholder="6h" aria-label="Sync interval" :disabled="!editable" />
+        <CardContent class="space-y-1.5">
+          <Label for="interval">Resync interval</Label>
+          <Input id="interval" v-model="interval" class="w-40 font-mono" placeholder="6h" :disabled="!editable" />
         </CardContent>
       </Card>
 
@@ -162,14 +161,14 @@ onBeforeRouteLeave(() => {
         :key="s.id"
         v-model="sources[i]!"
         :editable="editable"
-        :indexed="indexed ?? null"
+        :indexed="indexed"
         @remove="remove(s.id)"
       />
 
       <EmptyState
         v-if="!sources.length"
         :icon="PlugIcon"
-        title="No source declared"
+        title="No sources yet"
         :detail="editable
           ? 'Add a Confluence space, a Jira project, a web site or a git repository.'
           : 'Nothing is synced. An admin adds sources here once editing is enabled.'"
@@ -188,7 +187,7 @@ onBeforeRouteLeave(() => {
     >
       <div v-if="dirty" class="fixed inset-x-0 bottom-6 z-20 flex justify-center px-4">
         <div class="flex items-center gap-3 rounded-xl border bg-popover px-4 py-2.5 shadow-lg">
-          <span class="text-sm">Unsaved changes</span>
+          <span class="text-sm" role="status" aria-live="polite">Unsaved changes</span>
           <Button variant="ghost" size="sm" @click="load(data)">Discard</Button>
           <Button size="sm" :disabled="saving" @click="save">{{ saving ? 'Saving…' : 'Save' }}</Button>
         </div>

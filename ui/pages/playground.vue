@@ -2,8 +2,9 @@
 import { CopyIcon, HistoryIcon, Loader2Icon, PlayIcon } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import { ApiError, type SearchResponse, type TraceCandidate } from '~/composables/useApi'
+import { copyToClipboard } from '~/composables/useCopy'
 import { API_KEY_STORAGE } from '~/utils/auth'
-import { buildBody, type PlaygroundForm, TARGETS, toCurl, toMcpCall } from '~/utils/playground'
+import { buildBody, type PlaygroundForm, TARGETS, toCurl, toMcpCall, validationMessage } from '~/utils/playground'
 
 definePageMeta({ title: 'Playground' })
 useHead({ title: 'Playground' })
@@ -63,7 +64,7 @@ async function run() {
     history.value = [ran.value.form, ...history.value.filter((h) => h.query !== form.query || h.target !== form.target)].slice(0, 10)
     localStorage.setItem(HISTORY_KEY, JSON.stringify(history.value))
   } catch (e) {
-    const detail = e instanceof ApiError && e.status === 422 ? 'A filter has an invalid value.' : (e as Error).message
+    const detail = e instanceof ApiError ? (validationMessage(e.body?.detail) ?? e.message) : (e as Error).message
     toast.error('Search failed', { description: detail })
   } finally {
     running.value = false
@@ -72,11 +73,6 @@ async function run() {
 
 function load(entry: PlaygroundForm) {
   Object.assign(form, entry, { collections: [...entry.collections] })
-}
-
-async function copy(text: string, what: string) {
-  await navigator.clipboard.writeText(text)
-  toast.success(`${what} copied`)
 }
 
 const curl = computed(() =>
@@ -98,19 +94,17 @@ const rank = (n: number | null | undefined) => (n == null ? '—' : `#${n}`)
 
 <template>
   <div class="space-y-6">
-    <PageHeader title="Playground">
-      <template #description>
-        Run a search the way an agent would, and see why each result came back. Queries are logged as
-        <code class="text-xs">playground</code> and left out of the dashboard figures.
-      </template>
-    </PageHeader>
+    <PageHeader
+      title="Playground"
+      description="Run a search the way an agent would, and see why each result came back. Searches run here are left out of the dashboard figures unless you include them."
+    />
 
     <Card>
       <CardContent class="space-y-4">
         <form class="flex flex-wrap gap-2" @submit.prevent="run">
-          <Input v-model="form.query" placeholder="Ask what an agent would ask…" class="h-10 min-w-72 flex-1" autofocus />
+          <Input v-model="form.query" placeholder="Ask what an agent would ask…" class="h-10 min-w-0 flex-1 sm:min-w-72" aria-label="Query" autofocus />
           <Select v-model="form.target">
-            <SelectTrigger class="h-10 w-48"><SelectValue /></SelectTrigger>
+            <SelectTrigger class="h-10 w-48" aria-label="Search in"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem v-for="t in TARGETS" :key="t.id" :value="t.id">{{ t.label }}</SelectItem>
             </SelectContent>
@@ -127,7 +121,7 @@ const rank = (n: number | null | undefined) => (n == null ? '—' : `#${n}`)
             Limit
             <Input v-model.number="form.limit" type="number" min="1" max="50" class="h-8 w-20" />
           </label>
-          <ToggleGroup v-if="form.target !== 'search-skills'" v-model="form.mode" type="single" variant="outline" size="sm">
+          <ToggleGroup v-if="form.target !== 'search-skills'" v-model="form.mode" type="single" variant="outline" size="sm" aria-label="Result content">
             <ToggleGroupItem value="preview">Preview</ToggleGroupItem>
             <ToggleGroupItem value="full">Full chunks</ToggleGroupItem>
           </ToggleGroup>
@@ -135,11 +129,11 @@ const rank = (n: number | null | undefined) => (n == null ? '—' : `#${n}`)
           <label v-if="form.target === 'search'" class="flex items-center gap-2"><Switch v-model="form.bypassCache" /> Bypass cache</label>
         </div>
 
-        <div v-if="form.target !== 'search-skills'" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div v-if="form.target !== 'search-skills'" class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <template v-if="form.target === 'search'">
             <div class="space-y-1.5 sm:col-span-2 lg:col-span-4">
-              <Label>Collections <span class="font-normal text-muted-foreground">(none = all but memories)</span></Label>
-              <ToggleGroup v-model="form.collections" type="multiple" variant="outline" size="sm" class="flex-wrap justify-start">
+              <Label id="pg-coll-label">Collections <span class="font-normal text-muted-foreground">(none = all but memories)</span></Label>
+              <ToggleGroup v-model="form.collections" type="multiple" variant="outline" size="sm" class="flex-wrap justify-start" aria-labelledby="pg-coll-label">
                 <ToggleGroupItem v-for="c in collections" :key="c" :value="c" class="font-mono text-xs">{{ c.replace(/^mnemos_/, '') }}</ToggleGroupItem>
               </ToggleGroup>
             </div>
@@ -175,8 +169,8 @@ const rank = (n: number | null | undefined) => (n == null ? '—' : `#${n}`)
           </div>
         </div>
 
-        <div v-if="history.length" class="flex flex-wrap items-center gap-1.5 text-xs">
-          <HistoryIcon class="size-3.5 text-muted-foreground" />
+        <div v-if="history.length" role="group" aria-label="Recent searches" class="flex flex-wrap items-center gap-1.5 text-xs">
+          <HistoryIcon class="size-3.5 text-muted-foreground" aria-hidden="true" />
           <Button
             v-for="(h, i) in history"
             :key="i"
@@ -192,6 +186,9 @@ const rank = (n: number | null | undefined) => (n == null ? '—' : `#${n}`)
       </CardContent>
     </Card>
 
+    <!-- Mounted before any result: a live region inserted with its text is not announced. -->
+    <p class="sr-only" aria-live="polite">{{ running ? '' : response ? `${response.results.length} ${response.results.length === 1 ? 'result' : 'results'}` : '' }}</p>
+
     <EmptyState v-if="!response" title="No search yet" detail="Results and the trace of each stage show up here." />
 
     <template v-else>
@@ -204,8 +201,8 @@ const rank = (n: number | null | undefined) => (n == null ? '—' : `#${n}`)
         </Tabs>
         <div class="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
           <span class="tabular-nums">{{ Math.round(ran!.ms) }} ms round trip</span>
-          <Button variant="outline" size="sm" @click="copy(curl, 'curl')"><CopyIcon /> curl</Button>
-          <Button variant="outline" size="sm" @click="copy(mcp, 'MCP call')"><CopyIcon /> MCP call</Button>
+          <Button variant="outline" size="sm" @click="copyToClipboard(curl, 'curl command')"><CopyIcon /> Copy as curl</Button>
+          <Button variant="outline" size="sm" @click="copyToClipboard(mcp, 'MCP call')"><CopyIcon /> Copy as MCP call</Button>
         </div>
       </div>
 
@@ -225,9 +222,9 @@ const rank = (n: number | null | undefined) => (n == null ? '—' : `#${n}`)
                 <Badge class="tabular-nums">#{{ i + 1 }}</Badge>
                 <div class="min-w-0 flex-1">
                   <p class="truncate font-mono text-sm" :title="title(r)">{{ title(r) }}</p>
-                  <p class="truncate text-xs text-muted-foreground">{{ subtitle(r) }}</p>
+                  <p class="truncate text-xs text-muted-foreground" :title="subtitle(r)">{{ subtitle(r) }}</p>
                 </div>
-                <span class="text-sm font-medium tabular-nums">{{ Number(r.score).toFixed(3) }}</span>
+                <span class="text-sm font-medium tabular-nums"><span class="sr-only">Score </span>{{ Number(r.score).toFixed(3) }}</span>
               </div>
               <div v-if="tagsOf(r).length" class="flex flex-wrap gap-1">
                 <Badge v-for="t in tagsOf(r)" :key="t" variant="outline" class="font-mono text-[11px]">{{ t }}</Badge>

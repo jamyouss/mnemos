@@ -18,6 +18,7 @@ export default defineNuxtConfig({
 
   app: {
     head: {
+      htmlAttrs: { lang: 'en' },
       // Served by the mnemos server from config/theme.css. Loaded after the
       // bundled styles so an instance's tokens win over the defaults.
       link: [{ rel: 'stylesheet', href: '/theme.css' }],

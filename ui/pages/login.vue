@@ -36,7 +36,7 @@ async function submit() {
         <img src="/logo.svg" alt="" class="size-12">
         <div class="space-y-1">
           <h1 class="text-xl font-semibold tracking-tight">Sign in to mnemos</h1>
-          <p class="text-sm text-muted-foreground">Enter the API key of your tenant.</p>
+          <p class="text-sm text-muted-foreground">Enter your mnemos API key.</p>
         </div>
       </div>
 
@@ -54,7 +54,7 @@ async function submit() {
                   autofocus
                   class="pr-10 font-mono"
                   :aria-invalid="!!error"
-                  aria-describedby="api-key-error"
+                  :aria-describedby="error ? 'api-key-error' : undefined"
                 />
                 <Button
                   type="button"

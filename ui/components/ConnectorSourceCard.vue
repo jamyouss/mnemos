@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { BookOpenIcon, GitBranchIcon, GlobeIcon, KeyRoundIcon, TicketIcon, Trash2Icon } from '@lucide/vue'
-import { DEPLOYMENTS, GIT_COLLECTIONS, scopeTags, toPayload, type SourceForm } from '~/utils/connectors'
+import { DEPLOYMENTS, GIT_COLLECTIONS, scopeTags, toPayload, type Deployment, type GitCollection, type SourceForm } from '~/utils/connectors'
 
 const source = defineModel<SourceForm>({ required: true })
 const props = defineProps<{
   editable: boolean
-  /** Chunks per tag in mnemos_knowledge and mnemos_code; null while unknown. */
-  indexed: Record<string, number> | null
+  /** Chunks per tag in the knowledge and code collections; undefined while loading, null when unavailable. */
+  indexed?: Record<string, number> | null
 }>()
 const emit = defineEmits<{ remove: [] }>()
 
@@ -16,6 +16,15 @@ const meta = {
   web: { label: 'Web site', icon: GlobeIcon, keys: '', keysHint: '', url: '', token: '' },
   git: { label: 'Git repository', icon: GitBranchIcon, keys: '', keysHint: '', url: 'https://github.com/acme/app.git', token: 'GITHUB_TOKEN' },
 } as const
+const collectionLabel: Record<GitCollection, string> = { mnemos_code: 'Code', mnemos_knowledge: 'Knowledge' }
+const deploymentLabel: Record<Deployment, string> = { auto: 'Auto', cloud: 'Cloud', datacenter: 'Data Center' }
+// Function declarations, not a template index: vue-tsc 3.3 types `obj[loopVar]` in a template as a ref access.
+function collectionName(c: GitCollection) {
+  return collectionLabel[c]
+}
+function deploymentName(d: Deployment) {
+  return deploymentLabel[d]
+}
 
 const m = computed(() => meta[source.value.type])
 const id = (field: string) => `${source.value.id}-${field}`
@@ -29,7 +38,7 @@ const scopes = computed(() => scopeTags(toPayload(source.value)))
         <component :is="m.icon" class="size-4" />
       </div>
       <div class="min-w-0 flex-1">
-        <CardTitle class="truncate text-base">{{ source.name.trim() || source.type }}</CardTitle>
+        <CardTitle class="truncate text-base">{{ source.name.trim() || m.label }}</CardTitle>
         <CardDescription>{{ m.label }}</CardDescription>
       </div>
       <Button
@@ -37,7 +46,7 @@ const scopes = computed(() => scopeTags(toPayload(source.value)))
         variant="ghost"
         size="icon"
         class="size-8 text-muted-foreground hover:text-destructive"
-        :aria-label="`Remove ${source.name || source.type}`"
+        :aria-label="`Remove ${source.name.trim() || m.label}`"
         @click="emit('remove')"
       >
         <Trash2Icon />
@@ -47,8 +56,8 @@ const scopes = computed(() => scopeTags(toPayload(source.value)))
     <CardContent class="grid gap-4 md:grid-cols-2">
       <div class="space-y-1.5">
         <Label :for="id('name')">Name</Label>
-        <Input :id="id('name')" v-model="source.name" :placeholder="source.type" :disabled="!editable" />
-        <p class="text-xs text-muted-foreground">Unique; what <code>mnemos ingest run --only</code> selects.</p>
+        <Input :id="id('name')" v-model="source.name" :placeholder="m.label" :disabled="!editable" />
+        <p class="text-xs text-muted-foreground">Unique name for this source.</p>
       </div>
 
       <template v-if="source.type === 'web'">
@@ -77,10 +86,10 @@ const scopes = computed(() => scopeTags(toPayload(source.value)))
           <Select v-model="source.collection" :disabled="!editable">
             <SelectTrigger :id="id('collection')" class="w-full"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem v-for="c in GIT_COLLECTIONS" :key="c" :value="c">{{ c }}</SelectItem>
+              <SelectItem v-for="c in GIT_COLLECTIONS" :key="c" :value="c">{{ collectionName(c) }}</SelectItem>
             </SelectContent>
           </Select>
-          <p class="text-xs text-muted-foreground"><code>mnemos_code</code>: found by code search. <code>mnemos_knowledge</code>: next to Confluence and Jira.</p>
+          <p class="text-xs text-muted-foreground">Code: found by code search. Knowledge: searched with Confluence and Jira.</p>
         </div>
         <div class="space-y-1.5 md:col-span-2">
           <Label :for="id('url')">Repository URL</Label>
@@ -93,7 +102,7 @@ const scopes = computed(() => scopeTags(toPayload(source.value)))
           </Label>
           <Input :id="id('token')" v-model="source.token_env" class="font-mono text-xs" :placeholder="m.token" :disabled="!editable" />
           <p class="text-xs text-muted-foreground">
-            Variable holding a read-only token in the ingester's environment (<code>.env</code>). Blank for a public repository.
+            Variable holding a read-only token in the sync service's environment. Blank for a public repository.
           </p>
         </div>
         <div class="space-y-1.5">
@@ -133,7 +142,7 @@ const scopes = computed(() => scopeTags(toPayload(source.value)))
         <div class="space-y-1.5">
           <Label :for="id('keys')">{{ m.keys }}</Label>
           <Input :id="id('keys')" v-model="source.keys" :placeholder="m.keysHint" :disabled="!editable" />
-          <p class="text-xs text-muted-foreground">Comma- or space-separated; upper-cased like Atlassian shows them.</p>
+          <p class="text-xs text-muted-foreground">Comma- or space-separated. Case does not matter.</p>
         </div>
         <div class="space-y-1.5 md:col-span-2">
           <Label :for="id('url')">Site URL</Label>
@@ -143,28 +152,28 @@ const scopes = computed(() => scopeTags(toPayload(source.value)))
           <Label :for="id('token')" class="flex items-center gap-1.5"><KeyRoundIcon class="size-3.5" /> Token variable</Label>
           <Input :id="id('token')" v-model="source.token_env" class="font-mono text-xs" :placeholder="m.token" :disabled="!editable" />
           <p class="text-xs text-muted-foreground">
-            Name of the variable holding the token in the ingester's environment (<code>.env</code>). The token itself never goes here.
+            Name of the variable holding the token in the sync service's environment. The token itself never goes here.
           </p>
         </div>
         <div class="space-y-1.5">
           <Label :for="id('user')">User <span class="font-normal text-muted-foreground">(optional)</span></Label>
           <Input :id="id('user')" v-model="source.user" placeholder="bot@example.com" :disabled="!editable" />
-          <p class="text-xs text-muted-foreground">Cloud: account email (HTTP Basic). Blank: the token is a Data Center PAT.</p>
+          <p class="text-xs text-muted-foreground">Atlassian Cloud: your account email. Leave blank for a personal access token (Data Center).</p>
         </div>
         <div class="space-y-1.5">
           <Label :for="id('deployment')">Deployment</Label>
           <Select v-model="source.deployment" :disabled="!editable">
             <SelectTrigger :id="id('deployment')" class="w-full"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem v-for="d in DEPLOYMENTS" :key="d" :value="d">{{ d }}</SelectItem>
+              <SelectItem v-for="d in DEPLOYMENTS" :key="d" :value="d">{{ deploymentName(d) }}</SelectItem>
             </SelectContent>
           </Select>
-          <p class="text-xs text-muted-foreground"><code>auto</code>: cloud for *.atlassian.net, Data Center otherwise.</p>
+          <p class="text-xs text-muted-foreground">Auto: Cloud for *.atlassian.net sites, Data Center otherwise.</p>
         </div>
         <div v-if="source.type === 'jira'" class="space-y-1.5">
           <Label :for="id('jql')">Extra JQL <span class="font-normal text-muted-foreground">(optional)</span></Label>
           <Input :id="id('jql')" v-model="source.jql" class="font-mono text-xs" placeholder="resolution = Unresolved OR updated >= -180d" :disabled="!editable" />
-          <p class="text-xs text-muted-foreground">ANDed to <code>project = KEY</code>; no ORDER BY.</p>
+          <p class="text-xs text-muted-foreground">Added to the project filter with AND. Do not include ORDER BY.</p>
         </div>
       </template>
 
@@ -176,11 +185,11 @@ const scopes = computed(() => scopeTags(toPayload(source.value)))
     </CardContent>
 
     <CardFooter v-if="scopes.length" class="flex flex-wrap gap-2 border-t pt-4">
-      <span class="text-xs text-muted-foreground">Indexed:</span>
+      <span class="text-xs text-muted-foreground">Index status:</span>
       <Badge v-for="tag in scopes" :key="tag" variant="outline" class="font-mono text-[11px]">
         {{ tag }}
         <span class="ml-1" :class="indexed?.[tag] ? 'text-foreground' : 'text-muted-foreground'">
-          {{ indexed === null ? '…' : indexed[tag] ? `${indexed[tag]} chunks` : 'not synced yet' }}
+          {{ indexed === undefined ? 'counting…' : indexed === null ? 'unknown' : indexed[tag] ? `${indexed[tag]} chunks` : 'not synced yet' }}
         </span>
       </Badge>
     </CardFooter>

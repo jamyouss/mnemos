@@ -12,7 +12,7 @@ const last = computed(() => Math.min(page.value * pageSize.value, props.total))
 
 <template>
   <div v-if="total" class="flex flex-wrap items-center justify-between gap-4 text-sm text-muted-foreground">
-    <span class="tabular-nums">{{ first.toLocaleString() }}–{{ last.toLocaleString() }} of {{ total.toLocaleString() }}</span>
+    <span class="tabular-nums" aria-live="polite">{{ first.toLocaleString() }}–{{ last.toLocaleString() }} of {{ total.toLocaleString() }}</span>
     <Pagination
       v-if="total > pageSize"
       v-model:page="page"
@@ -20,9 +20,10 @@ const last = computed(() => Math.min(page.value * pageSize.value, props.total))
       :items-per-page="pageSize"
       :sibling-count="1"
       show-edges
-      class="mx-0 w-auto"
+      class="mx-0 w-auto max-w-full"
+      aria-label="Pages"
     >
-      <PaginationContent v-slot="{ items }">
+      <PaginationContent v-slot="{ items }" class="flex-wrap">
         <PaginationPrevious />
         <template v-for="(item, index) in items" :key="index">
           <PaginationItem v-if="item.type === 'page'" :value="item.value" :is-active="item.value === page">
@@ -34,7 +35,7 @@ const last = computed(() => Math.min(page.value * pageSize.value, props.total))
       </PaginationContent>
     </Pagination>
     <Select :model-value="String(pageSize)" @update:model-value="pageSize = Number($event)">
-      <SelectTrigger size="sm" class="w-32"><SelectValue /></SelectTrigger>
+      <SelectTrigger size="sm" class="w-32" aria-label="Items per page"><SelectValue /></SelectTrigger>
       <SelectContent>
         <SelectItem v-for="s in sizes" :key="s" :value="String(s)">{{ s }} per page</SelectItem>
       </SelectContent>

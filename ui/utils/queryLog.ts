@@ -55,6 +55,17 @@ export function byIntent(entries: QueryLogEntry[]): Record<string, number> {
   return countBy(entries, (e) => e.intent)
 }
 
+/** What each logged intent (the tool that searched) is called on screen. */
+export const INTENT_LABELS: Record<string, string> = {
+  search: 'Everything',
+  search_code: 'Code',
+  search_skills: 'Skills',
+  search_memory: 'Memories',
+}
+
+/** An intent the server adds later still shows, under its raw name. */
+export const intentLabel = (intent: string) => INTENT_LABELS[intent] ?? intent
+
 /**
  * Files returned most often, path-relative to the codebase mount.
  *

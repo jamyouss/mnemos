@@ -22,9 +22,11 @@ const max = computed(() => Math.max(1, ...props.rows.map((r) => r.count)))
         <div
           class="absolute inset-y-0 left-0 rounded-md bg-primary/15"
           :style="{ width: `${Math.max(1, (row.count / max) * 100)}%` }"
+          aria-hidden="true"
         />
+        <!-- block, not flex: text-overflow only puts the ellipsis on a block's own text. -->
         <span
-          class="relative flex h-full items-center truncate px-2"
+          class="relative block truncate px-2 leading-7"
           :class="mono && 'font-mono text-xs'"
           :title="row.label"
         >{{ row.label }}</span>

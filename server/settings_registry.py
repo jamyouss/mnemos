@@ -64,7 +64,7 @@ FIELDS: tuple[FieldSpec, ...] = (
               "Cross-encoder checkpoint, loaded on the first rerank.",
               "str", editable=True),
     FieldSpec("mnemos_reranker_type", "retrieval", "Reranker backend",
-              "rerankers backend type for the reranker model.", "str"),
+              "Reranker implementation the model runs on.", "str"),
     FieldSpec("mnemos_reranker_max_length", "retrieval", "Reranker max length",
               "Tokens per (query, chunk) pair; 0 keeps the model's limit. 256 halved latency at no measured loss.",
               "int", editable=True, min=0, max=8192),

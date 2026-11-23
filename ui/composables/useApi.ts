@@ -201,8 +201,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   })
   if (!res.ok) {
     const body = await res.json().catch(() => null)
-    const detail = typeof body?.detail === 'string' ? `: ${body.detail}` : ''
-    throw new ApiError(`${init?.method ?? 'GET'} ${path} → ${res.status}${detail}`, res.status, body)
+    // Shown as is in toasts and empty states: the server's own sentence, not the request.
+    const message = typeof body?.detail === 'string'
+      ? body.detail
+      : res.status >= 500 ? 'The server ran into an error. Try again in a moment.' : `The server refused the request (${res.status}).`
+    console.warn(`${init?.method ?? 'GET'} ${path} → ${res.status}`, body)
+    throw new ApiError(message, res.status, body)
   }
   return (await res.json()) as T
 }

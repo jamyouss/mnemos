@@ -31,7 +31,8 @@
     --accent-foreground: oklch(0.205 0 0);
     --destructive: oklch(0.577 0.245 27.325);
     --success: oklch(0.627 0.17 149.2);
-    --warning: oklch(0.769 0.188 70.08);
+    /* amber-700: text-warning on white is 5:1; amber-500 read at 2.1:1. */
+    --warning: oklch(0.555 0.163 48.998);
     --border: oklch(0.922 0 0);
     --input: oklch(0.922 0 0);
     --ring: oklch(0.708 0 0);

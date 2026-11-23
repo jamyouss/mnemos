@@ -8,10 +8,10 @@ import { isRevisionConflict } from './useApi'
  */
 export function toastSaveError(e: unknown, reload: () => unknown, title = 'Nothing was saved') {
   if (isRevisionConflict(e)) {
-    toast.error('Changed elsewhere — reload', {
-      description: 'Someone saved this since you loaded it. Nothing was overwritten; reload to get their version, then redo your edit.',
+    toast.error('Changed by someone else', {
+      description: 'Someone saved this since you opened it. Nothing was overwritten: refresh to get their version, then redo your edit.',
       duration: Infinity,
-      action: { label: 'Reload', onClick: () => reload() },
+      action: { label: 'Refresh', onClick: () => reload() },
     })
     return
   }

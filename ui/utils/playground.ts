@@ -85,3 +85,15 @@ export function toMcpCall(target: SearchTarget, body: Record<string, unknown>): 
   const tool = TARGETS.find((t) => t.id === target)!.tool
   return `${tool}(${JSON.stringify(replayBody(body), null, 2)})`
 }
+
+/** Why a 422 refused the search: FastAPI lists `{ loc, msg }` per field, a handler may send a sentence. */
+export function validationMessage(detail: unknown): string | null {
+  if (typeof detail === 'string') return detail
+  if (!Array.isArray(detail)) return null
+  const parts = detail.flatMap((d: { loc?: unknown; msg?: unknown } | null) => {
+    if (typeof d?.msg !== 'string') return []
+    const field = Array.isArray(d.loc) ? d.loc.filter((l) => l !== 'body').join('.') : ''
+    return [field ? `${field}: ${d.msg}` : d.msg]
+  })
+  return parts.length ? parts.join('; ') : null
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildBody, type PlaygroundForm, toCurl, toMcpCall } from './playground'
+import { buildBody, type PlaygroundForm, toCurl, toMcpCall, validationMessage } from './playground'
 
 const form = (over: Partial<PlaygroundForm> = {}): PlaygroundForm => ({
   target: 'search-code',
@@ -54,5 +54,18 @@ describe('replayed calls', () => {
     expect(curl).toContain(`what'\\''s cached`)
     expect(curl).toContain('$MNEMOS_API_KEY')
     expect(toCurl('http://localhost:8100', 'search', body, false)).not.toContain('authorization')
+  })
+})
+
+describe('validationMessage', () => {
+  it('names the refused field from a FastAPI 422 list', () => {
+    const detail = [{ loc: ['body', 'limit'], msg: 'Input should be less than or equal to 50' }]
+    expect(validationMessage(detail)).toBe('limit: Input should be less than or equal to 50')
+  })
+
+  it('keeps a plain sentence and gives up on anything else', () => {
+    expect(validationMessage('Unknown collection')).toBe('Unknown collection')
+    expect(validationMessage(null)).toBeNull()
+    expect(validationMessage([{ nope: 1 }])).toBeNull()
   })
 })

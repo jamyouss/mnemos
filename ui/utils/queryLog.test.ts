@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { byDay, byIntent, latencyStats, percentile, rates, scoreBuckets, timeSeries, topFiles } from './queryLog'
+import { byDay, byIntent, intentLabel, latencyStats, percentile, rates, scoreBuckets, timeSeries, topFiles } from './queryLog'
 
 const entry = (over: Partial<any> = {}) => ({
   ts: 1_700_000_000,
@@ -51,6 +51,11 @@ describe('byDay / byIntent', () => {
   it('counts intents', () => {
     const counts = byIntent([entry(), entry({ intent: 'search' })] as any)
     expect(counts).toEqual({ search_code: 1, search: 1 })
+  })
+
+  it('names known intents and keeps an unknown one as logged', () => {
+    expect(intentLabel('search_code')).toBe('Code')
+    expect(intentLabel('search_docs')).toBe('search_docs')
   })
 })
 

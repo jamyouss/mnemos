@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { Component } from 'vue'
+import { TriangleAlertIcon } from '@lucide/vue'
 
 defineProps<{
   label: string
@@ -24,10 +25,15 @@ const toneClass = {
       <component :is="icon" v-if="icon" class="size-4 text-muted-foreground" />
     </CardHeader>
     <CardContent class="px-4">
-      <p class="truncate text-2xl font-semibold tabular-nums" :class="toneClass[tone ?? 'default']" :title="String(value)">
-        {{ value }}
+      <p class="flex items-center gap-1.5 text-2xl font-semibold tabular-nums" :class="toneClass[tone ?? 'default']">
+        <span class="min-w-0 truncate" :title="String(value)">{{ value }}</span>
+        <!-- Colour alone does not say "look at this". -->
+        <template v-if="tone === 'warning' || tone === 'destructive'">
+          <TriangleAlertIcon class="size-4 shrink-0" aria-hidden="true" />
+          <span class="sr-only">(needs attention)</span>
+        </template>
       </p>
-      <p v-if="hint" class="mt-1 truncate text-xs text-muted-foreground" :title="hint">{{ hint }}</p>
+      <p v-if="hint" class="mt-1 text-xs text-muted-foreground">{{ hint }}</p>
     </CardContent>
   </Card>
 </template>

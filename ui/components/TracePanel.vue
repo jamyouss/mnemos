@@ -28,19 +28,24 @@ const dropped = computed(() => props.trace.candidates.filter((c) => c.final_rank
   <div class="space-y-6">
     <section class="space-y-2">
       <div class="flex items-baseline justify-between">
-        <h3 class="text-sm font-medium">Stages</h3>
+        <h2 class="text-sm font-medium">Stages</h2>
         <span class="text-xs tabular-nums text-muted-foreground">{{ Math.round(trace.total_ms) }} ms total</span>
       </div>
       <ul class="space-y-1.5">
         <li v-for="(s, i) in trace.stages" :key="i" class="grid grid-cols-[6rem_1fr_4.5rem] items-center gap-3 text-sm">
-          <span class="font-medium">{{ s.name }}</span>
+          <span class="truncate font-medium" :title="s.name">{{ s.name }}</span>
           <div class="relative min-w-0">
             <div
               v-if="s.ms !== null"
               class="absolute inset-y-0 left-0 rounded bg-primary/15"
               :style="{ width: `${Math.max(1, (s.ms / maxMs) * 100)}%` }"
             />
-            <p class="relative truncate px-2 py-0.5 text-xs text-muted-foreground" :title="details(s)">{{ details(s) || '—' }}</p>
+            <details v-if="details(s)" class="group/details relative">
+              <summary class="cursor-pointer list-none truncate px-2 py-0.5 text-xs text-muted-foreground group-open/details:whitespace-normal group-open/details:[overflow-wrap:anywhere] [&::-webkit-details-marker]:hidden">
+                {{ details(s) }}
+              </summary>
+            </details>
+            <p v-else class="relative px-2 py-0.5 text-xs text-muted-foreground">—</p>
           </div>
           <span class="text-right text-xs tabular-nums text-muted-foreground">{{ s.ms === null ? '' : `${Math.round(s.ms)} ms` }}</span>
         </li>
@@ -49,10 +54,8 @@ const dropped = computed(() => props.trace.candidates.filter((c) => c.final_rank
 
     <section class="space-y-2">
       <div class="flex items-baseline justify-between">
-        <h3 class="text-sm font-medium">Candidates</h3>
-        <span class="text-xs text-muted-foreground">
-          {{ trace.candidates.length }} retrieved · {{ dropped }} not kept · ranks are within each side's top 20
-        </span>
+        <h2 class="text-sm font-medium">Candidates</h2>
+        <span class="text-xs text-muted-foreground">{{ trace.candidates.length }} retrieved · {{ dropped }} dropped</span>
       </div>
       <div class="overflow-x-auto rounded-lg border">
         <Table>
@@ -75,7 +78,7 @@ const dropped = computed(() => props.trace.candidates.filter((c) => c.final_rank
             >
               <TableCell class="tabular-nums">
                 <Badge v-if="c.final_rank != null">#{{ c.final_rank }}</Badge>
-                <span v-else class="text-xs">dropped</span>
+                <span v-else class="text-xs">Dropped</span>
               </TableCell>
               <TableCell class="max-w-md">
                 <p class="truncate font-mono text-xs" :title="c.file_path">{{ c.file_path }}</p>
@@ -95,7 +98,7 @@ const dropped = computed(() => props.trace.candidates.filter((c) => c.final_rank
                 <span v-if="c.rerank_score != null" class="block text-[11px] text-muted-foreground">{{ c.rerank_score.toFixed(2) }}</span>
               </TableCell>
               <TableCell>
-                <Badge v-if="c.grade" :variant="c.grade === 'low' ? 'destructive' : 'secondary'">{{ c.grade }}</Badge>
+                <Badge v-if="c.grade" :variant="c.grade === 'low' ? 'destructive' : 'secondary'" class="capitalize">{{ c.grade }}</Badge>
               </TableCell>
             </TableRow>
           </TableBody>

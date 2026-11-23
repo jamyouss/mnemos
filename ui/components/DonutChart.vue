@@ -10,7 +10,7 @@ const props = defineProps<{
 
 const PALETTE = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)']
 // Past five slices the colours repeat and the ring stops being readable:
-// fold the tail into "other".
+// fold the tail into "Other".
 const MAX_SLICES = 5
 
 const slices = computed(() => {
@@ -18,11 +18,15 @@ const slices = computed(() => {
   if (sorted.length <= MAX_SLICES) return sorted
   const head = sorted.slice(0, MAX_SLICES - 1)
   const other = sorted.slice(MAX_SLICES - 1).reduce((n, r) => n + r.count, 0)
-  return [...head, { label: 'other', count: other }]
+  return [...head, { label: 'Other', count: other }]
 })
 const total = computed(() => slices.value.reduce((n, r) => n + r.count, 0))
 const color = (_: unknown, i: number) => PALETTE[i % PALETTE.length]
 const pct = (n: number) => (total.value ? `${Math.round((n / total.value) * 100)}%` : '—')
+// The ring is unlabelled SVG; this is its text alternative.
+const summary = computed(
+  () => `${total.value.toLocaleString()} ${props.centerLabel ?? 'total'}: ${slices.value.map((s) => `${s.label} ${pct(s.count)}`).join(', ')}`,
+)
 </script>
 
 <template>
@@ -31,7 +35,7 @@ const pct = (n: number) => (total.value ? `${Math.round((n / total.value) * 100)
        so the legend labels are not squeezed down to a single letter. -->
   <div v-else class="@container">
     <div class="flex flex-col items-center gap-6 @md:flex-row">
-      <div class="relative size-40 shrink-0">
+      <div class="relative size-40 shrink-0" role="img" :aria-label="summary">
         <VisSingleContainer :data="slices" class="size-40">
           <VisDonut
             :value="(d: { count: number }) => d.count"

@@ -9,7 +9,7 @@ import {
   SparklesIcon,
   ZapIcon,
 } from '@lucide/vue'
-import { byIntent, latencyStats, PERIODS, rates, scoreBuckets, since, timeSeries, topFiles, type Period } from '~/utils/queryLog'
+import { byIntent, intentLabel, latencyStats, PERIODS, rates, scoreBuckets, since, timeSeries, topFiles, type Period } from '~/utils/queryLog'
 import { isAdmin } from '~/utils/tenants'
 
 definePageMeta({ title: 'Dashboard' })
@@ -56,7 +56,7 @@ const intents = computed(() =>
     .sort((a, b) => b[1] - a[1])
     .map(([key]) => key),
 )
-const trafficSeries = computed(() => intents.value.map((key) => ({ key, label: key })))
+const trafficSeries = computed(() => intents.value.map((key) => ({ key, label: intentLabel(key) })))
 const trafficData = computed(() => buckets.value.map((b) => ({ t: b.t, ...Object.fromEntries(intents.value.map((k) => [k, b.byIntent[k] ?? 0])) })))
 const latencyData = computed(() => buckets.value.map((b) => ({ t: b.t, p50: Math.round(b.p50), p95: Math.round(b.p95) })))
 const scores = computed(() => scoreBuckets(entries.value).map((r) => ({ label: r.bucket, count: r.count })))
@@ -74,7 +74,7 @@ const memoryTypes = computed(() => Object.entries(memory.data.value?.by_type ?? 
 const projectRows = computed(() => (projects.data.value?.counts ?? []).map((c) => ({ label: c.value, count: c.count })))
 
 // ---- Retrieval stages, as actually configured ---------------------------
-/** Costs measured on this deployment. The question is never "is it on" but "is it worth it". */
+/** Costs from the benchmarks in docs/EVAL.md, not measured live. The question is never "is it on" but "is it worth it". */
 const STAGES = [
   { key: null, name: 'Hybrid BM25 + RRF', note: 'the baseline, ~40 ms' },
   { key: 'mnemos_cache_enabled', name: 'Semantic cache', note: 'free, wins on repeats' },
@@ -105,7 +105,7 @@ const fmtMs = (x: number) => (x >= 1000 ? `${(x / 1000).toFixed(1)} s` : `${Math
       <template #actions>
         <template v-if="admin">
           <label class="flex items-center gap-2 text-sm text-muted-foreground">
-            <Switch v-model="playground.include.value" /> Playground
+            <Switch v-model="playground.include.value" /> Include Playground searches
           </label>
           <ToggleGroup v-model="period" type="single" variant="outline" size="sm">
             <ToggleGroupItem v-for="(p, id) in PERIODS" :key="id" :value="id" :aria-label="p.label">{{ id }}</ToggleGroupItem>
@@ -120,20 +120,19 @@ const fmtMs = (x: number) => (x >= 1000 ? `${(x / 1000).toFixed(1)} s` : `${Math
 
     <Alert v-if="status.error.value" variant="destructive">
       <AlertTitle>The mnemos server is not answering</AlertTitle>
-      <AlertDescription>GET /api/status failed. Check the stack is up: <code>docker compose ps</code>.</AlertDescription>
+      <AlertDescription>The dashboard cannot reach the mnemos server. Check that it is running.</AlertDescription>
     </Alert>
 
     <Alert v-if="me && !admin">
       <AlertTitle>Index and memories only</AlertTitle>
       <AlertDescription>
-        Search traffic and retrieval settings come from the query log and the configuration, which only admin keys may
-        read. This dashboard uses the key of tenant “{{ me.name }}”.
+        Search traffic and retrieval settings are visible to admins only. You are signed in as “{{ me.name }}”.
       </AlertDescription>
     </Alert>
 
     <HealthStrip :health="health.data.value" :pending="health.pending.value" :log-enabled="log.data.value?.enabled" />
 
-    <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2" :class="admin && 'lg:grid-cols-3 xl:grid-cols-6'">
       <StatCard label="Indexed chunks" :icon="DatabaseIcon" :value="status.data.value ? totalChunks.toLocaleString() : '…'" :hint="`${collections.length} collections`" />
       <template v-if="admin">
         <StatCard label="Searches" :icon="ActivityIcon" :value="entries.length.toLocaleString()" :hint="PERIODS[period].label" />
@@ -168,7 +167,7 @@ const fmtMs = (x: number) => (x >= 1000 ? `${(x / 1000).toFixed(1)} s` : `${Math
       </AlertDescription>
     </Alert>
 
-    <div class="grid gap-4 lg:grid-cols-3">
+    <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
       <Card v-if="admin" class="lg:col-span-2">
         <CardHeader>
           <CardTitle>Search traffic</CardTitle>
@@ -204,7 +203,7 @@ const fmtMs = (x: number) => (x >= 1000 ? `${(x / 1000).toFixed(1)} s` : `${Math
       </Card>
     </div>
 
-    <div v-if="admin" class="grid gap-4 lg:grid-cols-3">
+    <div v-if="admin" class="grid grid-cols-1 gap-4 lg:grid-cols-3">
       <Card class="lg:col-span-2">
         <CardHeader>
           <CardTitle>Latency</CardTitle>
@@ -227,7 +226,7 @@ const fmtMs = (x: number) => (x >= 1000 ? `${(x / 1000).toFixed(1)} s` : `${Math
       <Card>
         <CardHeader>
           <CardTitle>Top-1 score</CardTitle>
-          <CardDescription>The scale follows the fusion weights and the reranker, so buckets follow the data. Read the shape, not a threshold.</CardDescription>
+          <CardDescription>Spread of the best score per search. Compare shapes over time, not absolute values.</CardDescription>
         </CardHeader>
         <CardContent>
           <BarList :rows="scores" empty="No scored searches in this window." />
@@ -235,14 +234,14 @@ const fmtMs = (x: number) => (x >= 1000 ? `${(x / 1000).toFixed(1)} s` : `${Math
       </Card>
     </div>
 
-    <div class="grid gap-4 lg:grid-cols-3">
+    <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
       <Card>
         <CardHeader>
           <CardTitle>Projects</CardTitle>
           <CardDescription>Code chunks per tag</CardDescription>
         </CardHeader>
         <CardContent>
-          <p v-if="projects.error.value" class="text-sm text-muted-foreground">Tag counts unavailable.</p>
+          <p v-if="projects.error.value" class="text-sm text-muted-foreground">Tag counts unavailable: {{ projects.error.value.message }}</p>
           <BarList v-else :rows="projectRows" mono empty="No tagged code yet." />
         </CardContent>
       </Card>
@@ -272,17 +271,20 @@ const fmtMs = (x: number) => (x >= 1000 ? `${(x / 1000).toFixed(1)} s` : `${Math
       <CardHeader class="flex flex-row items-start justify-between gap-4">
         <div class="space-y-1.5">
           <CardTitle class="flex items-center gap-2"><SparklesIcon class="size-4" /> Retrieval stages</CardTitle>
-          <CardDescription>Read from the running server. Each cost was measured on this index, not assumed.</CardDescription>
+          <CardDescription>On or off as read from the running server. Costs come from the project's benchmarks, not from this index.</CardDescription>
         </div>
         <Button as-child variant="outline" size="sm"><NuxtLink to="/config">Configure</NuxtLink></Button>
       </CardHeader>
       <CardContent>
         <p v-if="config.error.value" class="text-sm text-muted-foreground">Configuration unavailable: {{ config.error.value.message }}</p>
-        <ul v-else class="grid gap-x-8 gap-y-3 md:grid-cols-2">
+        <ul v-else class="grid grid-cols-1 gap-x-8 gap-y-3 md:grid-cols-2">
           <li v-for="s in stages" :key="s.name" class="flex items-center gap-3 text-sm">
-            <Badge :variant="s.on ? 'default' : 'secondary'" class="w-12 justify-center">{{ config.pending.value && s.key ? '…' : s.on ? 'on' : 'off' }}</Badge>
+            <Badge :variant="s.on ? 'default' : 'secondary'" class="w-12 shrink-0 justify-center">
+              <template v-if="config.pending.value && s.key"><span aria-hidden="true">…</span><span class="sr-only">Loading</span></template>
+              <template v-else>{{ s.on ? 'On' : 'Off' }}</template>
+            </Badge>
             <span class="font-medium">{{ s.name }}</span>
-            <span class="truncate text-muted-foreground" :title="s.note">{{ s.note }}</span>
+            <span class="min-w-0 text-muted-foreground">{{ s.note }}</span>
           </li>
         </ul>
       </CardContent>

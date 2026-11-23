@@ -7,12 +7,12 @@ import type { Whoami } from '~/utils/tenants'
 const props = defineProps<{ me: Whoami; what: string }>()
 
 const detail = computed(
-  () => `This dashboard uses the API key of tenant “${props.me.name}”, which is not an admin. ${props.what} needs an admin key.`,
+  () => `You are signed in as “${props.me.name}”, which is not an admin. ${props.what} is for admins only.`,
 )
 </script>
 
 <template>
   <EmptyState :icon="ShieldIcon" title="Admins only" :detail="detail">
-    <Button size="sm" variant="outline" @click="signOut"><KeyRoundIcon /> Use another key</Button>
+    <Button size="sm" variant="outline" @click="signOut"><KeyRoundIcon /> Sign in with another key</Button>
   </EmptyState>
 </template>

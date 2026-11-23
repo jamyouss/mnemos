@@ -16,10 +16,11 @@ function toggleMode() {
 </script>
 
 <template>
-  <div v-if="route.meta.bare">
+  <!-- Bare pages (sign-in) have no SidebarInset, so the landmark is here. -->
+  <main v-if="route.meta.bare">
     <NuxtPage />
     <Toaster rich-colors close-button />
-  </div>
+  </main>
   <SidebarProvider v-else>
     <AppSidebar />
     <!-- min-w-0: a flex child otherwise grows to its widest content, and one
@@ -29,14 +30,22 @@ function toggleMode() {
         <SidebarTrigger class="-ml-1" />
         <Separator orientation="vertical" class="mr-2 data-[orientation=vertical]:h-4" />
         <span class="text-sm font-medium">{{ route.meta.title ?? 'mnemos' }}</span>
-        <Button variant="ghost" size="icon" class="ml-auto size-8" aria-label="Toggle dark mode" @click="toggleMode">
+        <Button
+          variant="ghost"
+          size="icon"
+          class="ml-auto size-8"
+          aria-label="Dark mode"
+          :aria-pressed="colorMode.value === 'dark'"
+          @click="toggleMode"
+        >
           <SunIcon class="hidden dark:block" />
           <MoonIcon class="dark:hidden" />
         </Button>
       </header>
-      <main class="mx-auto w-full max-w-7xl flex-1 p-4 md:p-8">
+      <!-- SidebarInset is already the page's <main>. -->
+      <div class="mx-auto w-full max-w-7xl flex-1 p-4 md:p-8">
         <NuxtPage />
-      </main>
+      </div>
     </SidebarInset>
     <Toaster rich-colors close-button />
   </SidebarProvider>

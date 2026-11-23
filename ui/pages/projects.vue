@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { FolderTreeIcon, PencilIcon, PlusIcon, RotateCwIcon, SearchIcon, Trash2Icon, TriangleAlertIcon } from '@lucide/vue'
+import { FolderTreeIcon, PencilIcon, PlusIcon, RefreshCwIcon, SearchIcon, Trash2Icon, TriangleAlertIcon } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import { ApiError, type ProjectsResponse } from '~/composables/useApi'
 import { groupRows, newRow, problemsByRow, toPathPayload, toRowForm, type ProjectRowForm } from '~/utils/projects'
@@ -57,6 +57,12 @@ const editable = computed(() => admin.value && (data.value?.writable ?? false))
 const query = ref('')
 const groups = computed(() => groupRows(rows.value, query.value))
 const shown = computed(() => groups.value.reduce((n, g) => n + g.rows.length, 0))
+const prefixCount = computed(() => {
+  const noun = rows.value.length === 1 ? 'prefix' : 'prefixes'
+  return query.value ? `${shown.value} of ${rows.value.length} ${noun}` : `${rows.value.length} ${noun}`
+})
+// Each segment keeps its trailing "/", so a long prefix wraps after a slash, not mid-word.
+const pathSegments = (path: string) => path.split(/(?<=\/)/).filter(Boolean)
 
 // The editor works on the draft row itself: the save bar persists every change at once.
 const editingId = ref<number | null>(null)
@@ -112,21 +118,19 @@ onBeforeRouteLeave(() => {
 
 <template>
   <div class="space-y-6 pb-20">
-    <PageHeader title="Projects">
-      <template #description>
-        Which tags each indexed file gets, by path prefix relative to the codebase root; the longest matching prefix wins
-        and its first tag is the project's primary label. Tags scope searches and tenants. Stored in the database and
-        applied by every server instance within seconds.
-      </template>
+    <PageHeader
+      title="Projects"
+      description="Which tags each indexed file gets, by path prefix. The longest matching prefix wins; its first tag is the project name. Applies within seconds."
+    >
       <template #actions>
         <Button v-if="editable" size="sm" @click="add"><PlusIcon /> Add prefix</Button>
-        <Button variant="outline" size="sm" @click="refresh()"><RotateCwIcon /> Reload</Button>
+        <Button variant="outline" size="sm" @click="refresh()"><RefreshCwIcon /> Refresh</Button>
       </template>
     </PageHeader>
 
     <AdminOnly v-if="me && !readable" :me="me" what="The project mapping" />
 
-    <EmptyState v-else-if="error" title="Could not load the projects" :detail="error.message" />
+    <EmptyState v-else-if="error" tone="error" title="Could not load the projects" :detail="error.message" />
 
     <template v-else-if="data">
       <ReadOnlyAlert :writable="data.writable" :me="me" />
@@ -148,16 +152,17 @@ onBeforeRouteLeave(() => {
             <SearchIcon class="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input v-model="query" type="search" placeholder="Filter by path or tag…" class="pl-8" aria-label="Filter prefixes" />
           </div>
-          <span class="text-sm text-muted-foreground tabular-nums">
-            {{ query ? `${shown} of ${rows.length}` : rows.length }} prefix{{ rows.length > 1 ? 'es' : '' }}
-          </span>
+          <span class="text-sm text-muted-foreground tabular-nums" aria-live="polite">{{ prefixCount }}</span>
         </div>
 
         <EmptyState v-if="!groups.length" :icon="SearchIcon" title="No prefix matches" :detail="`Nothing in the mapping contains “${query}”.`" />
 
         <Card v-for="group in groups" :key="group.key" class="gap-0 overflow-hidden py-0">
-          <div class="flex items-center justify-between border-b bg-muted/40 px-4 py-2.5">
-            <span class="font-mono text-sm font-medium">{{ group.key || 'Other prefixes' }}</span>
+          <div class="flex items-center justify-between gap-3 border-b bg-muted/40 px-4 py-2.5">
+            <span class="min-w-0 font-mono text-sm font-medium break-words">
+              <template v-if="group.key"><template v-for="(seg, i) in pathSegments(group.key)" :key="i">{{ seg }}<wbr></template></template>
+              <template v-else>Other prefixes</template>
+            </span>
             <span class="text-xs text-muted-foreground tabular-nums">{{ group.rows.length }}</span>
           </div>
           <ul class="divide-y">
@@ -168,8 +173,8 @@ onBeforeRouteLeave(() => {
               :class="problems.byId.has(row.id) && 'bg-destructive/5'"
             >
               <div class="min-w-0 flex-1 space-y-1.5">
-                <p class="font-mono text-sm break-all">
-                  <span class="text-muted-foreground">{{ group.key }}</span>{{ row.prefix.slice(group.key.length) || (row.prefix ? '' : 'new prefix') }}
+                <p class="font-mono text-sm break-words">
+                  <span class="text-muted-foreground"><template v-for="(seg, i) in pathSegments(group.key)" :key="i">{{ seg }}<wbr></template></span><template v-for="(seg, i) in pathSegments(row.prefix.slice(group.key.length))" :key="`own-${i}`">{{ seg }}<wbr></template><template v-if="!row.prefix">New prefix</template>
                 </p>
                 <div class="flex flex-wrap items-center gap-1">
                   <Badge
@@ -178,8 +183,8 @@ onBeforeRouteLeave(() => {
                     :variant="i === 0 ? 'default' : 'secondary'"
                     class="font-mono text-[11px]"
                     :title="i === 0 ? 'Primary tag' : undefined"
-                  >{{ t }}</Badge>
-                  <span v-if="!row.tags.trim()" class="text-xs text-destructive">no tag</span>
+                  >{{ t }}<span v-if="i === 0" class="sr-only"> (primary)</span></Badge>
+                  <span v-if="!row.tags.trim()" class="text-xs text-destructive">No tag — required</span>
                 </div>
                 <p v-if="row.excludeDirs.trim() || row.excludeExts.trim()" class="text-xs text-muted-foreground">
                   Ignores <span class="font-mono">{{ [row.excludeDirs, row.excludeExts].filter((s) => s.trim()).join(', ') }}</span>
@@ -242,8 +247,7 @@ onBeforeRouteLeave(() => {
       </Sheet>
 
       <p v-if="rows.length" class="text-xs text-muted-foreground">
-        Ignore rules add to the built-in policy and hold for every way files arrive (watcher, git hooks, reindex);
-        nothing here re-allows what a built-in rule skips. Changing tags does not retag files already indexed: reindex them.
+        Ignore rules add to the built-in ones. Changing tags only affects files indexed afterwards.
       </p>
     </template>
 

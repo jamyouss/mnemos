@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { CopyIcon, KeyRoundIcon, LockIcon, MoreHorizontalIcon, PencilIcon, PlusIcon, RotateCwIcon, Trash2Icon, TriangleAlertIcon, UsersIcon } from '@lucide/vue'
+import { CopyIcon, KeyRoundIcon, LockIcon, MoreHorizontalIcon, PencilIcon, PlusIcon, RefreshCwIcon, Trash2Icon, TriangleAlertIcon, UsersIcon } from '@lucide/vue'
 import { toast } from 'vue-sonner'
+import { copyToClipboard } from '~/composables/useCopy'
 import type { IssuedKey, TenantChange } from '~/composables/useApi'
 import { buttonVariants } from '~/components/ui/button'
 import { API_KEY_STORAGE } from '~/utils/auth'
@@ -134,10 +135,8 @@ function showKey(result: IssuedKey, how: 'created' | 'rotated') {
   issued.value = { name: result.tenant.name, key: result.api_key, how }
 }
 
-async function copyKey() {
-  if (!issued.value) return
-  await navigator.clipboard.writeText(issued.value.key)
-  toast.success('API key copied')
+function copyKey() {
+  if (issued.value) copyToClipboard(issued.value.key, 'API key')
 }
 
 // ---- Rotate & delete --------------------------------------------------------
@@ -173,21 +172,19 @@ async function confirmAction() {
 
 <template>
   <div class="space-y-6">
-    <PageHeader title="Tenants">
-      <template #description>
-        Who may call this server, each with its own API key. Admins manage configuration and tenants; read and write
-        scopes decide which projects (tags) a key sees and changes. Stored in the database: a change or a revoked key
-        reaches every server instance within seconds.
-      </template>
+    <PageHeader
+      title="Tenants"
+      description="Who can use this server, each with an API key. Read and write scopes limit which projects a key can see and change."
+    >
       <template #actions>
-        <Button v-if="editable" size="sm" @click="openCreate"><PlusIcon /> New tenant</Button>
-        <Button variant="outline" size="sm" @click="refresh()"><RotateCwIcon /> Reload</Button>
+        <Button v-if="editable" size="sm" @click="openCreate"><PlusIcon /> Add tenant</Button>
+        <Button variant="outline" size="sm" @click="refresh()"><RefreshCwIcon /> Refresh</Button>
       </template>
     </PageHeader>
 
     <AdminOnly v-if="me && !admin" :me="me" what="Tenant management" />
 
-    <EmptyState v-else-if="error" title="Could not load the tenants" :detail="error.message" />
+    <EmptyState v-else-if="error" tone="error" title="Could not load the tenants" :detail="error.message" />
 
     <template v-else-if="data">
       <ReadOnlyAlert :writable="data.writable" :me="me" />
@@ -196,7 +193,8 @@ async function confirmAction() {
         <TriangleAlertIcon />
         <AlertTitle>Authentication is off</AlertTitle>
         <AlertDescription>
-          Every caller is an admin until <code>MNEMOS_AUTH_ENABLED=true</code>; these keys and scopes only apply then.
+          Every caller is an admin until authentication is turned on in the server configuration; these keys and scopes
+          only apply then.
         </AlertDescription>
       </Alert>
 
@@ -209,18 +207,18 @@ async function confirmAction() {
                 <TableHead>Role</TableHead>
                 <TableHead>Read</TableHead>
                 <TableHead>Write</TableHead>
-                <TableHead>Created</TableHead>
-                <TableHead class="w-12 pr-6" />
+                <TableHead class="hidden md:table-cell">Created</TableHead>
+                <TableHead class="w-12 pr-6"><span class="sr-only">Actions</span></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               <TableRow v-for="t in data.tenants" :key="t.name">
                 <TableCell class="pl-6 font-mono">
                   {{ t.name }}
-                  <Badge v-if="isSelf(t)" variant="outline" class="ml-1 font-sans text-[10px]">you</Badge>
+                  <Badge v-if="isSelf(t)" variant="outline" class="ml-1 font-sans text-[10px]">You</Badge>
                 </TableCell>
                 <TableCell>
-                  <Badge :variant="t.admin ? 'default' : 'secondary'">{{ t.root ? 'root' : t.admin ? 'admin' : 'member' }}</Badge>
+                  <Badge :variant="t.admin ? 'default' : 'secondary'">{{ t.root ? 'Root' : t.admin ? 'Admin' : 'Member' }}</Badge>
                 </TableCell>
                 <TableCell class="max-w-56 truncate" :class="t.read !== '*' && 'font-mono text-xs'" :title="describeScope(t.read)">
                   {{ describeScope(t.read) }}
@@ -228,14 +226,16 @@ async function confirmAction() {
                 <TableCell class="max-w-56 truncate" :class="t.write !== '*' && 'font-mono text-xs'" :title="describeScope(t.write)">
                   {{ describeScope(t.write) }}
                 </TableCell>
-                <TableCell class="whitespace-nowrap text-muted-foreground">{{ fmtDate(t.created_at) }}</TableCell>
+                <TableCell class="hidden whitespace-nowrap text-muted-foreground md:table-cell">{{ fmtDate(t.created_at) }}</TableCell>
                 <TableCell class="pr-6 text-right">
-                  <span
-                    v-if="t.root"
-                    class="inline-flex size-8 items-center justify-center text-muted-foreground"
-                    title="Root tenant: its key comes from MNEMOS_BOOTSTRAP_ADMIN_KEY; change the variable and restart to rotate it"
-                    :aria-label="`${t.name} is the root tenant and cannot be changed here`"
-                  ><LockIcon class="size-4" /></span>
+                  <Tooltip v-if="t.root">
+                    <TooltipTrigger as-child>
+                      <Button variant="ghost" size="icon" class="size-8 text-muted-foreground" :aria-label="`${t.name} is the root tenant`">
+                        <LockIcon />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent class="max-w-64">Root tenant: its key is set in the server configuration and can't be changed here.</TooltipContent>
+                  </Tooltip>
                   <DropdownMenu v-else-if="editable">
                     <DropdownMenuTrigger as-child>
                       <Button variant="ghost" size="icon" class="size-8" :aria-label="`Actions for ${t.name}`"><MoreHorizontalIcon /></Button>
@@ -254,8 +254,8 @@ async function confirmAction() {
         </CardContent>
       </Card>
 
-      <EmptyState v-else :icon="UsersIcon" title="No tenant" detail="With authentication on, the server refuses to start without one.">
-        <Button v-if="editable" size="sm" @click="openCreate"><PlusIcon /> New tenant</Button>
+      <EmptyState v-else :icon="UsersIcon" title="No tenants yet" detail="Create one to issue an API key.">
+        <Button v-if="editable" size="sm" @click="openCreate"><PlusIcon /> Add tenant</Button>
       </EmptyState>
     </template>
 
@@ -271,8 +271,16 @@ async function confirmAction() {
         <form class="space-y-5" @submit.prevent="submit">
           <div v-if="!editing" class="space-y-1.5">
             <Label for="tenant-name">Name</Label>
-            <Input id="tenant-name" v-model="form.name" class="font-mono" placeholder="ci-acme" autocomplete="off" :aria-invalid="(form.name !== '' && !!nameProblem) || undefined" />
-            <p v-if="form.name && nameProblem" class="text-xs text-destructive">{{ nameProblem }}</p>
+            <Input
+              id="tenant-name"
+              v-model="form.name"
+              class="font-mono"
+              placeholder="ci-acme"
+              autocomplete="off"
+              :aria-invalid="(form.name !== '' && !!nameProblem) || undefined"
+              :aria-describedby="form.name && nameProblem ? 'tenant-name-error' : undefined"
+            />
+            <p v-if="form.name && nameProblem" id="tenant-name-error" class="text-xs text-destructive">{{ nameProblem }}</p>
           </div>
 
           <div class="flex items-start justify-between gap-4">
@@ -282,7 +290,7 @@ async function confirmAction() {
             </div>
             <Switch id="tenant-admin" v-model="form.admin" />
           </div>
-          <p v-if="demotingSelf" class="text-xs text-warning">This is the key this dashboard uses: without admin, it loses access to this page.</p>
+          <p v-if="demotingSelf" class="text-xs text-warning" role="alert">This is the key this dashboard uses: without admin, it loses access to this page.</p>
 
           <ScopeEditor id="tenant-read" v-model="form.read" label="Read" :description="READ_HELP" :empty-meaning="READ_EMPTY" :options="tagOptions" />
           <ScopeEditor id="tenant-write" v-model="form.write" label="Write" :description="WRITE_HELP" :empty-meaning="WRITE_EMPTY" :options="tagOptions" />
@@ -303,7 +311,7 @@ async function confirmAction() {
         <DialogHeader>
           <DialogTitle>API key of “{{ issued?.name }}”</DialogTitle>
           <DialogDescription>
-            {{ issued?.how === 'rotated' ? 'The previous key no longer works.' : 'The tenant exists from now on.' }}
+            {{ issued?.how === 'rotated' ? 'The previous key no longer works.' : 'Tenant created.' }}
           </DialogDescription>
         </DialogHeader>
         <Alert variant="destructive">
@@ -317,9 +325,13 @@ async function confirmAction() {
           <Input :model-value="issued?.key ?? ''" readonly class="font-mono text-xs" aria-label="API key" @focus="($event.target as HTMLInputElement).select()" />
           <Button variant="outline" size="icon" aria-label="Copy the API key" @click="copyKey"><CopyIcon /></Button>
         </div>
-        <p class="text-xs text-muted-foreground">
-          Clients send it as <code>Authorization: Bearer &lt;key&gt;</code> (<code>MNEMOS_API_KEY</code> for the CLI and git hooks).
-        </p>
+        <details class="text-xs text-muted-foreground">
+          <summary class="cursor-pointer">How to use it</summary>
+          <p class="mt-1.5">
+            Clients send it as <code>Authorization: Bearer &lt;key&gt;</code>. The CLI and the git hooks read it from their
+            environment.
+          </p>
+        </details>
         <DialogFooter>
           <Button @click="keyOpen = false">I have copied it</Button>
         </DialogFooter>
@@ -335,12 +347,12 @@ async function confirmAction() {
           <AlertDialogDescription>
             <template v-if="confirming.kind === 'rotate'">
               A new key is issued and the current one stops working on every server instance within seconds: whatever
-              uses it (ingester, CI, MCP client, git hooks) needs the new one.
+              uses it (the sync service, CI, MCP clients, git hooks) needs the new one.
               <template v-if="isSelf(confirming.tenant)"> This dashboard switches to the new key by itself.</template>
             </template>
             <template v-else>
               Its key stops working on every server instance within seconds. What it indexed and the memories it wrote stay.
-              <template v-if="isSelf(confirming.tenant)"> This dashboard uses that key and will ask for another one.</template>
+              <template v-if="isSelf(confirming.tenant)"> This dashboard uses that key: you will be signed out.</template>
             </template>
           </AlertDialogDescription>
         </AlertDialogHeader>

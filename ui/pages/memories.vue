@@ -41,6 +41,10 @@ const rows = computed(() => list.data.value?.entries ?? [])
 const total = computed(() => list.data.value?.total ?? 0)
 const counts = computed(() => stats.data.value?.by_status ?? {})
 const types = computed(() => Object.keys(stats.data.value?.by_type ?? {}).sort())
+// "No memories yet" only when there are none at all; a status tab counts as a filter.
+const none = computed(() => (stats.data.value?.total ?? 0) === 0)
+const shortId = (id: string) => id.slice(0, 8)
+const sentence = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 
 async function reject(id: string) {
   busy.value = id
@@ -61,18 +65,16 @@ async function reject(id: string) {
 
 <template>
   <div class="space-y-6">
-    <PageHeader title="Memories">
-      <template #description>
-        Memories are written searchable. This screen is for taking a wrong one back out, not for letting good ones in —
-        search returns <code class="text-xs">approved</code> entries only.
-      </template>
-    </PageHeader>
+    <PageHeader
+      title="Memories"
+      description="New memories are searchable right away. Reject one here to take it out of search results."
+    />
 
-    <EmptyState v-if="list.error.value" title="Could not load memories" :detail="list.error.value.message" />
+    <EmptyState v-if="list.error.value" tone="error" title="Could not load memories" :detail="list.error.value.message" />
 
     <template v-else>
       <div class="flex flex-wrap items-center gap-2">
-        <Tabs v-model="status">
+        <Tabs v-model="status" class="max-w-full overflow-x-auto">
           <TabsList>
             <TabsTrigger value="approved">Approved <Badge variant="secondary" class="ml-1">{{ counts.approved ?? 0 }}</Badge></TabsTrigger>
             <TabsTrigger value="rejected">Rejected <Badge variant="secondary" class="ml-1">{{ counts.rejected ?? 0 }}</Badge></TabsTrigger>
@@ -80,34 +82,36 @@ async function reject(id: string) {
             <TabsTrigger :value="ALL">All <Badge variant="secondary" class="ml-1">{{ stats.data.value?.total ?? 0 }}</Badge></TabsTrigger>
           </TabsList>
         </Tabs>
-        <Input v-model="search" placeholder="Filter by content or tag…" class="h-9 min-w-56 flex-1" />
+        <Input v-model="search" placeholder="Filter by content or tag…" class="h-9 min-w-56 flex-1" aria-label="Filter memories" />
         <Select v-model="type">
-          <SelectTrigger class="w-40"><SelectValue /></SelectTrigger>
+          <SelectTrigger class="w-40" aria-label="Memory type"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem :value="ALL">Every type</SelectItem>
-            <SelectItem v-for="t in types" :key="t" :value="t">{{ t }}</SelectItem>
+            <SelectItem v-for="t in types" :key="t" :value="t">{{ sentence(t) }}</SelectItem>
           </SelectContent>
         </Select>
       </div>
 
+      <p class="sr-only" aria-live="polite">{{ list.pending.value ? '' : `${total} ${total === 1 ? 'memory' : 'memories'}` }}</p>
+
       <EmptyState
         v-if="!rows.length && !list.pending.value"
-        title="Nothing matches"
-        detail="Memories come from your commits, the MCP tool and `mnemos memory add`."
+        :title="none ? 'No memories yet' : 'Nothing matches these filters'"
+        :detail="none ? 'Memories are extracted from commits or added by agents.' : undefined"
       />
 
-      <div v-else class="grid gap-3" :class="list.pending.value && 'opacity-60 transition-opacity'">
+      <div v-else class="grid grid-cols-1 gap-3" :class="list.pending.value && 'opacity-60 transition-opacity'" :aria-busy="list.pending.value">
         <Card v-for="m in rows" :key="m.id" class="gap-3 py-4">
           <CardContent class="flex items-start justify-between gap-4 px-4">
             <div class="min-w-0 flex-1 space-y-2">
               <div class="flex flex-wrap items-center gap-1.5">
-                <Badge>{{ m.memory_type }}</Badge>
+                <Badge>{{ sentence(m.memory_type) }}</Badge>
                 <Badge v-for="t in m.tags" :key="t" variant="outline" class="font-mono">{{ t }}</Badge>
-                <Badge v-if="m.status !== 'approved'" variant="secondary" class="text-warning">{{ m.status }}</Badge>
+                <Badge v-if="m.status !== 'approved'" variant="outline">{{ sentence(m.status) }}</Badge>
               </div>
               <p class="whitespace-pre-wrap text-sm">{{ m.content }}</p>
               <p class="font-mono text-[11px] text-muted-foreground">
-                {{ m.id }}<span v-if="m.created_at"> · {{ new Date(m.created_at).toLocaleDateString() }}</span>
+                <span :title="m.id">{{ shortId(m.id) }}</span><span v-if="m.created_at"> · {{ new Date(m.created_at).toLocaleDateString() }}</span>
               </p>
             </div>
             <Button
@@ -116,6 +120,7 @@ async function reject(id: string) {
               size="sm"
               class="shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
               :disabled="busy === m.id"
+              :aria-label="`Reject memory ${shortId(m.id)}`"
               @click="reject(m.id)"
             >
               {{ busy === m.id ? 'Rejecting…' : 'Reject' }}

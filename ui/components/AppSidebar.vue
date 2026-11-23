@@ -20,7 +20,7 @@ const groups: { label: string; items: NavItem[] }[] = [
     label: 'Observe',
     items: [
       { to: '/', label: 'Dashboard', icon: LayoutDashboardIcon },
-      { to: '/search', label: 'Search', icon: SearchIcon, allowed: isAdmin },
+      { to: '/search', label: 'Search log', icon: SearchIcon, allowed: isAdmin },
       { to: '/playground', label: 'Playground', icon: FlaskConicalIcon },
     ],
   },
@@ -43,11 +43,11 @@ const visibleGroups = computed(() =>
 const isActive = (to: string) => (to === '/' ? route.path === '/' : route.path.startsWith(to))
 
 // Shown only when it says something the name does not.
-const role = computed(() => (me.value?.admin ? 'admin' : 'member'))
+const role = computed(() => (me.value?.admin ? 'Admin' : 'Member'))
 </script>
 
 <template>
-  <Sidebar collapsible="icon">
+  <Sidebar collapsible="icon" role="navigation" aria-label="Sidebar">
     <SidebarHeader>
       <SidebarMenu>
         <SidebarMenuItem>
@@ -86,7 +86,7 @@ const role = computed(() => (me.value?.admin ? 'admin' : 'member'))
       <div v-if="me?.auth_enabled" class="flex items-center gap-1 pl-2 group-data-[collapsible=icon]:hidden">
         <p class="min-w-0 flex-1 truncate text-xs text-muted-foreground" :title="`${me.name} (${role})`">
           Signed in as <span class="font-medium text-foreground">{{ me.name }}</span>
-          <Badge v-if="role !== me.name" variant="secondary" class="ml-1 px-1.5 text-[10px]">{{ role }}</Badge>
+          <Badge v-if="role.toLowerCase() !== me.name.toLowerCase()" variant="secondary" class="ml-1 px-1.5 text-[10px]">{{ role }}</Badge>
         </p>
         <Button variant="ghost" size="icon" class="size-7 shrink-0" aria-label="Sign out" title="Sign out" @click="signOut">
           <LogOutIcon />
