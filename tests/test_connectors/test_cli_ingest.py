@@ -220,10 +220,10 @@ def test_ingest_serve_syncs_at_start_and_rereads_the_config_on_each_run(wired, m
     monkeypatch.setenv("TRACKER_TOKEN", "jira-pat")
     config_path = _write_config(tmp_path)
 
-    def fake_serve(run_once, *, interval, trigger, stop):
-        run_once()                                  # start-up sync
+    def fake_serve(run_once, *, interval, queue, stop):
+        run_once(None)                              # start-up sync: every source
         _write_config(tmp_path, projects="[ops]")   # edited while the service runs
-        run_once()                                  # what SIGHUP / the timer triggers
+        run_once({"tracker"})                       # "Sync" on one card in the dashboard
 
     monkeypatch.setattr(connectors.runner, "serve", fake_serve)
 
@@ -232,6 +232,8 @@ def test_ingest_serve_syncs_at_start_and_rereads_the_config_on_each_run(wired, m
     assert result.exit_code == 0, result.output
     assert "jira/DEMO/DEMO-1.md" in mnemos.pushed_paths
     assert "jira/OPS/OPS-1.md" in mnemos.pushed_paths
+    # The second run synced the named source only: the web site was crawled once.
+    assert sum(r.url.path == "/" and r.url.host == "docs.example.com" for r in router.requests) == 1
 
 
 def test_ingest_serve_refuses_to_start_on_a_bad_config(wired, tmp_path):
@@ -298,19 +300,19 @@ def test_ingest_serve_follows_the_server_config_and_keeps_it_through_failures(wi
     monkeypatch.setenv("TRACKER_TOKEN", "jira-pat")
     watched: list[tuple] = []
 
-    def fake_watch_revision(read_revision, initial, trigger, stop, *, poll=5.0):
-        watched.append((read_revision, initial))
+    def fake_watch_server(read_snapshot, revision, seen, queue, stop, *, ack, poll=5.0):
+        watched.append((read_snapshot, revision, seen))
 
-    def fake_serve(run_once, *, interval, trigger, stop):
-        run_once()                                   # start-up sync: DEMO
+    def fake_serve(run_once, *, interval, queue, stop):
+        run_once(None)                               # start-up sync: DEMO
         connectors_api.revision, connectors_api.sources = 2, [_server_jira("ops")]
-        run_once()                                   # after a dashboard save: OPS
+        run_once(None)                               # after a dashboard save: OPS
         connectors_api.status = 403
-        run_once()                                   # server refuses: still OPS
+        run_once(None)                               # server refuses: still OPS
         connectors_api.status, connectors_api.sources = 200, []
-        run_once()                                   # broken save: still OPS
+        run_once(None)                               # broken save: still OPS
 
-    monkeypatch.setattr(connectors.runner, "watch_revision", fake_watch_revision)
+    monkeypatch.setattr(connectors.runner, "watch_server", fake_watch_server)
     monkeypatch.setattr(connectors.runner, "serve", fake_serve)
 
     result = CliRunner().invoke(cli, ["ingest", "serve"])
@@ -321,11 +323,11 @@ def test_ingest_serve_follows_the_server_config_and_keeps_it_through_failures(wi
     jqls = [r.url.params["jql"] for r in router.requests if r.url.path == "/rest/api/2/search"]
     assert len(jqls) == 4
     assert "DEMO" in jqls[0] and all("OPS" in jql for jql in jqls[1:])
-    # The watcher starts from the revision loaded at start-up and reads the live one.
-    read_revision, initial = watched[0]
-    assert initial == 1
+    # The watcher starts from the revision loaded at start-up and reads the live snapshot.
+    read_snapshot, initial, seen = watched[0]
+    assert (initial, seen) == (1, 0)
     connectors_api.revision = 7
-    assert read_revision() == 7
+    assert read_snapshot()["revision"] == 7
 
 
 def test_ingest_serve_refuses_to_start_without_a_server_config(wired, connectors_api):

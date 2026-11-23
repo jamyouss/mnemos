@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { newSource, scopeTags, toForm, toPayload, type ConnectorSource } from './connectors'
+import { newSource, scopeTags, sourceName, syncPending, syncStalled, toForm, toPayload, type ConnectorSource } from './connectors'
 
 describe('toPayload', () => {
   it('round-trips a stored source unchanged', () => {
@@ -57,5 +57,34 @@ describe('git sources', () => {
     expect(scopeTags({ type: 'git', url: 'https://GitHub.com/acme/app.git' })).toEqual(['git:github.com/acme/app'])
     expect(scopeTags({ type: 'git', url: 'https://git.local:8443/g/sub/r/' })).toEqual(['git:git.local:8443/g/sub/r'])
     expect(scopeTags({ type: 'git', url: 'git@github.com:acme/app.git' })).toEqual([])
+  })
+})
+
+describe('sync status', () => {
+  const state = {
+    acked_id: 2,
+    requests: [
+      { id: 2, sources: null, requested_at: '2026-11-23T10:00:00+00:00' },
+      { id: 3, sources: ['wiki'], requested_at: '2026-11-23T10:00:10+00:00' },
+    ],
+  }
+
+  it('is pending only for sources an unacknowledged request names', () => {
+    expect(syncPending(state, 'wiki')).toBe(true)
+    // Request 2, for every source, was already picked up.
+    expect(syncPending(state, 'tracker')).toBe(false)
+    expect(syncPending({ ...state, acked_id: 1 }, 'tracker')).toBe(true)
+  })
+
+  it('calls a request stalled once it has waited past the threshold', () => {
+    const sent = Date.parse('2026-11-23T10:00:10+00:00')
+    expect(syncStalled(state, sent + 29_000)).toBe(false)
+    expect(syncStalled(state, sent + 31_000)).toBe(true)
+    expect(syncStalled({ ...state, acked_id: 3 }, sent + 60_000)).toBe(false)
+  })
+
+  it('names an unnamed source after its type, as the sync service does', () => {
+    expect(sourceName({ type: 'web', name: '  ' })).toBe('web')
+    expect(sourceName({ type: 'git', name: 'Lpel - Lib - Auth' })).toBe('Lpel - Lib - Auth')
   })
 })

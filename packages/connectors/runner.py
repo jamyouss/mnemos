@@ -80,32 +80,69 @@ def _run_source(source: SourceConfig, mnemos: MnemosClient, full: bool) -> list[
         ]
 
 
+class SyncQueue:
+    """Syncs waiting to run: every source, or some by name.
+
+    Requests made while a run is going on merge into the next one, so a burst
+    of "sync now" clicks costs one run, not one per click.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._everything = False
+        self._names: set[str] = set()
+        self.ready = threading.Event()
+
+    def request(self, names: Collection[str] | None = None) -> None:
+        """Queue `names`, or every source when None. An empty list queues nothing."""
+        with self._lock:
+            if names is None:
+                self._everything = True
+            elif names:
+                self._names.update(names)
+            else:
+                return
+            self.ready.set()
+
+    def take(self) -> set[str] | None:
+        """What to sync now: None for every source, else the names; empties the queue."""
+        with self._lock:
+            only = None if self._everything else set(self._names)
+            self._everything = False
+            self._names.clear()
+            self.ready.clear()
+            return only
+
+
 def serve(
-    run_once: Callable[[], object],
+    run_once: Callable[[set[str] | None], object],
     *,
     interval: float | None,
-    trigger: threading.Event,
+    queue: SyncQueue,
     stop: threading.Event,
 ) -> None:
-    """Call `run_once` now, then whenever `trigger` is set or `interval` elapses.
+    """Sync every source now, then whatever `queue` asks for, and every source
+    again whenever `interval` elapses with nothing asked.
 
-    `interval=None` waits for `trigger` only. Setting `stop` (with `trigger`, to
-    wake a pending wait) ends the loop. A run that raises is logged and the
-    service keeps going: the next run gets another chance.
+    `run_once` gets None (every source) or the names to sync. `interval=None`
+    waits for requests only. Setting `stop` (then `queue.ready`, to wake a
+    pending wait) ends the loop. A run that raises is logged and the service
+    keeps going: the next run gets another chance.
     """
+    queue.request()
     while not stop.is_set():
-        trigger.clear()
-        try:
-            run_once()
-        except Exception:  # noqa: BLE001 — a service must survive a bad run
-            logger.exception("sync run failed")
+        if not queue.ready.wait(timeout=interval):
+            queue.request()
         if stop.is_set():
             return
-        trigger.wait(timeout=interval)
+        try:
+            run_once(queue.take())
+        except Exception:  # noqa: BLE001 — a service must survive a bad run
+            logger.exception("sync run failed")
 
 
-def watch_file(path: str, trigger: threading.Event, stop: threading.Event, *, poll: float = 5.0) -> None:
-    """Set `trigger` each time `path` changes, until `stop` is set.
+def watch_file(path: str, queue: SyncQueue, stop: threading.Event, *, poll: float = 5.0) -> None:
+    """Queue every source each time `path` changes, until `stop` is set.
 
     Lets an edit sync within seconds rather than at the next `interval`. The
     inode is part of the signature: editors and config tooling replace files
@@ -125,32 +162,53 @@ def watch_file(path: str, trigger: threading.Event, stop: threading.Event, *, po
         if current != last:
             last = current
             logger.info("%s changed: resyncing", path)
-            trigger.set()
+            queue.request()
 
 
-def watch_revision(
-    read_revision: Callable[[], int],
-    initial: int,
-    trigger: threading.Event,
+def latest_request(snapshot: dict) -> int:
+    """Id of the newest sync request in a /api/connectors snapshot (0 when none)."""
+    sync = snapshot.get("sync") or {}
+    return max([int(sync.get("acked_id", 0))] + [int(r.get("id", 0)) for r in sync.get("requests") or []])
+
+
+def watch_server(
+    read_snapshot: Callable[[], dict],
+    revision: int,
+    seen: int,
+    queue: SyncQueue,
     stop: threading.Event,
     *,
+    ack: Callable[[int], object],
     poll: float = 5.0,
 ) -> None:
-    """Set `trigger` each time `read_revision()` moves away from the last value
-    seen (starting at `initial`), until `stop` is set.
+    """Follow the server's /api/connectors snapshot until `stop` is set.
 
-    The server-side twin of `watch_file`: a dashboard save bumps the stored
-    revision. A read that raises is logged and retried at the next poll; it
-    never triggers, so an unreachable server does not cause resyncs.
+    A new revision (a dashboard save) queues every source. Each sync request
+    newer than `seen` queues the sources it names. Requests up to the newest
+    seen, `seen` included, are then acknowledged so the dashboard can tell
+    they were picked up. A read that raises is logged and retried at the next
+    poll: an unreachable server causes no resync.
     """
-    last = initial
+    acked = 0
     while not stop.wait(poll):
         try:
-            current = read_revision()
+            snapshot = read_snapshot()
         except Exception as exc:  # noqa: BLE001 — the watcher must outlive a server outage
-            logger.warning("cannot read the connectors revision: %s", exc)
+            logger.warning("cannot read the connectors: %s", exc)
             continue
-        if current != last:
-            logger.info("connectors revision %s -> %s: resyncing", last, current)
-            last = current
-            trigger.set()
+        if snapshot["revision"] != revision:
+            logger.info("connectors revision %s -> %s: resyncing", revision, snapshot["revision"])
+            revision = snapshot["revision"]
+            queue.request()
+        for entry in (snapshot.get("sync") or {}).get("requests") or []:
+            if int(entry.get("id", 0)) > seen:
+                logger.info("sync request %s from %s: %s", entry["id"], entry.get("requested_by"),
+                            ", ".join(entry["sources"]) if entry.get("sources") else "every source")
+                queue.request(entry.get("sources"))
+        seen = max(seen, latest_request(snapshot))
+        if acked < seen:
+            try:
+                ack(seen)
+                acked = seen
+            except Exception as exc:  # noqa: BLE001 — retried at the next poll
+                logger.warning("cannot acknowledge sync request %s: %s", seen, exc)

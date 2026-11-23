@@ -35,7 +35,7 @@ def make_client(tmp_path, monkeypatch, backend):
 def test_absent_document_is_an_empty_config(make_client):
     body = make_client().get("/api/connectors").json()
     assert body == {"revision": 0, "writable": True, "interval": None, "sources": [],
-                    "problems": []}
+                    "problems": [], "sync": {"requests": [], "acked_id": 0, "acked_at": None}}
 
 
 def test_saved_document_is_what_the_ingester_parses(make_client, backend):
@@ -128,3 +128,55 @@ def test_ingester_key_reads_but_only_admins_write(make_client, backend):
                       json={"sources": [JIRA]}).status_code == 403
     assert client.put("/api/connectors", headers=as_("root"),
                       json={"sources": [JIRA]}).status_code == 200
+
+
+def test_sync_requests_are_numbered_and_acknowledged(make_client, backend):
+    doc_store(backend).put("connectors", {"sources": [JIRA, {"type": "web", "urls": ["https://a.example"]}]})
+    client = make_client()
+
+    one = client.post("/api/connectors/sync", json={"sources": ["tracker"]}).json()
+    every = client.post("/api/connectors/sync", json={}).json()
+    assert one["request"]["id"] == 1 and one["request"]["sources"] == ["tracker"]
+    assert every["request"]["id"] == 2 and every["request"]["sources"] is None
+    # The ingester reads them with the connectors, then acknowledges the newest.
+    assert [r["id"] for r in client.get("/api/connectors").json()["sync"]["requests"]] == [1, 2]
+    assert client.post("/api/connectors/sync/ack", json={"id": 2}).json()["acked_id"] == 2
+    # A stale acknowledgement never moves it back.
+    assert client.post("/api/connectors/sync/ack", json={"id": 1}).json()["acked_id"] == 2
+    # An unnamed source answers to its type, as in the ingester.
+    assert client.post("/api/connectors/sync", json={"sources": ["web"]}).json()["request"]["id"] == 3
+
+
+def test_sync_request_for_an_unknown_source_is_refused(make_client, backend):
+    doc_store(backend).put("connectors", {"sources": [JIRA]})
+    client = make_client()
+
+    resp = client.post("/api/connectors/sync", json={"sources": ["tracker", "ghost"]})
+    assert resp.status_code == 422 and "ghost" in resp.json()["detail"]
+    assert client.post("/api/connectors/sync", json={"sources": []}).status_code == 422
+    assert client.get("/api/connectors/sync").json()["requests"] == []
+
+
+def test_sync_keeps_only_the_latest_requests(make_client, backend):
+    client = make_client()
+    for _ in range(25):
+        client.post("/api/connectors/sync", json={})
+    ids = [r["id"] for r in client.get("/api/connectors/sync").json()["requests"]]
+    assert ids == list(range(6, 26))
+
+
+def test_ingester_key_may_request_and_acknowledge_syncs(make_client, backend):
+    doc_store(backend).put("tenants", {"tenants": {
+        "root": {"key_sha256": hash_key("root"), "admin": True, "read": "*", "write": "*"},
+        "ingester": {"key_sha256": hash_key("ingest"), "admin": False, "read": "*", "write": "*"},
+        "dev": {"key_sha256": hash_key("dev"), "admin": False, "read": "*", "write": ["acme"]},
+    }})
+    client = make_client(mnemos_auth_enabled=True, qdrant_api_key="qk")
+
+    def as_(key):
+        return {"Authorization": f"Bearer {key}"}
+
+    assert client.post("/api/connectors/sync", headers=as_("dev"), json={}).status_code == 403
+    assert client.post("/api/connectors/sync", headers=as_("root"), json={}).status_code == 200
+    assert client.post("/api/connectors/sync/ack", headers=as_("dev"), json={"id": 1}).status_code == 403
+    assert client.post("/api/connectors/sync/ack", headers=as_("ingest"), json={"id": 1}).status_code == 200

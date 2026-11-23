@@ -143,16 +143,27 @@ the others still run; the command exits 1 if anything failed.
 
 `serve` is the long-running form: it syncs every source as soon as it starts,
 then every `interval`, when the configuration changes (the server's revision,
-or the `--config` file, checked every 5 s), and immediately on `SIGHUP`:
+or the `--config` file, checked every 5 s), when the dashboard asks, and
+immediately on `SIGHUP`:
 
 | To… | Do |
 |---|---|
-| resync now | `docker compose kill -s HUP ingester` · `kubectl exec deploy/mnemos-ingester -- kill -HUP 1` |
-| resync one source, or with `--full` | `mnemos ingest run --only <name> [--full]` from anywhere |
+| resync now, every source or one | **Sync all**, or **Sync** on a source card, in the dashboard's Connectors page (`POST /api/connectors/sync`) |
+| resync now, from a shell | `docker compose kill -s HUP ingester` · `kubectl exec deploy/mnemos-ingester -- kill -HUP 1` |
+| resync one source with `--full` | `mnemos ingest run --only <name> --full` from anywhere |
 | apply an edited configuration | nothing: a save (or an edit of the `--config` file) triggers a sync within seconds, and the sources are re-read before every sync (a broken one is reported and the previous version kept). A changed `interval` needs a restart |
 | stop | `SIGTERM` — the service exits at once; an interrupted sync resumes at the next run |
 
-Without `interval`, `serve` syncs at start-up, on configuration change and on `SIGHUP` only.
+A dashboard request is stored on the server (`connectors_sync`, the last 20
+kept) and read by `serve` at its next poll, with the connectors. `serve`
+queues the sources it names, then acknowledges it (`POST
+/api/connectors/sync/ack`), which is what the page shows: *Sync requested*
+until then. Requests that arrive during a sync merge into the next one.
+Requests filed while `serve` was down are covered by its start-up sync. Only
+`serve` reading the server sees them: with `--config`, use `SIGHUP`.
+
+Without `interval`, `serve` syncs at start-up, on configuration change, on
+request and on `SIGHUP` only.
 
 ## Confluence
 

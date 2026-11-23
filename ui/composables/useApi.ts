@@ -114,6 +114,23 @@ export interface ConnectorsResponse {
   sources: ConnectorSource[]
   /** What the ingester would reject; token variables are not checked here. */
   problems: string[]
+  sync: ConnectorSyncState
+}
+
+/** A "sync now" filed for the sync service; `sources: null` means every source. */
+export interface ConnectorSyncRequest {
+  id: number
+  sources: string[] | null
+  requested_at: string
+  requested_by: string
+}
+
+export interface ConnectorSyncState {
+  /** The latest requests, oldest first. */
+  requests: ConnectorSyncRequest[]
+  /** Every request up to this id has been picked up by the sync service. */
+  acked_id: number
+  acked_at: string | null
 }
 
 export interface ProjectsResponse {
@@ -299,6 +316,15 @@ export function useApi() {
 
     saveConnectors: (body: { interval: string; sources: ConnectorSource[]; revision: number }) =>
       request<ConnectorsResponse>('/api/connectors', { method: 'PUT', body: JSON.stringify(body) }),
+
+    connectorSync: () => request<ConnectorSyncState>('/api/connectors/sync'),
+
+    /** Every source when `sources` is omitted. */
+    requestConnectorSync: (sources?: string[]) =>
+      request<ConnectorSyncState & { request: ConnectorSyncRequest }>('/api/connectors/sync', {
+        method: 'POST',
+        body: JSON.stringify(sources ? { sources } : {}),
+      }),
 
     projects: () => request<ProjectsResponse>('/api/projects'),
 

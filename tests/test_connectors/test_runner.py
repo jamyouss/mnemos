@@ -7,7 +7,7 @@ import pytest
 
 import connectors.transport
 from connectors.config import ConnectorsConfig, JiraConfig, WebConfig
-from connectors.runner import run_sources, serve, watch_file, watch_revision
+from connectors.runner import SyncQueue, run_sources, serve, watch_file, watch_server
 
 from .conftest import FakeMnemos, Router
 
@@ -121,114 +121,151 @@ def test_full_forces_a_push_of_unchanged_documents(sources, mnemos: FakeMnemos):
 # ---------------------------------------------------------------------------
 
 
-def test_serve_syncs_at_start_then_on_each_trigger_until_stopped():
-    trigger, stop = threading.Event(), threading.Event()
-    runs: list[int] = []
+def test_serve_syncs_at_start_then_on_each_request_until_stopped():
+    queue, stop = SyncQueue(), threading.Event()
+    runs: list[set[str] | None] = []
 
-    def run_once() -> None:
-        runs.append(len(runs))
-        if len(runs) < 3:
-            trigger.set()  # what SIGHUP does: resync now
+    def run_once(only) -> None:
+        runs.append(only)
+        if len(runs) == 1:
+            queue.request(["wiki"])  # what "Sync" on one source does
+        elif len(runs) == 2:
+            queue.request()  # what SIGHUP or "Sync all" does
         else:
             stop.set()
 
-    serve(run_once, interval=None, trigger=trigger, stop=stop)
+    serve(run_once, interval=None, queue=queue, stop=stop)
 
-    assert runs == [0, 1, 2]
+    assert runs == [None, {"wiki"}, None]
+
+
+def test_requests_made_during_a_run_merge_into_the_next_one():
+    queue = SyncQueue()
+    queue.request(["wiki"])
+    queue.request(["jira"])
+    assert queue.take() == {"wiki", "jira"}
+    queue.request(["wiki"])
+    queue.request()
+    assert queue.take() is None  # every source covers the named one
+    queue.request([])
+    assert not queue.ready.is_set()
 
 
 def test_serve_resyncs_after_the_interval():
-    trigger, stop = threading.Event(), threading.Event()
-    runs: list[int] = []
+    queue, stop = SyncQueue(), threading.Event()
+    runs: list[set[str] | None] = []
 
-    def run_once() -> None:
-        runs.append(1)
+    def run_once(only) -> None:
+        runs.append(only)
         if len(runs) == 2:
             stop.set()
 
-    serve(run_once, interval=0.01, trigger=trigger, stop=stop)
+    serve(run_once, interval=0.01, queue=queue, stop=stop)
 
-    assert len(runs) == 2
+    assert runs == [None, None]
 
 
 def test_serve_keeps_running_when_a_run_raises():
-    trigger, stop = threading.Event(), threading.Event()
+    queue, stop = SyncQueue(), threading.Event()
     runs: list[int] = []
 
-    def run_once() -> None:
+    def run_once(_only) -> None:
         runs.append(1)
         if len(runs) == 1:
             raise RuntimeError("mnemos unreachable")
         stop.set()
 
-    serve(run_once, interval=0.01, trigger=trigger, stop=stop)
+    serve(run_once, interval=0.01, queue=queue, stop=stop)
 
     assert len(runs) == 2
 
 
-def test_watch_file_triggers_on_an_atomic_replace(tmp_path):
+def test_watch_file_queues_a_sync_on_an_atomic_replace(tmp_path):
     import os
 
     path = tmp_path / "connectors.yaml"
     path.write_text("interval: 6h\n")
-    trigger, stop = threading.Event(), threading.Event()
-    thread = threading.Thread(target=watch_file, args=(str(path), trigger, stop), kwargs={"poll": 0.01})
+    queue, stop = SyncQueue(), threading.Event()
+    thread = threading.Thread(target=watch_file, args=(str(path), queue, stop), kwargs={"poll": 0.01})
     thread.start()
     try:
-        assert not trigger.wait(0.05)  # nothing changed yet
+        assert not queue.ready.wait(0.05)  # nothing changed yet
         # What the dashboard does: same size, possibly same mtime, new inode.
         replacement = tmp_path / "next.yaml"
         replacement.write_text("interval: 1h\n")
         os.replace(replacement, path)
-        assert trigger.wait(2)
+        assert queue.ready.wait(2)
+        assert queue.take() is None
     finally:
         stop.set()
         thread.join()
 
 
-def test_watch_revision_triggers_on_a_new_revision_only():
-    trigger, stop = threading.Event(), threading.Event()
-    # Same revision, a failed read, same again, then a dashboard save.
-    answers = iter([3, RuntimeError("server down"), 3, 4])
-    triggered_before_the_save: list[bool] = []
+def _snapshot(revision: int, requests: list[dict], acked: int = 0) -> dict:
+    return {"revision": revision, "sync": {"requests": requests, "acked_id": acked}}
 
-    def read_revision() -> int:
-        answer = next(answers, 4)
-        if answer == 4 and not triggered_before_the_save:
-            triggered_before_the_save.append(trigger.is_set())
+
+def _watch(snapshots: list, revision: int, seen: int):
+    """Run watch_server over `snapshots` (an exception entry is a failed read); return (queue, acks)."""
+    queue, stop = SyncQueue(), threading.Event()
+    acks: list[int] = []
+    answers = iter(snapshots)
+
+    def read():
+        answer = next(answers, None)
+        if answer is None:
+            stop.set()
+            raise RuntimeError("done")
         if isinstance(answer, Exception):
             raise answer
         return answer
 
-    thread = threading.Thread(
-        target=watch_revision, args=(read_revision, 3, trigger, stop), kwargs={"poll": 0.01}
-    )
-    thread.start()
-    try:
-        assert trigger.wait(2)
-        assert triggered_before_the_save == [False]
-        trigger.clear()
-        assert not trigger.wait(0.1)  # revision 4 stays put: no second resync
-    finally:
-        stop.set()
-        thread.join()
+    watch_server(read, revision, seen, queue, stop, ack=acks.append, poll=0.001)
+    return queue, acks
 
 
-def test_watch_revision_survives_a_server_outage():
-    trigger, stop = threading.Event(), threading.Event()
-    reads: list[int] = []
+def test_watch_server_queues_a_dashboard_save():
+    queue, _ = _watch([_snapshot(3, []), RuntimeError("server down"), _snapshot(4, [])], revision=3, seen=0)
+    assert queue.take() is None
 
-    def read_revision() -> int:
-        reads.append(1)
-        raise RuntimeError("connection refused")
 
-    thread = threading.Thread(
-        target=watch_revision, args=(read_revision, 1, trigger, stop), kwargs={"poll": 0.01}
-    )
-    thread.start()
-    try:
-        assert not trigger.wait(0.1)
-    finally:
-        stop.set()
-        thread.join()
-    assert len(reads) > 1  # kept polling after the first failure
+def test_watch_server_ignores_an_unchanged_revision_and_failed_reads():
+    queue, acks = _watch([_snapshot(3, []), RuntimeError("server down"), _snapshot(3, [])], revision=3, seen=0)
+    assert not queue.ready.is_set()
+    assert acks == []
+
+
+def test_watch_server_queues_new_sync_requests_and_acknowledges_them():
+    old = {"id": 1, "sources": None}
+    snapshots = [
+        _snapshot(3, [old]),
+        _snapshot(3, [old, {"id": 2, "sources": ["wiki"]}]),
+        _snapshot(3, [old, {"id": 2, "sources": ["wiki"]}, {"id": 3, "sources": ["jira"]}]),
+    ]
+    queue, acks = _watch(snapshots, revision=3, seen=1)
+
+    # Request 1 predates start-up: covered by the start-up sync, acknowledged, not queued again.
+    assert queue.take() == {"wiki", "jira"}
+    assert acks == [1, 2, 3]
+
+
+def test_watch_server_retries_a_failed_acknowledgement():
+    queue, stop = SyncQueue(), threading.Event()
+    calls: list[int] = []
+    reads = iter([_snapshot(1, [{"id": 5, "sources": None}])] * 2)
+
+    def ack(request_id: int) -> None:
+        calls.append(request_id)
+        if len(calls) == 1:
+            raise RuntimeError("server down")
+
+    def read():
+        answer = next(reads, None)
+        if answer is None:
+            stop.set()
+            raise RuntimeError("done")
+        return answer
+
+    watch_server(read, 1, 0, queue, stop, ack=ack, poll=0.001)
+    assert calls == [5, 5]
+    assert queue.take() is None

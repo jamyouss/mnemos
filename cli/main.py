@@ -1188,12 +1188,12 @@ def ingest_run(config_path: str | None, only: tuple[str, ...], full: bool) -> No
 def ingest_serve(config_path: str | None) -> None:
     """Sync at start-up, then every `interval` of the connectors config.
 
-    Without --config the sources come from the server (/api/connectors) and a
-    save from the dashboard resyncs within seconds; with --config, editing the
-    file does. Send SIGHUP to resync now (`docker compose kill -s HUP
-    ingester`, `kill -HUP 1` in a pod). The config is re-read before every
-    run; a broken or unreachable one keeps the previous version. A changed
-    `interval` needs a restart.
+    Without --config the sources come from the server (/api/connectors): a
+    save from the dashboard resyncs within seconds, and so does its "Sync now"
+    (every source or one). With --config, editing the file does. Send SIGHUP
+    to resync now (`docker compose kill -s HUP ingester`, `kill -HUP 1` in a
+    pod). The config is re-read before every run; a broken or unreachable one
+    keeps the previous version. A changed `interval` needs a restart.
     """
     import signal
     import threading
@@ -1203,18 +1203,19 @@ def ingest_serve(config_path: str | None) -> None:
     from connectors.config import ConfigError
 
     revision, config = _load_connectors(config_path)
-    trigger, stop = threading.Event(), threading.Event()
+    queue, stop = connectors.runner.SyncQueue(), threading.Event()
 
-    def run_once() -> None:
+    def run_once(only: set[str] | None) -> None:
         nonlocal config
         try:
             _, config = _read_connectors(config_path)
         except ConfigError as exc:
             console.print(f"[red]{exc}[/red]\n[yellow]keeping the previous configuration[/yellow]")
-        _print_sync_results(f"Sync {datetime.now():%Y-%m-%d %H:%M:%S}", _sync_config(config))
+        scope = f" ({', '.join(sorted(only))})" if only else ""
+        _print_sync_results(f"Sync {datetime.now():%Y-%m-%d %H:%M:%S}{scope}", _sync_config(config, only))
 
     def resync(_signum, _frame) -> None:
-        trigger.set()
+        queue.request()
 
     def shutdown(_signum, _frame) -> None:
         # Syncs are idempotent: dropping one half-way only defers work to the next run.
@@ -1223,13 +1224,17 @@ def ingest_serve(config_path: str | None) -> None:
     if config_path:
         origin = config_path
         watcher = threading.Thread(
-            target=connectors.runner.watch_file, args=(config_path, trigger, stop), daemon=True
+            target=connectors.runner.watch_file, args=(config_path, queue, stop), daemon=True
         )
     else:
         origin = f"{_base_url()}/api/connectors"
+        # Requests filed before start-up are covered by the start-up sync of
+        # every source; the watcher acknowledges them at its first poll.
+        seen = connectors.runner.latest_request(_server_connectors())
         watcher = threading.Thread(
-            target=connectors.runner.watch_revision,
-            args=(lambda: _server_connectors()["revision"], revision, trigger, stop),
+            target=connectors.runner.watch_server,
+            args=(_server_connectors, revision, seen, queue, stop),
+            kwargs={"ack": _ack_sync},
             daemon=True,
         )
     previous = {sig: signal.signal(sig, handler) for sig, handler in
@@ -1238,14 +1243,24 @@ def ingest_serve(config_path: str | None) -> None:
     every = f"every {config.interval}s, " if config.interval else ""
     console.print(
         f"Serving {len(config.sources)} source(s) from {origin}: "
-        f"sync now, then {every}on config change and on SIGHUP."
+        f"sync now, then {every}on config change, on request and on SIGHUP."
     )
     try:
-        connectors.runner.serve(run_once, interval=config.interval, trigger=trigger, stop=stop)
+        connectors.runner.serve(run_once, interval=config.interval, queue=queue, stop=stop)
     finally:
         stop.set()
         for sig, handler in previous.items():
             signal.signal(sig, handler)
+
+
+def _ack_sync(request_id: int) -> None:
+    """Tell the server every sync request up to `request_id` was picked up."""
+    if request_id <= 0:
+        return
+    from connectors.transport import make_client
+
+    with make_client(headers=_headers(), timeout=10) as http:
+        http.post(f"{_base_url()}/api/connectors/sync/ack", json={"id": request_id}).raise_for_status()
 
 
 if __name__ == "__main__":

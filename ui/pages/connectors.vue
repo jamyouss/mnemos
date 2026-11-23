@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import type { Component } from 'vue'
-import { BookOpenIcon, GitBranchIcon, GlobeIcon, PlugIcon, PlusIcon, RefreshCwIcon, TicketIcon, TriangleAlertIcon } from '@lucide/vue'
+import { BookOpenIcon, GitBranchIcon, GlobeIcon, PlugIcon, PlusIcon, RefreshCcwDotIcon, RefreshCwIcon, TicketIcon, TriangleAlertIcon } from '@lucide/vue'
+import { useIntervalFn } from '@vueuse/core'
 import { toast } from 'vue-sonner'
-import { ApiError, type ConnectorsResponse } from '~/composables/useApi'
-import { newSource, toForm, toPayload, type SourceForm, type SourceType } from '~/utils/connectors'
+import { ApiError, type ConnectorsResponse, type ConnectorSyncState } from '~/composables/useApi'
+import {
+  newSource, pendingRequests, sourceName, syncPending, syncStalled, toForm, toPayload, type SourceForm, type SourceType,
+} from '~/utils/connectors'
 import { canReadSetup, isAdmin } from '~/utils/tenants'
 
 definePageMeta({ title: 'Connectors' })
@@ -48,6 +51,45 @@ const serialize = (i: string, list: SourceForm[]) => JSON.stringify({ interval: 
 const savedState = computed(() => (data.value ? serialize(data.value.interval ?? '', data.value.sources.map(toForm)) : ''))
 const dirty = computed(() => !!data.value && serialize(interval.value, sources.value) !== savedState.value)
 const editable = computed(() => admin.value && (data.value?.writable ?? false))
+
+// Sync requests and how far the sync service picked them up. Kept apart from
+// `data`: polling them must not reset a form being edited.
+const sync = ref<ConnectorSyncState | null>(null)
+watch(data, (cfg) => { if (cfg) sync.value = cfg.sync }, { immediate: true })
+const savedNames = computed(() => new Set((data.value?.sources ?? []).map(sourceName)))
+const pendingAll = computed(() => pendingRequests(sync.value).some((r) => r.sources === null))
+// Advanced by the poller, which only runs while something waits.
+const now = ref(Date.now())
+const stalled = computed(() => syncStalled(sync.value, now.value))
+// A sync runs the saved configuration, never the form.
+const syncBlocked = computed(() => (dirty.value ? 'Save or discard your changes first: a sync runs the saved configuration.' : ''))
+
+async function requestSync(names?: string[]) {
+  try {
+    sync.value = await api.requestConnectorSync(names)
+    toast.success(names ? `Sync of ${names[0]} requested` : 'Sync of every source requested', {
+      description: 'The sync service picks it up within seconds.',
+    })
+  } catch (e) {
+    toast.error('Could not request a sync', { description: e instanceof Error ? e.message : String(e) })
+  }
+}
+
+// Poll only while a request waits for the sync service.
+const poller = useIntervalFn(async () => {
+  now.value = Date.now()
+  const before = sync.value?.acked_id ?? 0
+  try {
+    sync.value = await api.connectorSync()
+  } catch {
+    return // the next tick tries again
+  }
+  if (sync.value.acked_id > before) {
+    toast.success('The sync service started the sync', { description: 'Chunk counts grow as documents land: Refresh to see them.' })
+    refreshNuxtData('connector-tags')
+  }
+}, 3000, { immediate: false })
+watch(() => pendingRequests(sync.value).length > 0, (waiting) => (waiting ? poller.resume() : poller.pause()), { immediate: true })
 
 const addable: { type: SourceType; label: string; icon: Component }[] = [
   { type: 'confluence', label: 'Confluence spaces', icon: BookOpenIcon },
@@ -110,6 +152,16 @@ onBeforeRouteLeave(() => {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        <Button
+          v-if="data?.sources.length"
+          variant="outline"
+          size="sm"
+          :disabled="!!syncBlocked || pendingAll"
+          :title="syncBlocked || undefined"
+          @click="requestSync()"
+        >
+          <RefreshCcwDotIcon :class="pendingAll && 'animate-spin'" /> Sync all
+        </Button>
         <Button variant="outline" size="sm" @click="refresh()"><RefreshCwIcon /> Refresh</Button>
       </template>
     </PageHeader>
@@ -142,12 +194,21 @@ onBeforeRouteLeave(() => {
         </AlertDescription>
       </Alert>
 
+      <Alert v-if="stalled">
+        <TriangleAlertIcon />
+        <AlertTitle>The sync service has not picked up the request</AlertTitle>
+        <AlertDescription>
+          It reads requests every few seconds while <code>mnemos ingest serve</code> runs against this server. Check that
+          it is running and that its key can read the connectors.
+        </AlertDescription>
+      </Alert>
+
       <Card>
         <CardHeader>
           <CardTitle>Schedule</CardTitle>
           <CardDescription>
             How often sources are resynced: <code>45s</code>, <code>30m</code>, <code>6h</code>, <code>1d</code>. Leave blank
-            to sync only when sources change. A new interval needs a restart of the sync service.
+            to sync only when sources change or on request. A new interval needs a restart of the sync service.
           </CardDescription>
         </CardHeader>
         <CardContent class="space-y-1.5">
@@ -162,7 +223,11 @@ onBeforeRouteLeave(() => {
         v-model="sources[i]!"
         :editable="editable"
         :indexed="indexed"
+        :saved="savedNames.has(sourceName(s))"
+        :pending="syncPending(sync, sourceName(s))"
+        :sync-blocked="syncBlocked"
         @remove="remove(s.id)"
+        @sync="requestSync([sourceName(s)])"
       />
 
       <EmptyState

@@ -165,10 +165,18 @@ answers `409` and nothing is overwritten; the page offers to refresh. Details:
 
 Edits the server's `connectors` configuration: the sync `interval` and one card per
 Confluence, Jira, web or git source, with the fields of
-[CONNECTORS.md](CONNECTORS.md#configuration-file). Each card shows its scope
-tags (`jira:OPS`, `web:docs.example.com`) and how many chunks
-`mnemos_knowledge` (or `mnemos_code`, for a git source) holds under each — `not synced yet` is the answer to "did
-the ingester ever run?".
+[CONNECTORS.md](CONNECTORS.md#configuration-file). Saved sources start
+collapsed to their name, type and chunk count; a click on the header opens
+the form. Each card shows its scope tags (`jira:OPS`, `web:docs.example.com`)
+and how many chunks `mnemos_knowledge` (or `mnemos_code`, for a git source)
+holds under each — `not synced yet` is the answer to "did the ingester ever
+run?".
+
+**Sync all** in the header and **Sync** on a saved card ask the ingester to
+sync now. The card shows *Sync requested* until the ingester picks the request
+up (within ~5 s); a warning appears when it has not after 30 s, which usually
+means `mnemos ingest serve` is not running. Both are disabled while the form
+has unsaved changes: a sync runs the saved configuration.
 
 The server validates with the ingester's own parser and refuses a
 configuration the ingester would reject, listing every problem; one that is

@@ -168,3 +168,29 @@ export function scopeTags(source: ConnectorSource): string[] {
     return `${source.type}:${scope}`
   })
 }
+
+/** The name the server and the sync service know a source by: its own, else its type. */
+export function sourceName(source: Pick<ConnectorSource, 'type' | 'name'>): string {
+  return source.name?.trim() || source.type
+}
+
+interface SyncState {
+  requests: { id: number; sources: string[] | null; requested_at: string }[]
+  acked_id: number
+}
+
+/** Requests the sync service has not picked up yet. */
+export function pendingRequests(state: SyncState | null | undefined) {
+  return state ? state.requests.filter((r) => r.id > state.acked_id) : []
+}
+
+/** Whether a pending request covers `name` (every-source requests cover them all). */
+export function syncPending(state: SyncState | null | undefined, name: string): boolean {
+  return pendingRequests(state).some((r) => r.sources === null || r.sources.includes(name))
+}
+
+/** Whether the oldest pending request has waited longer than `afterMs`: the sync service is likely not running. */
+export function syncStalled(state: SyncState | null | undefined, now: number, afterMs = 30_000): boolean {
+  const oldest = pendingRequests(state)[0]
+  return !!oldest && now - Date.parse(oldest.requested_at) > afterMs
+}

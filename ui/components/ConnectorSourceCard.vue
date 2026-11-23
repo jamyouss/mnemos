@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BookOpenIcon, GitBranchIcon, GlobeIcon, KeyRoundIcon, TicketIcon, Trash2Icon } from '@lucide/vue'
+import { BookOpenIcon, ChevronDownIcon, GitBranchIcon, GlobeIcon, KeyRoundIcon, RefreshCcwDotIcon, TicketIcon, Trash2Icon } from '@lucide/vue'
 import { DEPLOYMENTS, GIT_COLLECTIONS, scopeTags, toPayload, type Deployment, type GitCollection, type SourceForm } from '~/utils/connectors'
 
 const source = defineModel<SourceForm>({ required: true })
@@ -7,8 +7,16 @@ const props = defineProps<{
   editable: boolean
   /** Chunks per tag in the knowledge and code collections; undefined while loading, null when unavailable. */
   indexed?: Record<string, number> | null
+  /** In the saved configuration: only those can be synced, and they start collapsed. */
+  saved: boolean
+  /** A sync request covering this source waits for the sync service. */
+  pending: boolean
+  /** Why "Sync" is unavailable; empty when it can be used. */
+  syncBlocked: string
 }>()
-const emit = defineEmits<{ remove: [] }>()
+const emit = defineEmits<{ remove: []; sync: [] }>()
+
+const open = ref(!props.saved)
 
 const meta = {
   confluence: { label: 'Confluence', icon: BookOpenIcon, keys: 'Spaces', keysHint: 'Space keys, e.g. ENG, OPS', url: 'https://wiki.example.com or https://<site>.atlassian.net', token: 'CONFLUENCE_TOKEN' },
@@ -29,18 +37,48 @@ function deploymentName(d: Deployment) {
 const m = computed(() => meta[source.value.type])
 const id = (field: string) => `${source.value.id}-${field}`
 const scopes = computed(() => scopeTags(toPayload(source.value)))
+// One line for the collapsed header; the footer keeps the per-tag detail.
+const summary = computed(() => {
+  if (!scopes.value.length || props.indexed === null) return ''
+  if (props.indexed === undefined) return 'counting…'
+  const total = scopes.value.reduce((sum, tag) => sum + (props.indexed?.[tag] ?? 0), 0)
+  return total ? `${total.toLocaleString()} chunks` : 'not synced yet'
+})
 </script>
 
 <template>
-  <Card>
+  <Card :class="!open && 'py-4'">
     <CardHeader class="flex flex-row items-center gap-3 space-y-0">
-      <div class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted">
-        <component :is="m.icon" class="size-4" />
-      </div>
-      <div class="min-w-0 flex-1">
-        <CardTitle class="truncate text-base">{{ source.name.trim() || m.label }}</CardTitle>
-        <CardDescription>{{ m.label }}</CardDescription>
-      </div>
+      <button
+        type="button"
+        class="-m-1 flex min-w-0 flex-1 items-center gap-3 rounded-lg p-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        :aria-expanded="open"
+        :aria-controls="id('body')"
+        @click="open = !open"
+      >
+        <div class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted">
+          <component :is="m.icon" class="size-4" />
+        </div>
+        <div class="min-w-0 flex-1">
+          <CardTitle class="truncate text-base">{{ source.name.trim() || m.label }}</CardTitle>
+          <CardDescription class="truncate">
+            {{ m.label }}<template v-if="summary"> · {{ summary }}</template>
+          </CardDescription>
+        </div>
+        <ChevronDownIcon class="size-4 shrink-0 text-muted-foreground transition-transform" :class="open && 'rotate-180'" />
+      </button>
+      <Badge v-if="pending" variant="secondary" class="hidden sm:inline-flex" role="status">Sync requested</Badge>
+      <Button
+        v-if="props.saved"
+        variant="outline"
+        size="sm"
+        :disabled="!!props.syncBlocked || props.pending"
+        :title="props.syncBlocked || undefined"
+        :aria-label="`Sync ${source.name.trim() || m.label} now`"
+        @click="emit('sync')"
+      >
+        <RefreshCcwDotIcon :class="props.pending && 'animate-spin'" /> Sync
+      </Button>
       <Button
         v-if="props.editable"
         variant="ghost"
@@ -53,6 +91,7 @@ const scopes = computed(() => scopeTags(toPayload(source.value)))
       </Button>
     </CardHeader>
 
+    <div v-show="open" :id="id('body')" class="flex flex-col gap-6">
     <CardContent class="grid gap-4 md:grid-cols-2">
       <div class="space-y-1.5">
         <Label :for="id('name')">Name</Label>
@@ -193,5 +232,6 @@ const scopes = computed(() => scopeTags(toPayload(source.value)))
         </span>
       </Badge>
     </CardFooter>
+    </div>
   </Card>
 </template>
