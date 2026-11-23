@@ -10,24 +10,28 @@ import {
   ZapIcon,
 } from '@lucide/vue'
 import { byIntent, latencyStats, PERIODS, rates, scoreBuckets, since, timeSeries, topFiles, type Period } from '~/utils/queryLog'
+import { isAdmin } from '~/utils/tenants'
 
 definePageMeta({ title: 'Dashboard' })
 useHead({ title: 'Dashboard' })
 
 const api = useApi()
 const period = ref<Period>('7d')
+const { data: me } = await useWhoami()
+// The query log and the configuration are for admins only: not even asked for otherwise.
+const admin = computed(() => isAdmin(me.value))
 
 // Independent and lazy: one failing source greys out its own card, not the page.
 const status = useAsyncData('status', () => api.status(), { lazy: true })
 // 5000 is the server's cap per call; enough for 30 days of a single developer.
-const log = useAsyncData('log-dashboard', () => api.queryLog({ limit: 5000 }), { lazy: true })
+const log = useAsyncData('log-dashboard', () => api.queryLog({ limit: 5000 }), { lazy: true, immediate: admin.value })
 const memory = useAsyncData('memory-stats', () => api.memoryStats(), { lazy: true })
 const health = useAsyncData('health-deps', () => api.healthDeps(), { lazy: true })
-const config = useAsyncData('config', () => api.config(), { lazy: true })
+const config = useAsyncData('config', () => api.config(), { lazy: true, immediate: admin.value })
 const projects = useAsyncData('facets-code-tags', () => api.facets('mnemos_code', 'tags', 10), { lazy: true })
 
 function refreshAll() {
-  for (const source of [status, log, memory, health, config, projects]) source.refresh()
+  for (const source of admin.value ? [status, log, memory, health, config, projects] : [status, memory, health, projects]) source.refresh()
 }
 
 // ---- Query log, narrowed to the selected period -------------------------
@@ -99,12 +103,14 @@ const fmtMs = (x: number) => (x >= 1000 ? `${(x / 1000).toFixed(1)} s` : `${Math
   <div class="space-y-6">
     <PageHeader title="Dashboard" description="What the index holds, how search behaves, and what is switched on.">
       <template #actions>
-        <label class="flex items-center gap-2 text-sm text-muted-foreground">
-          <Switch v-model="playground.include.value" /> Playground
-        </label>
-        <ToggleGroup v-model="period" type="single" variant="outline" size="sm">
-          <ToggleGroupItem v-for="(p, id) in PERIODS" :key="id" :value="id" :aria-label="p.label">{{ id }}</ToggleGroupItem>
-        </ToggleGroup>
+        <template v-if="admin">
+          <label class="flex items-center gap-2 text-sm text-muted-foreground">
+            <Switch v-model="playground.include.value" /> Playground
+          </label>
+          <ToggleGroup v-model="period" type="single" variant="outline" size="sm">
+            <ToggleGroupItem v-for="(p, id) in PERIODS" :key="id" :value="id" :aria-label="p.label">{{ id }}</ToggleGroupItem>
+          </ToggleGroup>
+        </template>
         <Button variant="outline" size="sm" @click="refreshAll">
           <RefreshCwIcon />
           Refresh
@@ -117,26 +123,36 @@ const fmtMs = (x: number) => (x >= 1000 ? `${(x / 1000).toFixed(1)} s` : `${Math
       <AlertDescription>GET /api/status failed. Check the stack is up: <code>docker compose ps</code>.</AlertDescription>
     </Alert>
 
+    <Alert v-if="me && !admin">
+      <AlertTitle>Index and memories only</AlertTitle>
+      <AlertDescription>
+        Search traffic and retrieval settings come from the query log and the configuration, which only admin keys may
+        read. This dashboard uses the key of tenant “{{ me.name }}”.
+      </AlertDescription>
+    </Alert>
+
     <HealthStrip :health="health.data.value" :pending="health.pending.value" :log-enabled="log.data.value?.enabled" />
 
     <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
       <StatCard label="Indexed chunks" :icon="DatabaseIcon" :value="status.data.value ? totalChunks.toLocaleString() : '…'" :hint="`${collections.length} collections`" />
-      <StatCard label="Searches" :icon="ActivityIcon" :value="entries.length.toLocaleString()" :hint="PERIODS[period].label" />
-      <StatCard
-        label="p95 latency"
-        :icon="GaugeIcon"
-        :value="latency.count ? fmtMs(latency.p95) : '—'"
-        :tone="latency.p95 > 2000 ? 'warning' : 'default'"
-        :hint="latency.count ? `p50 ${fmtMs(latency.p50)}` : 'no searches'"
-      />
-      <StatCard label="Cache hits" :icon="ZapIcon" :value="entries.length ? fmtPct(shares.cacheHit) : '—'" hint="answered from the semantic cache" />
-      <StatCard
-        label="Empty results"
-        :icon="SearchXIcon"
-        :value="entries.length ? fmtPct(shares.zeroResults) : '—'"
-        :tone="shares.zeroResults > 0.1 ? 'warning' : 'default'"
-        hint="searches that returned nothing"
-      />
+      <template v-if="admin">
+        <StatCard label="Searches" :icon="ActivityIcon" :value="entries.length.toLocaleString()" :hint="PERIODS[period].label" />
+        <StatCard
+          label="p95 latency"
+          :icon="GaugeIcon"
+          :value="latency.count ? fmtMs(latency.p95) : '—'"
+          :tone="latency.p95 > 2000 ? 'warning' : 'default'"
+          :hint="latency.count ? `p50 ${fmtMs(latency.p50)}` : 'no searches'"
+        />
+        <StatCard label="Cache hits" :icon="ZapIcon" :value="entries.length ? fmtPct(shares.cacheHit) : '—'" hint="answered from the semantic cache" />
+        <StatCard
+          label="Empty results"
+          :icon="SearchXIcon"
+          :value="entries.length ? fmtPct(shares.zeroResults) : '—'"
+          :tone="shares.zeroResults > 0.1 ? 'warning' : 'default'"
+          hint="searches that returned nothing"
+        />
+      </template>
       <StatCard
         label="Memories"
         :icon="BrainIcon"
@@ -153,7 +169,7 @@ const fmtMs = (x: number) => (x >= 1000 ? `${(x / 1000).toFixed(1)} s` : `${Math
     </Alert>
 
     <div class="grid gap-4 lg:grid-cols-3">
-      <Card class="lg:col-span-2">
+      <Card v-if="admin" class="lg:col-span-2">
         <CardHeader>
           <CardTitle>Search traffic</CardTitle>
           <CardDescription>Searches per {{ PERIODS[period].bucket }}, by intent</CardDescription>
@@ -177,7 +193,7 @@ const fmtMs = (x: number) => (x >= 1000 ? `${(x / 1000).toFixed(1)} s` : `${Math
         </CardContent>
       </Card>
 
-      <Card>
+      <Card :class="!admin && 'lg:col-span-3'">
         <CardHeader>
           <CardTitle>Index</CardTitle>
           <CardDescription>Chunks per collection</CardDescription>
@@ -188,7 +204,7 @@ const fmtMs = (x: number) => (x >= 1000 ? `${(x / 1000).toFixed(1)} s` : `${Math
       </Card>
     </div>
 
-    <div class="grid gap-4 lg:grid-cols-3">
+    <div v-if="admin" class="grid gap-4 lg:grid-cols-3">
       <Card class="lg:col-span-2">
         <CardHeader>
           <CardTitle>Latency</CardTitle>
@@ -231,7 +247,7 @@ const fmtMs = (x: number) => (x >= 1000 ? `${(x / 1000).toFixed(1)} s` : `${Math
         </CardContent>
       </Card>
 
-      <Card>
+      <Card v-if="admin">
         <CardHeader>
           <CardTitle>Most returned files</CardTitle>
           <CardDescription>One topping this list across unrelated queries is usually noise.</CardDescription>
@@ -252,7 +268,7 @@ const fmtMs = (x: number) => (x >= 1000 ? `${(x / 1000).toFixed(1)} s` : `${Math
       </Card>
     </div>
 
-    <Card>
+    <Card v-if="admin">
       <CardHeader class="flex flex-row items-start justify-between gap-4">
         <div class="space-y-1.5">
           <CardTitle class="flex items-center gap-2"><SparklesIcon class="size-4" /> Retrieval stages</CardTitle>

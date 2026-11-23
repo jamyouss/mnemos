@@ -1,15 +1,19 @@
 <script setup lang="ts">
 import type { Component } from 'vue'
-import { BookOpenIcon, GitBranchIcon, GlobeIcon, InfoIcon, PlugIcon, PlusIcon, RotateCwIcon, TicketIcon, TriangleAlertIcon } from '@lucide/vue'
+import { BookOpenIcon, GitBranchIcon, GlobeIcon, PlugIcon, PlusIcon, RotateCwIcon, TicketIcon, TriangleAlertIcon } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import { ApiError, type ConnectorsResponse } from '~/composables/useApi'
 import { newSource, toForm, toPayload, type SourceForm, type SourceType } from '~/utils/connectors'
+import { canReadSetup, isAdmin } from '~/utils/tenants'
 
 definePageMeta({ title: 'Connectors' })
 useHead({ title: 'Connectors' })
 
 const api = useApi()
-const { data, error, refresh } = await useAsyncData('connectors', () => api.connectors())
+const { data: me } = await useWhoami()
+const admin = computed(() => isAdmin(me.value))
+const readable = computed(() => canReadSetup(me.value))
+const { data, error, refresh } = await useAsyncData('connectors', () => api.connectors(), { immediate: readable.value })
 // Chunks per sync tag: whether a source has delivered anything yet. Git
 // sources mostly land in mnemos_code. A failure only hides the counts, it
 // must not block editing.
@@ -26,7 +30,7 @@ const { data: indexed } = await useAsyncData('connector-tags', async () => {
 
 const interval = ref('')
 const sources = ref<SourceForm[]>([])
-// Problems of the last rejected save; the file's own come with `data`.
+// Problems of the last rejected save; the stored configuration's own come with `data`.
 const rejected = ref<string[]>([])
 const saving = ref(false)
 
@@ -39,11 +43,11 @@ function load(cfg: ConnectorsResponse | null | undefined) {
 watch(data, load, { immediate: true })
 
 // Compared in payload form, so whitespace or an explicit `deployment: auto`
-// in the file does not count as a change.
+// in the stored sources does not count as a change.
 const serialize = (i: string, list: SourceForm[]) => JSON.stringify({ interval: i.trim(), sources: list.map(toPayload) })
 const savedState = computed(() => (data.value ? serialize(data.value.interval ?? '', data.value.sources.map(toForm)) : ''))
 const dirty = computed(() => !!data.value && serialize(interval.value, sources.value) !== savedState.value)
-const editable = computed(() => data.value?.writable ?? false)
+const editable = computed(() => admin.value && (data.value?.writable ?? false))
 
 const addable: { type: SourceType; label: string; icon: Component }[] = [
   { type: 'confluence', label: 'Confluence spaces', icon: BookOpenIcon },
@@ -61,18 +65,23 @@ function remove(id: number) {
 }
 
 async function save() {
+  if (!data.value) return
   saving.value = true
-  const intervalChanged = interval.value.trim() !== (data.value?.interval ?? '')
+  const intervalChanged = interval.value.trim() !== (data.value.interval ?? '')
   try {
-    data.value = await api.saveConnectors({ interval: interval.value.trim(), sources: sources.value.map(toPayload) })
+    data.value = await api.saveConnectors({
+      interval: interval.value.trim(),
+      sources: sources.value.map(toPayload),
+      revision: data.value.revision,
+    })
     toast.success('Connectors saved', {
       description: intervalChanged
         ? 'The ingester resyncs within seconds; restart it for the new interval (docker compose restart ingester).'
-        : 'The ingester picks up the file and resyncs within seconds.',
+        : 'The ingester picks up the change and resyncs within seconds.',
     })
   } catch (e) {
     if (e instanceof ApiError && e.body?.problems) rejected.value = e.body.problems
-    toast.error('Nothing was saved', { description: (e as Error).message })
+    toastSaveError(e, refresh)
   } finally {
     saving.value = false
   }
@@ -89,8 +98,8 @@ onBeforeRouteLeave(() => {
       <template #description>
         Confluence spaces, Jira projects, web sites and git repositories the ingester
         (<code class="text-xs">mnemos ingest serve</code>) keeps in sync inside <code class="text-xs">mnemos_knowledge</code>
-        or <code class="text-xs">mnemos_code</code>. Saved to
-        <code class="text-xs">{{ data?.path ?? 'connectors.yaml' }}</code>, which the ingester re-reads when it changes.
+        or <code class="text-xs">mnemos_code</code>. Stored in the database; the ingester checks the server every few
+        seconds and resyncs when they change. Tokens stay in the ingester's environment.
       </template>
       <template #actions>
         <DropdownMenu v-if="editable">
@@ -107,17 +116,12 @@ onBeforeRouteLeave(() => {
       </template>
     </PageHeader>
 
-    <EmptyState v-if="error" title="Could not load the connectors" :detail="error.message" />
+    <AdminOnly v-if="me && !readable" :me="me" what="The connector configuration" />
+
+    <EmptyState v-else-if="error" title="Could not load the connectors" :detail="error.message" />
 
     <template v-else-if="data">
-      <Alert v-if="!data.writable">
-        <InfoIcon />
-        <AlertTitle>Read-only</AlertTitle>
-        <AlertDescription>
-          Editing is off on this server. Set <code>MNEMOS_UI_CONFIG_WRITABLE=true</code> to enable it — and turn on
-          <code>MNEMOS_AUTH_ENABLED</code> first if anyone else can reach port 8100.
-        </AlertDescription>
-      </Alert>
+      <ReadOnlyAlert :writable="data.writable" :me="me" />
 
       <Alert v-if="rejected.length" variant="destructive">
         <TriangleAlertIcon />
@@ -131,12 +135,12 @@ onBeforeRouteLeave(() => {
 
       <Alert v-else-if="data.problems.length" variant="destructive">
         <TriangleAlertIcon />
-        <AlertTitle>The ingester rejects this file</AlertTitle>
+        <AlertTitle>The ingester rejects this configuration</AlertTitle>
         <AlertDescription>
           <ul class="list-disc space-y-0.5 pl-4 font-mono text-xs">
             <li v-for="p in data.problems" :key="p">{{ p }}</li>
           </ul>
-          <p class="mt-2">Until it is fixed, a running ingester keeps its previous configuration. Saving rewrites the file from this form.</p>
+          <p class="mt-2">Until it is fixed, a running ingester keeps its previous configuration. Saving replaces it with this form.</p>
         </AlertDescription>
       </Alert>
 
@@ -145,7 +149,7 @@ onBeforeRouteLeave(() => {
           <CardTitle>Schedule</CardTitle>
           <CardDescription>
             Resync period after the start-up sync: <code>45s</code>, <code>30m</code>, <code>6h</code>, <code>1d</code>. Blank: only
-            at start-up, on file change and on SIGHUP. A new interval needs an ingester restart.
+            at start-up, when the sources change here and on SIGHUP. A new interval needs an ingester restart.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -165,10 +169,10 @@ onBeforeRouteLeave(() => {
       <EmptyState
         v-if="!sources.length"
         :icon="PlugIcon"
-        :title="data.exists ? 'No source declared' : 'No connectors file yet'"
+        title="No source declared"
         :detail="editable
-          ? 'Add a Confluence space, a Jira project, a web site or a git repository; saving creates the file.'
-          : 'Declare sources in config/connectors.yaml (template: config/connectors.example.yaml).'"
+          ? 'Add a Confluence space, a Jira project, a web site or a git repository.'
+          : 'Nothing is synced. An admin adds sources here once editing is enabled.'"
       />
 
       <p v-if="sources.length" class="text-xs text-muted-foreground">

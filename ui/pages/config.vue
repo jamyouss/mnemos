@@ -1,13 +1,16 @@
 <script setup lang="ts">
-import { ArrowRightIcon, InfoIcon, RotateCwIcon, SearchIcon, TriangleAlertIcon } from '@lucide/vue'
+import { ArrowRightIcon, RotateCwIcon, SearchIcon, TriangleAlertIcon } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import { ApiError, type ConfigField, type ConfigResponse } from '~/composables/useApi'
+import { isAdmin } from '~/utils/tenants'
 
 definePageMeta({ title: 'Configuration' })
 useHead({ title: 'Configuration' })
 
 const api = useApi()
-const { data, error, refresh } = await useAsyncData('config', () => api.config())
+const { data: me } = await useWhoami()
+const admin = computed(() => isAdmin(me.value))
+const { data, error, refresh } = await useAsyncData('config', () => api.config(), { immediate: admin.value })
 
 const draft = ref<Record<string, unknown>>({})
 const errors = ref<Record<string, string>>({})
@@ -57,11 +60,12 @@ function discard() {
 }
 
 async function save() {
+  if (!data.value) return
   saving.value = true
   errors.value = {}
   try {
     const values = Object.fromEntries(changes.value.map((c) => [c.field.key, c.to]))
-    const res = await api.updateConfig(values)
+    const res = await api.updateConfig(values, data.value.revision)
     // Assigning `data` reloads the draft, so read what was sent from `values`.
     const restart = res.pending_restart.filter((k) => k in values)
     data.value = res
@@ -69,7 +73,7 @@ async function save() {
     toast.success(`Saved ${Object.keys(values).length} setting(s)`, {
       description: restart.length
         ? `Applied now: ${res.applied?.length ?? 0}. Restart rag-server for: ${restart.join(', ')}.`
-        : 'Applied to the running server.',
+        : 'Applied to the running servers.',
     })
   } catch (e) {
     confirmOpen.value = false
@@ -79,18 +83,19 @@ async function save() {
       const section = data.value?.sections.find((s) => s.fields.some((f) => f.key === first))
       if (section) tab.value = section.id
     }
-    toast.error('Nothing was saved', { description: (e as Error).message })
+    toastSaveError(e, refresh)
   } finally {
     saving.value = false
   }
 }
 
 async function reset(field: ConfigField) {
+  if (!data.value) return
   try {
-    data.value = await api.resetConfig(field.key)
+    data.value = await api.resetConfig(field.key, data.value.revision)
     toast.success(`${field.label} reset`, { description: `Back to the ${fields.value[field.key]?.source ?? 'default'} value.` })
   } catch (e) {
-    toast.error('Could not remove the override', { description: (e as Error).message })
+    toastSaveError(e, refresh, 'Could not remove the override')
   }
 }
 
@@ -105,8 +110,8 @@ onBeforeRouteLeave(() => {
   <div class="space-y-6 pb-20">
     <PageHeader title="Configuration">
       <template #description>
-        What the running server uses. Precedence: <strong>dashboard override</strong> &gt; environment variable &gt;
-        default. Overrides live in <code class="text-xs">{{ data?.overrides_path ?? 'settings.json' }}</code>.
+        What the running servers use. Precedence: <strong>dashboard override</strong> &gt; environment variable &gt;
+        default. Overrides are stored in the database, so every server instance applies them within seconds.
       </template>
       <template #actions>
         <div class="relative">
@@ -117,17 +122,12 @@ onBeforeRouteLeave(() => {
       </template>
     </PageHeader>
 
-    <EmptyState v-if="error" title="Could not load the configuration" :detail="error.message" />
+    <AdminOnly v-if="me && !admin" :me="me" what="The configuration" />
+
+    <EmptyState v-else-if="error" title="Could not load the configuration" :detail="error.message" />
 
     <template v-else-if="data">
-      <Alert v-if="!data.writable">
-        <InfoIcon />
-        <AlertTitle>Read-only</AlertTitle>
-        <AlertDescription>
-          Editing is off on this server. Set <code>MNEMOS_UI_CONFIG_WRITABLE=true</code> to enable it — and turn on
-          <code>MNEMOS_AUTH_ENABLED</code> first if anyone else can reach port 8100.
-        </AlertDescription>
-      </Alert>
+      <ReadOnlyAlert :writable="data.writable" :me="me" />
 
       <Alert v-if="data.pending_restart.length" class="border-warning/50">
         <TriangleAlertIcon class="text-warning" />
@@ -191,7 +191,7 @@ onBeforeRouteLeave(() => {
       <DialogContent class="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>Apply {{ changes.length }} change{{ changes.length > 1 ? 's' : '' }}?</DialogTitle>
-          <DialogDescription>Saved as overrides on the server. Live settings apply immediately; the others after a restart.</DialogDescription>
+          <DialogDescription>Saved as overrides in the database, shared by every server instance. Live settings apply within seconds; the others after a restart.</DialogDescription>
         </DialogHeader>
         <ul class="divide-y rounded-lg border text-sm">
           <li v-for="c in changes" :key="c.field.key" class="flex items-center gap-3 px-3 py-2">

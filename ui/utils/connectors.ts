@@ -1,5 +1,5 @@
 /**
- * connectors.yaml as the Connectors page edits it.
+ * The connector configuration as the Connectors page edits it.
  *
  * The form keeps list fields as free text (`ENG, OPS`) so typing a separator
  * never fights the input; `toPayload` turns it back into what the server
@@ -16,7 +16,7 @@ export const GIT_COLLECTIONS: GitCollection[] = ['mnemos_code', 'mnemos_knowledg
 export const DEFAULT_MAX_PAGES = 200
 export const DEFAULT_MAX_FILE_KB = 512
 
-/** One source as stored in connectors.yaml: known keys only. */
+/** One source as the server stores it: known keys only. */
 export interface ConnectorSource {
   type: SourceType
   name?: string

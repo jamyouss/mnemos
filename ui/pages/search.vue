@@ -1,18 +1,21 @@
 <script setup lang="ts">
 import { RefreshCwIcon } from '@lucide/vue'
 import { byIntent, latencyStats, rates, scoreBuckets, topFiles } from '~/utils/queryLog'
+import { isAdmin } from '~/utils/tenants'
 
 definePageMeta({ title: 'Search' })
 useHead({ title: 'Search' })
 
 const api = useApi()
+const { data: me } = await useWhoami()
+const admin = computed(() => isAdmin(me.value))
 const ALL = 'all'
 const intent = ref<string>(ALL)
 const filter = ref('')
 const { data, error, refresh, pending } = await useAsyncData(
   'query-log',
   () => api.queryLog({ limit: 1000, intent: intent.value === ALL ? undefined : intent.value }),
-  { watch: [intent] },
+  { watch: [intent], immediate: admin.value },
 )
 
 const playground = usePlaygroundTraffic()
@@ -42,7 +45,7 @@ const shortFile = (f?: string) => f?.replace('/data/codebase/', '') ?? '—'
 <template>
   <div class="space-y-6">
     <PageHeader title="Search" description="The last 1,000 recorded searches, newest first.">
-      <template #actions>
+      <template v-if="admin" #actions>
         <label class="flex items-center gap-2 text-sm text-muted-foreground">
           <Switch v-model="playground.include.value" /> Playground
         </label>
@@ -63,7 +66,9 @@ const shortFile = (f?: string) => f?.replace('/data/codebase/', '') ?? '—'
       </template>
     </PageHeader>
 
-    <EmptyState v-if="error" title="Could not read the query log" detail="GET /api/query-log failed." />
+    <AdminOnly v-if="me && !admin" :me="me" what="The query log" />
+
+    <EmptyState v-else-if="error" title="Could not read the query log" detail="GET /api/query-log failed." />
 
     <EmptyState
       v-else-if="data && !data.enabled"

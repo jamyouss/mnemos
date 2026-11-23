@@ -8,6 +8,8 @@
 
 import { createAuthedFetch, type AuthedFetch } from '../utils/auth'
 import type { ConnectorSource } from '../utils/connectors'
+import type { ProjectPath } from '../utils/projects'
+import type { Scope, Tenant, Whoami } from '../utils/tenants'
 
 export interface CollectionInfo {
   points_count: number
@@ -97,20 +99,50 @@ export interface ConfigSection {
 
 export interface ConfigResponse {
   writable: boolean
-  overrides_path: string
+  /** Bumped by every save; sent back so a save over someone else's is refused (409). */
+  revision: number
   pending_restart: string[]
   sections: ConfigSection[]
   applied?: string[]
 }
 
 export interface ConnectorsResponse {
-  path: string
+  revision: number
   writable: boolean
-  exists: boolean
   interval: string | null
   sources: ConnectorSource[]
   /** What the ingester would reject; token variables are not checked here. */
   problems: string[]
+}
+
+export interface ProjectsResponse {
+  revision: number
+  writable: boolean
+  paths: ProjectPath[]
+  problems: string[]
+}
+
+export interface TenantsResponse {
+  revision: number
+  writable: boolean
+  tenants: Tenant[]
+}
+
+/** Every tenant mutation answers with the new revision, so edits chain without a reload. */
+export interface TenantResult {
+  tenant: Tenant
+  revision: number
+}
+
+/** A tenant and its API key, which the server returns this once only. */
+export interface IssuedKey extends TenantResult {
+  api_key: string
+}
+
+export interface TenantChange {
+  admin?: boolean
+  read?: Scope
+  write?: Scope
 }
 
 export interface MemoryStats {
@@ -137,15 +169,20 @@ export interface HealthDeps {
   llm: DepHealth & { provider: string; model: string; checked_at: string }
 }
 
-/** Carries the server's JSON body so a 422 can show which field failed. */
+/** Carries the server's JSON body so a 422 can show which field failed and a 409 the current revision. */
 export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
-    readonly body: { detail?: unknown; errors?: Record<string, string>; problems?: string[] } | null,
+    readonly body: { detail?: unknown; errors?: Record<string, string>; problems?: string[]; revision?: number } | null,
   ) {
     super(message)
   }
+}
+
+/** A save refused because someone else saved since the page loaded; other 409s carry no revision. */
+export function isRevisionConflict(e: unknown): e is ApiError {
+  return e instanceof ApiError && e.status === 409 && typeof e.body?.revision === 'number'
 }
 
 let authedFetch: AuthedFetch | null = null
@@ -243,18 +280,47 @@ export function useApi() {
 
     healthDeps: () => request<HealthDeps>('/api/health/deps'),
 
+    whoami: () => request<Whoami>('/api/whoami'),
+
     config: () => request<ConfigResponse>('/api/config'),
 
-    updateConfig: (values: Record<string, unknown>) =>
-      request<ConfigResponse>('/api/config', { method: 'PATCH', body: JSON.stringify({ values }) }),
+    updateConfig: (values: Record<string, unknown>, revision: number) =>
+      request<ConfigResponse>('/api/config', { method: 'PATCH', body: JSON.stringify({ values, revision }) }),
 
-    resetConfig: (key: string) =>
-      request<ConfigResponse>(`/api/config/${encodeURIComponent(key)}`, { method: 'DELETE' }),
+    resetConfig: (key: string, revision: number) =>
+      request<ConfigResponse>(`/api/config/${encodeURIComponent(key)}?revision=${revision}`, { method: 'DELETE' }),
 
     connectors: () => request<ConnectorsResponse>('/api/connectors'),
 
-    saveConnectors: (body: { interval: string; sources: ConnectorSource[] }) =>
+    saveConnectors: (body: { interval: string; sources: ConnectorSource[]; revision: number }) =>
       request<ConnectorsResponse>('/api/connectors', { method: 'PUT', body: JSON.stringify(body) }),
+
+    projects: () => request<ProjectsResponse>('/api/projects'),
+
+    saveProjects: (body: { paths: ProjectPath[]; revision: number }) =>
+      request<ProjectsResponse>('/api/projects', { method: 'PUT', body: JSON.stringify(body) }),
+
+    tenants: () => request<TenantsResponse>('/api/tenants'),
+
+    createTenant: (body: { name: string; admin: boolean; read: Scope; write: Scope; revision: number }) =>
+      request<IssuedKey>('/api/tenants', { method: 'POST', body: JSON.stringify(body) }),
+
+    updateTenant: (name: string, change: TenantChange, revision: number) =>
+      request<TenantResult>(`/api/tenants/${encodeURIComponent(name)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ ...change, revision }),
+      }),
+
+    rotateTenantKey: (name: string, revision: number) =>
+      request<IssuedKey>(`/api/tenants/${encodeURIComponent(name)}/rotate`, {
+        method: 'POST',
+        body: JSON.stringify({ revision }),
+      }),
+
+    deleteTenant: (name: string, revision: number) =>
+      request<{ deleted: string; revision: number }>(`/api/tenants/${encodeURIComponent(name)}?revision=${revision}`, {
+        method: 'DELETE',
+      }),
 
     /** Any search endpoint, as the Playground calls it. */
     runSearch: (target: SearchTarget, body: Record<string, unknown>) =>
