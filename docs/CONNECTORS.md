@@ -112,8 +112,8 @@ how many chunks `mnemos_knowledge` holds — `not synced yet` until the ingester
 has delivered something. The server validates with the ingester's own parser
 before saving, so a save the ingester would reject is refused (`422`) with
 every problem listed, and nothing is stored. A save carries the revision the
-page loaded; if someone saved in between, it answers `409` and the page
-reloads.
+page loaded; if someone saved in between, it answers `409`, nothing is
+overwritten, and the page offers to refresh.
 
 - **Writing** needs `MNEMOS_UI_CONFIG_WRITABLE=true` on the server and an
   admin key; otherwise the page is read-only.

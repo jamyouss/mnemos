@@ -301,7 +301,7 @@ Mnemos is not (yet) horizontally sharded, but `rag-server` runs as several
 replicas: all configuration lives in Qdrant and each pod polls it every
 `MNEMOS_CONFIG_POLL_SECONDS`, so a dashboard save on one pod reaches the
 others within seconds. Two saves of the same page race on a `revision`
-check (`409`, the dashboard reloads); the check and the write are not atomic
+check (`409`, the dashboard offers to refresh); the check and the write are not atomic
 in Qdrant, which only matters for two admins saving in the same millisecond.
 
 The ingester (`mnemos ingest serve`) must run **once**, not per server pod:

@@ -287,17 +287,22 @@ Details: [`MEMORY_PIPELINE.md`](MEMORY_PIPELINE.md).
 
 ## 8. Enable advanced retrieval features (optional)
 
-Every advanced feature is off by default. Flip them via env vars and restart
-the rag-server container:
+Every advanced feature is off by default. Turn one on from the dashboard's
+Configuration page (applies live, no restart), or set it in `.env` and
+recreate the server:
 
 ```bash
-# Cross-encoder reranker (+47% MRR vs baseline; 12-50s/query on CPU)
-MNEMOS_RERANKER_ENABLED=true docker compose up -d rag-server
-
-# Semantic cache (instant replies for repeated queries)
-MNEMOS_CACHE_ENABLED=true docker compose up -d rag-server
-
+# .env
+MNEMOS_RERANKER_ENABLED=true   # cross-encoder reranker (+47% MRR; 12-50 s/query on CPU)
+MNEMOS_CACHE_ENABLED=true      # semantic cache (instant replies for repeated queries)
 ```
+
+```bash
+docker compose up -d rag-server
+```
+
+A value saved from the dashboard wins over `.env`: reset it there for the
+`.env` value to apply again.
 
 Full reference: [`CONFIGURATION.md`](CONFIGURATION.md).
 
@@ -323,16 +328,15 @@ update the bind mounts or move your code under one of the allowed roots.
 ### Container can't reach Ollama (`connection refused`)
 If you installed Ollama on the host (not via the `llm` profile), the
 container needs to reach it via `host.docker.internal:11434` on Mac /
-Windows, or the host gateway IP on Linux. Set `MNEMOS_OLLAMA_URL`
+Windows, or the host gateway IP on Linux. Set `MNEMOS_OLLAMA_URL` in `.env`
 accordingly.
 
 ### Slow reranker
-Use a smaller checkpoint:
+Use a smaller checkpoint, in `.env` (or the Configuration page):
 ```bash
-MNEMOS_RERANKER_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2 \
-docker compose up -d rag-server
+MNEMOS_RERANKER_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2
 ```
-or move to a GPU host.
+then `docker compose up -d rag-server` — or move to a GPU host.
 
 ## Next steps
 

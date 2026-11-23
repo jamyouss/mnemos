@@ -43,9 +43,10 @@ and Unovis charts. Generated primitives live in `ui/components/ui/`; add more
 with `npx shadcn-vue@latest add <name>` from `ui/` — `components.json` holds
 the aliases.
 
-> The CLI runs `npm install`, and on macOS that drops two packages Tailwind's
-> WASM fallback needs from `package-lock.json`; the image build then fails at
-> `npm ci`. Regenerate the lock on Linux afterwards:
+> `package-lock.json` must be written by npm ≥ 11.19, the version in the
+> image's `node:24` stage: older npm drops the optional packages Tailwind's
+> WASM fallback needs, and the image build then fails at `npm ci`. Use
+> `npx -y npm@11.19.1 install`, or regenerate it on Linux:
 > `docker run --rm -v "$PWD":/app -w /app node:24-alpine npm install --package-lock-only`.
 
 > The server starts fine without a dashboard. If `/app/ui` is absent — a build
@@ -73,7 +74,7 @@ One screen for the questions that used to need a shell, over a 24 h / 7 d /
 Search figures come from the last 5,000 log entries; when they start after
 the window opens, the screen says the totals undercount.
 
-### Search
+### Search log
 
 Reads `/api/query-log`: p50/p95, empty-result share, intents, the top-1 score
 distribution, the files returned most often, and the last searches with their
@@ -93,8 +94,9 @@ Two things are deliberate:
 An empty screen states *why* it is empty: nothing searched, or nothing
 recorded. Those are different problems.
 
-Playground searches are left out of this screen and the dashboard unless the
-*Playground* switch is on: test traffic would move the very figures being read.
+Playground searches are left out of this screen and the dashboard unless
+*Include Playground searches* is on: test traffic would move the very figures
+being read.
 
 ### Playground
 
@@ -139,8 +141,9 @@ a rejected memory disappears from retrieval immediately.
 ### Configuration
 
 Every server setting, grouped by section, with **where its value comes from**
-(`default`, `env`, `override`) and **when a change applies** (`live`,
-`restart`, `reindex`). Changes are reviewed as a diff before they are sent.
+(*Default*, *Environment*, *Dashboard*) and **when a change applies** (*Live*,
+*After restart*, *Needs reindex*). Changes are reviewed as a diff before they
+are sent.
 
 Admin keys only. Read-only unless the server runs with
 `MNEMOS_UI_CONFIG_WRITABLE=true`. Secrets, URLs, paths and the embedding model
@@ -148,7 +151,7 @@ are never editable here, and the API key is never sent to the browser. Saved
 values are overrides stored in the database, applied by every server pod, and
 win over `.env`; the reset button next to an override removes it. A save
 checks the revision the page loaded: if someone saved in between, the server
-answers `409` and the page reloads. Details:
+answers `409` and nothing is overwritten; the page offers to refresh. Details:
 [CONFIGURATION.md](CONFIGURATION.md#dashboard-overrides).
 
 ### Connectors
@@ -172,12 +175,14 @@ Details in [CONNECTORS.md](CONNECTORS.md#from-the-dashboard).
 
 ### Projects
 
-Edits the `path → tags` mapping and the per-prefix ignore rules
-(`exclude_dirs`, `exclude_exts`) described in
-[CONFIGURATION.md](CONFIGURATION.md#tags--scoping-chunks-across-projects).
-The server refuses an empty or absolute prefix, a duplicate prefix and an
-entry without tags (`422`, every problem listed). A save applies to every pod
-within `MNEMOS_CONFIG_POLL_SECONDS`, from the next indexing event on; already
+Lists the `path → tags` mapping grouped by organisation, with a filter on
+path or tag; each prefix opens in a side panel to edit its tags and its
+ignore rules (`exclude_dirs`, `exclude_exts`, described in
+[CONFIGURATION.md](CONFIGURATION.md#tags--scoping-chunks-across-projects)).
+Changes are saved together from the bar at the bottom. The server refuses an
+empty or absolute prefix, a duplicate prefix and an entry without tags
+(`422`, every problem listed). A save applies to every pod within
+`MNEMOS_CONFIG_POLL_SECONDS`, from the next indexing event on; already
 indexed chunks keep their tags until reindexed. Same visibility, save rules
 and revision check as Connectors.
 
@@ -188,11 +193,13 @@ Admin keys only. Lists the API keys' tenants with their role and `read` /
 rotates or revokes its key. A new or rotated key is shown **once**, then only
 its SHA-256 is kept. A revoked key stops working on every pod within
 `MNEMOS_CONFIG_POLL_SECONDS`. The last admin cannot be removed or demoted.
-Saving needs `MNEMOS_UI_CONFIG_WRITABLE=true`. Scope rules:
+The root tenant (`admin`, from `MNEMOS_BOOTSTRAP_ADMIN_KEY`) is locked: its
+row shows a padlock, and its key changes only with the variable. Saving needs
+`MNEMOS_UI_CONFIG_WRITABLE=true`. Scope rules:
 [DEPLOYMENT.md](DEPLOYMENT.md#tenants-and-scopes).
 
-The sidebar hides what the key cannot open: Search, Configuration and Tenants
-need an admin key; Connectors and Projects need admin or `write: "*"`.
+The sidebar hides what the key cannot open: Search log, Configuration and
+Tenants need an admin key; Connectors and Projects need admin or `write: "*"`.
 
 ### Appearance
 
@@ -203,13 +210,13 @@ Two layers, the higher one winning:
    visitor, without rebuilding the image. Start from `config/theme.example.css`.
 2. **Per browser** — the *Appearance* panel in the sidebar: light / dark /
    system, an accent preset and a corner radius, kept in localStorage.
-   *Instance* in either picker keeps the deployment's theme.
+   *Default* in either picker keeps the deployment's theme.
 
 ## Configuration
 
 | Var | Default | Note |
 |-----|---------|------|
-| `MNEMOS_QUERY_LOG_ENABLED` | `false` | **Required for the Search screen.** Without it there is nothing to display |
+| `MNEMOS_QUERY_LOG_ENABLED` | `false` | **Required for the Search log.** Without it there is nothing to display |
 | `MNEMOS_QUERY_LOG_PATH` | `/data/state/query-log.jsonl` | Read by tailing, so the file can grow |
 | `MNEMOS_UI_PATH` | `/app/ui` | Absent → API only |
 | `MNEMOS_UI_CONFIG_WRITABLE` | `false` | Lets the Configuration, Connectors, Projects and Tenants pages save. See [CONFIGURATION.md](CONFIGURATION.md#dashboard-overrides) |

@@ -420,7 +420,7 @@ searchable). Every server pod reads the same documents.
   and retried; the last good configuration stays in force.
 - **Concurrent saves.** Each document carries a `revision`. A save that sends
   the revision it loaded and finds another one answers `409` with the current
-  revision (the dashboard reloads). A save without `revision` overwrites
+  revision (the dashboard offers to refresh). A save without `revision` overwrites
   (last write wins).
 
 ## Dashboard overrides

@@ -196,7 +196,8 @@ What's distinctive about the bundle Mnemos ships:
 ## 🚀 Quick start
 
 ```bash
-# 1. Boot the stack — pulls jamyouss/mnemos-server + mnemos-watcher from Docker Hub
+# 1. Configure, then boot the stack — every setting lives in .env
+cp .env.example .env                       # set MNEMOS_CODEBASE_HOST_PATH
 docker compose up -d
 docker compose --profile llm up -d        # adds bundled Ollama
 ollama pull llama3.1:8b
@@ -226,7 +227,8 @@ mnemos search-code "JWT validation middleware" --tags-all myproject,go
 
 🪤 **First reranker query takes longer** — the embedding model is baked into
 the image, but if you enable the optional cross-encoder reranker
-(`MNEMOS_RERANKER_ENABLED=true`) it pulls ~280 MB the first time it's used.
+(`MNEMOS_RERANKER_ENABLED=true` in `.env`, or from the dashboard's
+Configuration page) it pulls ~280 MB the first time it's used.
 
 Then open **http://localhost:8100/** for the dashboard — what is indexed, what
 is being searched, what has been remembered, and how retrieval scored. See
