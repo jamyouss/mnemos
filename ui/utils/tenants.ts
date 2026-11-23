@@ -11,6 +11,8 @@ export type Scope = '*' | string[]
 export interface Tenant {
   name: string
   admin: boolean
+  /** Set from MNEMOS_BOOTSTRAP_ADMIN_KEY; the server refuses to edit, rotate or delete it. */
+  root: boolean
   read: Scope
   write: Scope
   created_at: string

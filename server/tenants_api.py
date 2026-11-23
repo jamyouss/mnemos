@@ -3,7 +3,8 @@
 A tenant is an API key with a role and tag scopes (see `server.principal`).
 Only the key's SHA-256 is stored; the key itself is returned once, at creation
 or rotation. At least one admin always remains, so the dashboard can never
-lock itself out.
+lock itself out, and the root tenant (from MNEMOS_BOOTSTRAP_ADMIN_KEY) can be
+neither edited, rotated nor deleted here.
 """
 from __future__ import annotations
 
@@ -48,6 +49,7 @@ def _public(name: str, entry: dict) -> dict[str, Any]:
     return {
         "name": name,
         "admin": bool(entry.get("admin")),
+        "root": bool(entry.get("root")),
         "read": entry.get("read", []),
         "write": entry.get("write", []),
         "created_at": entry.get("created_at", ""),
@@ -87,6 +89,17 @@ def _known(tenants: dict[str, dict], name: str) -> dict:
     if name not in tenants:
         raise HTTPException(status_code=404, detail=f"No tenant {name!r}")
     return tenants[name]
+
+
+def _mutable(tenants: dict[str, dict], name: str) -> dict:
+    entry = _known(tenants, name)
+    if entry.get("root"):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Tenant {name!r} is the root tenant: it cannot be edited, rotated or "
+                   "deleted; its key comes from MNEMOS_BOOTSTRAP_ADMIN_KEY",
+        )
+    return entry
 
 
 @tenants_router.get("/api/whoami")
@@ -152,7 +165,7 @@ def update_tenant(name: str, body: TenantPatchRequest, request: Request):
             changes[field] = _scope(field, getattr(body, field))
     try:
         tenants, current = _load(request, body.revision)
-        _known(tenants, name).update(changes)
+        _mutable(tenants, name).update(changes)
         doc = _save(request, tenants, current)
     except RevisionConflict as exc:
         return revision_conflict(exc)
@@ -165,7 +178,7 @@ def rotate_tenant_key(name: str, request: Request, body: RevisionRequest | None 
     api_key = generate_key()
     try:
         tenants, current = _load(request, body.revision if body else None)
-        _known(tenants, name)["key_sha256"] = hash_key(api_key)
+        _mutable(tenants, name)["key_sha256"] = hash_key(api_key)
         doc = _save(request, tenants, current)
     except RevisionConflict as exc:
         return revision_conflict(exc)
@@ -177,7 +190,7 @@ def delete_tenant(name: str, request: Request, revision: int | None = None):
     require_admin_writer(request)
     try:
         tenants, current = _load(request, revision)
-        _known(tenants, name)
+        _mutable(tenants, name)
         del tenants[name]
         doc = _save(request, tenants, current)
     except RevisionConflict as exc:

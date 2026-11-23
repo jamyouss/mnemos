@@ -119,20 +119,38 @@ def test_absent_files_leave_their_keys_absent(files):
     assert store.revisions() == {"projects": 1}
 
 
-def test_bootstrap_admin_key_creates_tenant_admin(files):
+def test_bootstrap_admin_key_creates_the_root_tenant(files):
     store = doc_store()
     bootstrap_config(store, _settings(files, mnemos_bootstrap_admin_key="boot-key"))
     tenants = store.get("tenants").data["tenants"]
     assert set(tenants) == {"admin"}
     assert tenants["admin"]["key_sha256"] == hash_key("boot-key")
-    assert tenants["admin"]["admin"] is True
+    assert (tenants["admin"]["admin"], tenants["admin"]["root"]) == (True, True)
 
 
-def test_tenants_file_wins_over_the_bootstrap_key(files):
+def test_root_tenant_joins_the_imported_tenants(files):
     files["tenants"].write_text(TENANTS)
     store = doc_store()
     bootstrap_config(store, _settings(files, mnemos_bootstrap_admin_key="boot-key"))
-    assert set(store.get("tenants").data["tenants"]) == {"ci", "alice"}
+    tenants = store.get("tenants").data["tenants"]
+    assert set(tenants) == {"ci", "alice", "admin"}
+    assert tenants["admin"]["root"] is True and not tenants["ci"].get("root")
+
+
+def test_changing_the_bootstrap_key_rotates_the_root_key(files):
+    backend = InMemoryConfigQdrant()
+    store = doc_store(backend)
+    bootstrap_config(store, _settings(files, mnemos_bootstrap_admin_key="old-key"))
+    created = store.get("tenants").data["tenants"]["admin"]["created_at"]
+
+    upserts = backend.upserts
+    bootstrap_config(store, _settings(files, mnemos_bootstrap_admin_key="old-key"))
+    assert backend.upserts == upserts  # unchanged key: every pod starts without a write
+
+    bootstrap_config(store, _settings(files, mnemos_bootstrap_admin_key="new-key"))
+    root = store.get("tenants").data["tenants"]["admin"]
+    assert root["key_sha256"] == hash_key("new-key")
+    assert root["created_at"] == created
 
 
 def test_auth_without_any_tenant_refuses_to_start(files):

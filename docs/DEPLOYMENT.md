@@ -105,11 +105,14 @@ add a NetworkPolicy that only lets the Mnemos pods reach Qdrant.
 `config/tenants.yaml` is gitignored on purpose — it holds your real API
 keys. The template at `config/tenants.example.yaml` is what ships with
 the repo. It is only an import source: at the first start, when the database
-holds no tenant, each entry becomes an admin tenant with every scope. Instead
-of the file you can set `MNEMOS_BOOTSTRAP_ADMIN_KEY`, which creates one tenant
-`admin` with that key. With auth on and neither, the server refuses to start.
-After the first start, manage keys from the dashboard's Tenants page (or the
-API below) and delete the file and the variable.
+holds no tenant, each entry becomes an admin tenant with every scope.
+
+`MNEMOS_BOOTSTRAP_ADMIN_KEY` makes tenant `admin` the **root** tenant, checked
+at every start. The root can be neither edited, rotated nor deleted from the
+dashboard or the API (`403`): its key is the variable, so rotating it means
+changing the variable and restarting. Without root, keep at least one admin:
+the last one cannot be removed or demoted. With auth on and no tenant at all,
+the server refuses to start.
 
 With `MNEMOS_AUTH_ENABLED=true`:
 - Every path under `/api`, `/internal` and `/mcp` requires an

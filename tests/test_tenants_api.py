@@ -45,7 +45,7 @@ def test_list_never_shows_the_hash(make_client):
     resp = make_client().get("/api/tenants")
     assert resp.status_code == 200
     assert resp.json() == {"revision": 1, "writable": True, "tenants": [{
-        "name": "root", "admin": True, "read": "*", "write": "*",
+        "name": "root", "admin": True, "root": False, "read": "*", "write": "*",
         "created_at": "2026-01-01T00:00:00+00:00",
     }]}
     assert hash_key("root-key") not in resp.text
@@ -127,6 +127,22 @@ def test_the_last_admin_cannot_be_removed_or_demoted(make_client, backend):
     # With a second admin, the first may go.
     client.post("/api/tenants", json={"name": "ops", "admin": True, "read": "*", "write": "*"})
     assert client.patch("/api/tenants/root", json={"admin": False}).status_code == 200
+
+
+def test_the_root_tenant_cannot_be_edited_rotated_or_deleted(make_client, backend):
+    store = doc_store(backend)
+    tenants = store.get("tenants").data["tenants"]
+    tenants["admin"] = {**_admin("boot-key"), "root": True}
+    store.put("tenants", {"tenants": tenants})
+    client = make_client()
+
+    for resp in (client.patch("/api/tenants/admin", json={"write": ["acme"]}),
+                 client.post("/api/tenants/admin/rotate"),
+                 client.delete("/api/tenants/admin")):
+        assert resp.status_code == 403
+        assert "MNEMOS_BOOTSTRAP_ADMIN_KEY" in resp.json()["detail"]
+    assert _stored(backend)["admin"] == {**_admin("boot-key"), "root": True}
+    assert client.get("/api/whoami", headers={"Authorization": "Bearer boot-key"}).status_code == 200
 
 
 def test_stale_revision_is_a_conflict_on_every_mutation(make_client):

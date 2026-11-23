@@ -7,8 +7,9 @@ later is still imported on the next start. Once a key is stored, the database
 is the only source of truth and the file is never read again.
 
 Tenants imported from tenants.yaml become admins with every tag: that is the
-power every key had before scopes existed. Without tenants nor a tenants
-file, `MNEMOS_BOOTSTRAP_ADMIN_KEY` creates tenant `admin`.
+power every key had before scopes existed. `MNEMOS_BOOTSTRAP_ADMIN_KEY` makes
+tenant `admin` the root tenant, checked at every start: the dashboard can
+neither edit, rotate nor delete it, and changing the variable rotates its key.
 """
 from __future__ import annotations
 
@@ -19,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from connectors.config import SOURCE_KEYS, ConfigError, read_config_file
-from core.config_store import ConfigDocStore
+from core.config_store import ConfigDocStore, RevisionConflict
 from core.projects import read_projects_file
 from pydantic_settings import BaseSettings
 
@@ -29,6 +30,7 @@ from server.settings_store import SETTINGS_KEY, clean_overrides
 logger = logging.getLogger("mnemos.config_bootstrap")
 
 OVERRIDES_FILENAME = "settings.json"
+ROOT_TENANT = "admin"
 
 
 def _now() -> str:
@@ -43,6 +45,29 @@ def admin_tenant(api_key: str) -> dict[str, Any]:
         "write": ALL_TAGS,
         "created_at": _now(),
     }
+
+
+def sync_root_tenant(docs: ConfigDocStore, api_key: str) -> None:
+    """Store tenant `admin` as the root, keyed by `api_key`; a no-op when already so."""
+    for _ in range(3):
+        doc = docs.get("tenants")
+        tenants = dict((doc.data.get("tenants") if doc else None) or {})
+        current = tenants.get(ROOT_TENANT) or {}
+        wanted = {
+            **admin_tenant(api_key),
+            "root": True,
+            "created_at": current.get("created_at") or _now(),
+        }
+        if current == wanted:
+            return
+        tenants[ROOT_TENANT] = wanted
+        try:
+            docs.put("tenants", {"tenants": tenants}, expected_revision=doc.revision if doc else 0)
+        except RevisionConflict:
+            continue  # another pod starting at the same time wrote first: re-check
+        logger.info("Root tenant %s set from MNEMOS_BOOTSTRAP_ADMIN_KEY", ROOT_TENANT)
+        return
+    logger.warning("Root tenant not synced: the tenants kept changing during start-up")
 
 
 def _connectors_from_file(path: Path) -> dict | None:
@@ -128,13 +153,12 @@ def bootstrap_config(docs: ConfigDocStore, settings: BaseSettings) -> None:
         if key in present:
             continue
         data = read()
-        if data is None and key == "tenants" and settings.mnemos_bootstrap_admin_key:
-            data = {"tenants": {"admin": admin_tenant(settings.mnemos_bootstrap_admin_key)}}
-            logger.info("Created tenant admin from MNEMOS_BOOTSTRAP_ADMIN_KEY")
         if data is None:
             continue
         doc = docs.create_if_absent(key, data)
         logger.info("Imported %s into the database (revision %d)", key, doc.revision)
+    if settings.mnemos_bootstrap_admin_key:
+        sync_root_tenant(docs, settings.mnemos_bootstrap_admin_key)
 
     if settings.mnemos_auth_enabled:
         tenants = docs.get("tenants")

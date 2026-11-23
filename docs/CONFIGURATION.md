@@ -370,7 +370,7 @@ Each line is a flat JSON object:
 |-----|--------|------|
 | `MNEMOS_AUTH_ENABLED` | `false` | Require `Authorization: Bearer <api-key>` on every `/api`, `/internal` and `/mcp` path. `/health` and the dashboard files stay open |
 | `MNEMOS_TENANTS_PATH` | `/data/config/tenants.yaml` | Import source: read once, at the first start, when the database holds no tenant. Ignored afterwards |
-| `MNEMOS_BOOTSTRAP_ADMIN_KEY` | _(unset)_ | No tenant in the database and no tenants file → the first start creates tenant `admin` with this key |
+| `MNEMOS_BOOTSTRAP_ADMIN_KEY` | _(unset)_ | Key of the root tenant `admin`, created or updated at every start. The root cannot be edited, rotated or deleted from the dashboard or the API; change the variable and restart to rotate its key |
 | `QDRANT_API_KEY` | _(unset)_ | Required with auth on, see [Storage](#storage-and-embeddings): API keys protect nothing if Qdrant itself is open |
 | `MNEMOS_API_KEY` | _(unset)_ | Client side: the key sent by the CLI, watcher, ingester, `scripts/*` and git hooks |
 
@@ -410,10 +410,11 @@ searchable). Every server pod reads the same documents.
 
 - **First start.** For each key absent from the database, the server imports
   its file once: `MNEMOS_CONNECTORS_CONFIG`, `MNEMOS_PROJECTS_CONFIG_PATH`,
-  `$MNEMOS_STATE_DIR/settings.json`, `MNEMOS_TENANTS_PATH` (or
-  `MNEMOS_BOOTSTRAP_ADMIN_KEY`). Missing file → nothing imported. After that
-  the database is the source of truth and the files are ignored; editing them
-  changes nothing.
+  `$MNEMOS_STATE_DIR/settings.json`, `MNEMOS_TENANTS_PATH`. Missing file →
+  nothing imported. After that the database is the source of truth and the
+  files are ignored; editing them changes nothing. `MNEMOS_BOOTSTRAP_ADMIN_KEY`
+  is the exception: checked at every start, it keeps the root tenant `admin`
+  on its key.
 - **Propagation.** The pod that saves applies at once; every other pod picks
   the change up within `MNEMOS_CONFIG_POLL_SECONDS`. A failed poll is logged
   and retried; the last good configuration stays in force.

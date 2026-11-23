@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { CopyIcon, KeyRoundIcon, MoreHorizontalIcon, PencilIcon, PlusIcon, RotateCwIcon, Trash2Icon, TriangleAlertIcon, UsersIcon } from '@lucide/vue'
+import { CopyIcon, KeyRoundIcon, LockIcon, MoreHorizontalIcon, PencilIcon, PlusIcon, RotateCwIcon, Trash2Icon, TriangleAlertIcon, UsersIcon } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import type { IssuedKey, TenantChange } from '~/composables/useApi'
 import { buttonVariants } from '~/components/ui/button'
@@ -220,7 +220,7 @@ async function confirmAction() {
                   <Badge v-if="isSelf(t)" variant="outline" class="ml-1 font-sans text-[10px]">you</Badge>
                 </TableCell>
                 <TableCell>
-                  <Badge :variant="t.admin ? 'default' : 'secondary'">{{ t.admin ? 'admin' : 'member' }}</Badge>
+                  <Badge :variant="t.admin ? 'default' : 'secondary'">{{ t.root ? 'root' : t.admin ? 'admin' : 'member' }}</Badge>
                 </TableCell>
                 <TableCell class="max-w-56 truncate" :class="t.read !== '*' && 'font-mono text-xs'" :title="describeScope(t.read)">
                   {{ describeScope(t.read) }}
@@ -230,7 +230,13 @@ async function confirmAction() {
                 </TableCell>
                 <TableCell class="whitespace-nowrap text-muted-foreground">{{ fmtDate(t.created_at) }}</TableCell>
                 <TableCell class="pr-6 text-right">
-                  <DropdownMenu v-if="editable">
+                  <span
+                    v-if="t.root"
+                    class="inline-flex size-8 items-center justify-center text-muted-foreground"
+                    title="Root tenant: its key comes from MNEMOS_BOOTSTRAP_ADMIN_KEY; change the variable and restart to rotate it"
+                    :aria-label="`${t.name} is the root tenant and cannot be changed here`"
+                  ><LockIcon class="size-4" /></span>
+                  <DropdownMenu v-else-if="editable">
                     <DropdownMenuTrigger as-child>
                       <Button variant="ghost" size="icon" class="size-8" :aria-label="`Actions for ${t.name}`"><MoreHorizontalIcon /></Button>
                     </DropdownMenuTrigger>
