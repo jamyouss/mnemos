@@ -9,6 +9,7 @@ from mcp.server import Server
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from qdrant_client import QdrantClient
 from starlette.responses import Response
+from starlette.routing import Route
 
 from fastapi.staticfiles import StaticFiles
 
@@ -240,6 +241,16 @@ def create_app() -> FastAPI:
         await mgr.handle_request(scope, receive, send)
 
     app.mount("/mcp", app=mcp_http_handler)
+
+    class _McpWithoutSlash:
+        """Bare `/mcp`: the Mount only matches `/mcp/…`, and the dashboard
+        mounted at `/` would answer it with 405/404 instead of a redirect."""
+
+        async def __call__(self, scope, receive, send):
+            await mcp_http_handler(scope, receive, send)
+
+    # A class instance, not a function: Starlette then routes it as raw ASGI.
+    app.router.routes.append(Route("/mcp", endpoint=_McpWithoutSlash(), methods=["GET", "POST", "DELETE"]))
 
     # --- REST endpoints ---
     @app.get("/health")

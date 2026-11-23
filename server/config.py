@@ -20,8 +20,8 @@ class Settings(BaseSettings):
     mnemos_auth_enabled: bool = False
     # Import source, read once when the database holds no tenant.
     mnemos_tenants_path: str = "/data/config/tenants.yaml"
-    # Without tenants in the database nor a tenants file, the first start
-    # creates an `admin` tenant with this key.
+    # Key of the root tenant `admin`, synced at every start; the API cannot
+    # edit, rotate or delete that tenant.
     mnemos_bootstrap_admin_key: str = ""
     # How often each pod checks the shared configuration for changes.
     mnemos_config_poll_seconds: float = 5.0

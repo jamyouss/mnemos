@@ -104,7 +104,7 @@ TOOL_DEFINITIONS: list[types.Tool] = [
                 },
                 "path_filter": {
                     "type": "string",
-                    "description": "Optional file path prefix filter",
+                    "description": "Exact file_path of one indexed file (as returned in results); not a prefix",
                 },
                 "limit": {
                     "type": "integer",
@@ -157,7 +157,7 @@ TOOL_DEFINITIONS: list[types.Tool] = [
                 },
                 "path_filter": {
                     "type": "string",
-                    "description": "Optional file path filter",
+                    "description": "Exact file_path of one indexed file (as returned in results); not a prefix",
                 },
                 "limit": {
                     "type": "integer",

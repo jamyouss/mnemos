@@ -177,7 +177,7 @@ FIELDS: tuple[FieldSpec, ...] = (
     FieldSpec("mnemos_tenants_path", "security", "Tenants import file",
               "tenants.yaml imported once (as admins), when the database holds no tenant.", "path"),
     FieldSpec("mnemos_bootstrap_admin_key", "security", "Bootstrap admin key",
-              "Creates tenant `admin` at first start when the database holds no tenant and no tenants file exists. Never returned by the API.",
+              "Key of the root tenant `admin`, synced at every start; that tenant cannot be edited, rotated or deleted. Never returned by the API.",
               "secret"),
     FieldSpec("mnemos_ui_config_writable", "security", "Dashboard can edit config",
               "Allow writes to settings, connectors, projects and tenants; with auth off anyone reaching the server can.",

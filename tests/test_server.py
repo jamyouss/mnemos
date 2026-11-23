@@ -72,3 +72,22 @@ def test_theme_css_is_not_shadowed_by_the_dashboard_mount(tmp_path, monkeypatch)
     response = client.get("/theme.css")
     assert response.headers["content-type"].startswith("text/css")
     assert response.text == ""
+
+
+@pytest.mark.parametrize("path", ["/mcp", "/mcp/"])
+def test_mcp_answers_with_or_without_slash_beside_the_dashboard(tmp_path, monkeypatch, path):
+    """The dashboard mounted at `/` used to swallow bare `/mcp` with a 405."""
+    from fastapi.testclient import TestClient
+    from server.config import settings
+
+    ui = tmp_path / "ui"
+    ui.mkdir()
+    (ui / "index.html").write_text("<html>dashboard</html>")
+    monkeypatch.setattr(settings, "mnemos_ui_path", str(ui))
+
+    with patch("server.main.QdrantClient"):
+        client = TestClient(create_app())
+    # No lifespan here: reaching the MCP handler shows as its 503, not the UI's 405.
+    response = client.post(path, json={})
+    assert response.status_code == 503
+    assert response.text == "MCP server not initialised"

@@ -172,7 +172,7 @@ def status() -> None:
 @click.option("--limit", default=5, show_default=True, help="Number of results to return.")
 @click.option("--collection", multiple=True, help="Restrict to specific collections.")
 @click.option("--file-type", multiple=True, help="Restrict to specific file types.")
-@click.option("--path-filter", default=None, help="Filter by file path substring.")
+@click.option("--path-filter", default=None, help="Only this file: its exact indexed path, not a prefix.")
 @click.option(
     "--tags",
     default=None,
@@ -248,7 +248,7 @@ def search(
     default=None,
     help="Comma-separated tags (AND filter). Example: --tags-all acme,vue3",
 )
-@click.option("--path-filter", default=None, help="Filter by file path substring.")
+@click.option("--path-filter", default=None, help="Only this file: its exact indexed path, not a prefix.")
 @click.option(
     "--mode",
     type=click.Choice(["preview", "full"]),
