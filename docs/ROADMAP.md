@@ -134,16 +134,22 @@ for per-phase numbers.
 - **Contextual chunking — retry with the cleaned golden** — Le premier
   passage (golden bruité) ne montrait pas de gain. Le golden est désormais
   propre, à mesurer via Anthropic API (prompt caching).
-- **CRAG rewriter on a fast LLM** (Anthropic Haiku, Groq) — Le rewriter
-  ship wired mais reste off : sur Ollama local le combo grader+rewriter
-  pousse la latence p50 au-delà de 100 s. Avec un LLM cloud rapide,
-  estimé +5–10 % de recall sur les queries vagues.
+
+### Abandonné (2026-11-23)
+- **CRAG grader + rewriter sur un LLM cloud** — Le code reste, off par
+  défaut, mais plus rien n'est prévu dessus. Le grader ne tourne que sur
+  `mnemos_search`, dont les intents hors code sont déjà au plafond (hit@5
+  100 % pour doc, mémoire et skills sur le run 92 q du 2026-11-22) ;
+  `mnemos_search_code`, seul intent qui rate encore, ne l'appelle pas. Il
+  ne fait que retirer des chunks (MRR et recall inchangés en mai, 3 chunks
+  sur 89 en septembre), et le rewriter n'agit que si tous sont jugés `low`.
+  Envoyer le code indexé à un LLM tiers pour ce gain n'en vaut pas la peine.
+- **GPU pour le reranker** — Un GPU ne change que la latence, pas la
+  qualité. Le reranker apporte +0,10 MRR sur EmbeddingGemma 2 (0,556 →
+  0,658) pour ~0,8 s CPU : la question est de l'activer sur CPU, pas
+  d'acheter du matériel.
 
 ### Performance
-- **GPU host for the reranker** — `bge-reranker-base` sur CPU ≈ 1,1 s pour
-  20 candidats (moitié moins tronqué à 256 tokens, le défaut) ; ~14 s p50
-  mesurés en mai. Avec EmbeddingGemma 2 le gain du reranker se réduit
-  (MRR 0.556 → 0.658) : à remesurer avant tout default-on.
 - **Sparse model upgrade** — Investiguer SPLADE-v3 ou ColBERT en remplacement
   du BM25 in-house.
 
@@ -173,8 +179,6 @@ hybrid seul — voir [EVAL](EVAL.md)) :
 |---|---|
 | MMR | duplicate@5 < 0.20 sans dégrader NDCG@5 |
 | Contextual chunking (retry) | NDCG@5 ≥ baseline + 5pts |
-| Rewriter + grader on cloud LLM | recall@5 sur intent vague +10 %, p50 < 2 s |
-| GPU reranker | p50 < 500 ms, prêt pour default-on |
 
 Aucun item ne ship si une métrique régresse.
 

@@ -324,8 +324,6 @@ The next iteration turns measurements into defaults:
 
 | Item | Why it matters | Status |
 |------|---------------|--------|
-| **GPU host for the reranker** | `bge-reranker-base` still costs ~0.8 s per query on CPU, more inside Docker. A GPU makes it cheap enough to turn on by default. | 🔜 |
-| **CRAG grader + rewriter on a fast LLM** (Anthropic Haiku, Groq) | Both ship wired but off — on local Ollama they push per-query latency past 100 s. With a cloud LLM they should land at +5–10 % recall on vague queries. | 🔜 |
 | **Contextual chunking, second measurement** | The first run, on a noisy golden set, showed no gain. Worth measuring again on the cleaned set, through the Anthropic API with prompt caching. | 🔜 |
 | **MMR, measured** | Ships wired but off. Turn it on by default only if it cuts near-duplicates in the top 5 without hurting NDCG@5. | 🔜 |
 | **A/B-testing infra** | Sampling on variants per tenant, so future retrieval changes ship with data, not vibes. | 🔜 |
