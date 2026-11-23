@@ -16,7 +16,11 @@ function toggleMode() {
 </script>
 
 <template>
-  <SidebarProvider>
+  <div v-if="route.meta.bare">
+    <NuxtPage />
+    <Toaster rich-colors close-button />
+  </div>
+  <SidebarProvider v-else>
     <AppSidebar />
     <!-- min-w-0: a flex child otherwise grows to its widest content, and one
          long unbroken line (a path, a code token) pushes the page sideways. -->

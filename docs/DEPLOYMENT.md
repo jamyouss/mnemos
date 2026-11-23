@@ -167,7 +167,7 @@ stops working on every pod within `MNEMOS_CONFIG_POLL_SECONDS`.
 | Watcher container | `MNEMOS_API_KEY` in its environment |
 | `scripts/reindex-all.py` | `MNEMOS_API_KEY` env var |
 | Git hooks | `MNEMOS_API_KEY` env var or `~/.config/mnemos/config` (env wins). Passed to curl through a config on fd 3, so it never shows up in `ps` |
-| Dashboard | Prompts for the key on the first `401` and keeps it in the browser's localStorage (`mnemos.apiKey`) |
+| Dashboard | Sign-in page; the key is kept in the browser's localStorage (`mnemos.apiKey`) until sign-out or a `401` |
 | MCP clients | Must send the header themselves (below) |
 
 Claude Code:

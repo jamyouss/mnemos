@@ -7,6 +7,7 @@
  */
 
 import { createAuthedFetch, type AuthedFetch } from '../utils/auth'
+import { sendToSignIn } from './useSession'
 import type { ConnectorSource } from '../utils/connectors'
 import type { ProjectPath } from '../utils/projects'
 import type { Scope, Tenant, Whoami } from '../utils/tenants'
@@ -188,11 +189,11 @@ export function isRevisionConflict(e: unknown): e is ApiError {
 let authedFetch: AuthedFetch | null = null
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  // Built on first use: storage and prompt only exist in the browser.
+  // Built on first use: storage only exists in the browser.
   authedFetch ??= createAuthedFetch({
     fetch: (input, options) => fetch(input, options),
     storage: window.localStorage,
-    ask: () => window.prompt('This mnemos server requires an API key (MNEMOS_API_KEY):'),
+    onUnauthorized: sendToSignIn,
   })
   const res = await authedFetch(path, {
     headers: { 'content-type': 'application/json' },

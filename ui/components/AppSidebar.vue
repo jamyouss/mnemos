@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { Component } from 'vue'
-import { BrainIcon, FlaskConicalIcon, FolderTreeIcon, LayoutDashboardIcon, PlugIcon, SearchIcon, SlidersHorizontalIcon, UsersIcon } from '@lucide/vue'
+import { BrainIcon, FlaskConicalIcon, FolderTreeIcon, LayoutDashboardIcon, LogOutIcon, PlugIcon, SearchIcon, SlidersHorizontalIcon, UsersIcon } from '@lucide/vue'
+import { signOut } from '~/composables/useSession'
 import { canReadSetup, isAdmin, type Whoami } from '~/utils/tenants'
 
 const route = useRoute()
@@ -40,6 +41,9 @@ const visibleGroups = computed(() =>
 )
 
 const isActive = (to: string) => (to === '/' ? route.path === '/' : route.path.startsWith(to))
+
+// Shown only when it says something the name does not.
+const role = computed(() => (me.value?.admin ? 'admin' : 'member'))
 </script>
 
 <template>
@@ -79,9 +83,15 @@ const isActive = (to: string) => (to === '/' ? route.path === '/' : route.path.s
     </SidebarContent>
 
     <SidebarFooter>
-      <p v-if="me?.auth_enabled" class="truncate px-2 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden" :title="me.name">
-        Signed in as <span class="font-medium text-foreground">{{ me.name }}</span>{{ me.admin ? ' · admin' : '' }}
-      </p>
+      <div v-if="me?.auth_enabled" class="flex items-center gap-1 pl-2 group-data-[collapsible=icon]:hidden">
+        <p class="min-w-0 flex-1 truncate text-xs text-muted-foreground" :title="`${me.name} (${role})`">
+          Signed in as <span class="font-medium text-foreground">{{ me.name }}</span>
+          <Badge v-if="role !== me.name" variant="secondary" class="ml-1 px-1.5 text-[10px]">{{ role }}</Badge>
+        </p>
+        <Button variant="ghost" size="icon" class="size-7 shrink-0" aria-label="Sign out" title="Sign out" @click="signOut">
+          <LogOutIcon />
+        </Button>
+      </div>
       <ThemeCustomizer />
     </SidebarFooter>
     <SidebarRail />

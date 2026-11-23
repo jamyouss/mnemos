@@ -218,9 +218,11 @@ Two layers, the higher one winning:
 
 ## Not included
 
-**No login of its own.** With `MNEMOS_AUTH_ENABLED=true` the dashboard files
-load without a key; the first `401` from the API prompts for one, which is
-kept in the browser's localStorage (`mnemos.apiKey`).
+**No accounts.** With `MNEMOS_AUTH_ENABLED=true` the dashboard opens on a
+sign-in page that takes a tenant's API key, checks it against `/api/whoami`
+and keeps it in the browser's localStorage (`mnemos.apiKey`). Sign out from
+the sidebar footer; a key revoked or rotated elsewhere sends the browser back
+to the sign-in page at its next request.
 
 **No writing memories, no triggering a reindex.** The CLI and the MCP tools
 write; this screen prunes, which was the missing gesture. And a button that
