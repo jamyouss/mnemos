@@ -962,7 +962,9 @@ async def test_facets_counts_a_payload_field(app):
         "field": "tags",
         "counts": [{"value": "acme", "count": 42}, {"value": "webshop", "count": 7}],
     }
-    app.state.qdrant.facet.assert_called_once_with(collection_name="mnemos_code", key="tags", limit=5)
+    app.state.qdrant.facet.assert_called_once_with(
+        collection_name="mnemos_code", key="tags", limit=5, facet_filter=None
+    )
 
 
 @pytest.mark.anyio

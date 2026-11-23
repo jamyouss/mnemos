@@ -14,6 +14,7 @@ from qdrant_client import QdrantClient
 from core.collections import COLLECTIONS
 from core.embeddings import EmbeddingService
 from core.indexer import Indexer
+from server.principal import Principal, forbidden, principal_from_scope, require_write_all
 from server.search import SearchService
 
 # Hard cap on the JSON payload size for search-tool responses, in characters.
@@ -370,7 +371,10 @@ def create_mcp_server(
     ) -> list[types.TextContent]:
         args = arguments or {}
         try:
-            result = await _dispatch_tool(name, args, search_service, indexer, qdrant_client, deduplicator)
+            principal = _caller(server)
+            result = await _dispatch_tool(
+                name, args, principal, search_service, indexer, qdrant_client, deduplicator
+            )
             # Compact JSON: LLMs don't need pretty-printing. Roughly halves the
             # token cost of every MCP response.
             return [types.TextContent(
@@ -383,9 +387,25 @@ def create_mcp_server(
     return server
 
 
+def _caller(server: Server) -> Principal:
+    """Principal of the HTTP request carrying the current tool call.
+
+    The streamable HTTP transport hands the Starlette request to the request
+    context, a contextvar: read it here, on the event loop, before the tool
+    hops to a worker thread. No request (direct call, stdio) means no
+    credentials, which `principal_from_scope` refuses when auth is on.
+    """
+    try:
+        request = server.request_context.request
+    except LookupError:
+        request = None
+    return principal_from_scope(request.scope if request is not None else {})
+
+
 async def _dispatch_tool(
     name: str,
     args: dict[str, Any],
+    principal: Principal,
     search_service: SearchService,
     indexer: Indexer,
     qdrant_client: QdrantClient | None,
@@ -395,7 +415,7 @@ async def _dispatch_tool(
     # one slow call does not stall the other MCP sessions and REST requests.
     return await anyio.to_thread.run_sync(
         functools.partial(
-            _run_tool, name, args, search_service, indexer, qdrant_client, deduplicator
+            _run_tool, name, args, principal, search_service, indexer, qdrant_client, deduplicator
         )
     )
 
@@ -403,6 +423,7 @@ async def _dispatch_tool(
 def _run_tool(
     name: str,
     args: dict[str, Any],
+    principal: Principal,
     search_service: SearchService,
     indexer: Indexer,
     qdrant_client: QdrantClient | None,
@@ -418,6 +439,7 @@ def _run_tool(
             tags_any=args.get("tags_any"),
             tags_all=args.get("tags_all"),
             mode=args.get("mode", "preview"),
+            read_scope=principal.read_filter(),
         )
         return _apply_response_budget([r.model_dump() for r in results])
 
@@ -431,6 +453,7 @@ def _run_tool(
             tags_any=args.get("tags_any"),
             tags_all=args.get("tags_all"),
             mode=args.get("mode", "preview"),
+            read_scope=principal.read_filter(),
         )
         return _apply_response_budget([r.model_dump() for r in results])
 
@@ -449,6 +472,7 @@ def _run_tool(
             tags_any=args.get("tags_any"),
             tags_all=args.get("tags_all"),
             mode=args.get("mode", "preview"),
+            read_scope=principal.read_filter(),
         )
         return _apply_response_budget([r.model_dump() for r in results])
 
@@ -456,11 +480,14 @@ def _run_tool(
         if deduplicator is None:
             raise RuntimeError("deduplicator required for mnemos_memory")
         from core.models import ExtractedMemory
+        tags = args.get("tags", [])
+        if not principal.can_write_declared(tags):
+            raise forbidden(f"Tenant {principal.name!r} cannot write tags {sorted(set(tags))}")
         memory = ExtractedMemory(
             content=args["content"],
             memory_type=args.get("memory_type", "note"),
             project=args.get("project"),
-            tags=args.get("tags", []),
+            tags=tags,
         )
         result = deduplicator.deduplicate_and_store(memory)
         return {"id": result.memory_id, "status": "approved", "action": result.action}
@@ -473,6 +500,7 @@ def _run_tool(
             project=args.get("project"),
             status=args.get("status"),
             limit=args.get("limit", 20),
+            read_scope=principal.read_filter(),
         )
         return entries
 
@@ -483,10 +511,12 @@ def _run_tool(
             qdrant_client=qdrant_client,
             memory_id=args["memory_id"],
             action=args["action"],
+            principal=principal,
         )
         return {"memory_id": args["memory_id"], "action": args["action"]}
 
     if name == "mnemos_reindex":
+        require_write_all(principal)
         return {
             "collection": args.get("collection"),
             "mode": args.get("mode", "incremental"),
@@ -511,10 +541,13 @@ def _list_memory(
     project: str | None,
     status: str | None,
     limit: int,
+    read_scope: list[str] | None,
 ) -> list[dict]:
-    from qdrant_client.models import Filter, FieldCondition, MatchValue
+    from qdrant_client.models import Filter, FieldCondition, MatchAny, MatchValue
 
     must_conditions = []
+    if read_scope is not None:
+        must_conditions.append(FieldCondition(key="tags", match=MatchAny(any=read_scope)))
     if project:
         must_conditions.append(
             FieldCondition(key="project", match=MatchValue(value=project))
@@ -538,8 +571,17 @@ def _review_memory(
     qdrant_client: QdrantClient,
     memory_id: str,
     action: str,
+    principal: Principal,
 ) -> None:
-    from qdrant_client.models import SetPayload
+    if not principal.write_all:
+        records = qdrant_client.retrieve(
+            collection_name="mnemos_memory", ids=[memory_id], with_payload=["tags"]
+        )
+        if not records:
+            raise ValueError(f"Memory entry {memory_id!r} not found")
+        tags = (records[0].payload or {}).get("tags") or []
+        if not principal.can_write_resolved(tags):
+            raise forbidden(f"Tenant {principal.name!r} cannot review memory {memory_id!r} (tags {tags})")
 
     new_status = "approved" if action == "approve" else "rejected"
     qdrant_client.set_payload(

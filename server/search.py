@@ -18,9 +18,10 @@ import time
 from typing import Any
 
 from core.cache import SemanticCache
-from core.collections import COLLECTIONS, DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME
+from core.collections import COLLECTIONS, DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME, TAGS_PAYLOAD_FIELD
 from core.embeddings import EmbeddingService
 from core.grader import DocumentGrader
+from core.indexer import TAGGED_COLLECTIONS
 from core.models import (
     CodeSearchResult,
     MemoryResult,
@@ -58,6 +59,19 @@ _METADATA_KEEP: tuple[str, ...] = (
 
 def _filter_metadata(payload: dict) -> dict:
     return {k: payload[k] for k in _METADATA_KEEP if k in payload}
+
+
+def _scoped_filter(conditions: list, collection: str, read_scope: list[str] | None) -> Filter | None:
+    """`conditions` as one filter, plus the caller's read scope on a tagged collection.
+
+    Skills and docs carry no tags and are readable by everyone, so the scope
+    never touches them. An empty scope matches nothing: Qdrant's MatchAny on
+    an empty list selects no point.
+    """
+    must = list(conditions)
+    if read_scope is not None and collection in TAGGED_COLLECTIONS:
+        must.append(FieldCondition(key=TAGS_PAYLOAD_FIELD, match=MatchAny(any=list(read_scope))))
+    return Filter(must=must) if must else None
 
 
 # Preview mode budget. Most code chunks fit comfortably; only long
@@ -295,7 +309,8 @@ class SearchService:
         self,
         query: str,
         target_collections: list[str],
-        query_filter: Filter | None,
+        conditions: list,
+        read_scope: list[str] | None,
         per_collection: int,
         trace: RetrievalTrace | None = None,
         via: str | None = None,
@@ -303,6 +318,7 @@ class SearchService:
         dense_vec, sparse_vec = self._embed(query, trace)
         out: list[SearchResult] = []
         for coll_name in target_collections:
+            query_filter = _scoped_filter(conditions, coll_name, read_scope)
             hits = self._query_collection(coll_name, dense_vec, sparse_vec, query_filter, per_collection, trace)
             results = [
                 SearchResult(
@@ -377,15 +393,16 @@ class SearchService:
         use_cache: bool = True,
         trace: RetrievalTrace | None = None,
         source: str | None = None,
+        read_scope: list[str] | None = None,
     ) -> list[SearchResult]:
         t_start = time.perf_counter()
         cache_on = bool(self._cache and self._cache.enabled and use_cache)
 
         # --- 0. Cache lookup (Phase 4E) ---
         # Cache key includes the limit and filter set so that a more permissive
-        # entry can never be reused for a stricter call. Tag scopes also go into
-        # the namespace so a result cached for one tag set is never reused for
-        # a different one.
+        # entry can never be reused for a stricter call. Tag filters and the
+        # caller's read scope also go into the namespace so a result cached for
+        # one tag set is never served to a caller restricted to another.
         cache_namespace = (
             "search:"
             f"limit={limit}:"
@@ -394,7 +411,8 @@ class SearchService:
             f"types={','.join(sorted(file_types)) if file_types else ''}:"
             f"path={path_filter or ''}:"
             f"tagsAny={','.join(sorted(tags_any)) if tags_any else ''}:"
-            f"tagsAll={','.join(sorted(tags_all)) if tags_all else ''}"
+            f"tagsAll={','.join(sorted(tags_all)) if tags_all else ''}:"
+            f"read={','.join(sorted(read_scope)) if read_scope is not None else '*'}"
         )
         if cache_on:
             cached = self._cache.lookup(query, namespace=cache_namespace)
@@ -432,14 +450,15 @@ class SearchService:
             # list (Qdrant's `must` is itself an AND).
             for tag in tags_all:
                 must_conditions.append(FieldCondition(key="tags", match=MatchAny(any=[tag])))
-        query_filter = Filter(must=must_conditions) if must_conditions else None
 
         # Pull a wider candidate pool per collection when a reranker is going to
         # re-score them; otherwise pulling only `limit` per collection is fine.
         per_collection = _HYBRID_TOP if (self._reranker and self._reranker.enabled) else limit
 
         # --- 1. Initial retrieval ---
-        all_results = self._retrieve_all(query, target_collections, query_filter, per_collection, trace)
+        all_results = self._retrieve_all(
+            query, target_collections, must_conditions, read_scope, per_collection, trace
+        )
 
         # --- 2. CRAG corrective loop ---
         if self._grader and self._grader.enabled and all_results:
@@ -459,7 +478,8 @@ class SearchService:
                         trace.note("rewriter", variants=variants)
                     for alt in variants:
                         all_results.extend(
-                            self._retrieve_all(alt, target_collections, query_filter, per_collection, trace, via=alt)
+                            self._retrieve_all(alt, target_collections, must_conditions, read_scope,
+                                               per_collection, trace, via=alt)
                         )
                     all_results = self._dedupe_by_path(all_results)
             else:
@@ -506,6 +526,7 @@ class SearchService:
         mode: str = "preview",
         trace: RetrievalTrace | None = None,
         source: str | None = None,
+        read_scope: list[str] | None = None,
     ) -> list[CodeSearchResult]:
         """Search the single `mnemos_code` collection; scope to a project or
         any other slice via the `tags` payload filter rather than per-project
@@ -525,7 +546,7 @@ class SearchService:
             must_conditions.append(FieldCondition(key="chunk_type", match=MatchValue(value=symbol_type)))
         if path_filter:
             must_conditions.append(FieldCondition(key="file_path", match=MatchValue(value=path_filter)))
-        query_filter = Filter(must=must_conditions) if must_conditions else None
+        query_filter = _scoped_filter(must_conditions, "mnemos_code", read_scope)
 
         per_collection = _HYBRID_TOP if (self._reranker and self._reranker.enabled) else limit
         hits = self._query_collection("mnemos_code", dense_vec, sparse_vec, query_filter, per_collection, trace)
@@ -607,6 +628,7 @@ class SearchService:
         mode: str = "preview",
         trace: RetrievalTrace | None = None,
         source: str | None = None,
+        read_scope: list[str] | None = None,
     ) -> list[MemoryResult]:
         dense_vec, sparse_vec = self._embed(query, trace)
 
@@ -619,7 +641,7 @@ class SearchService:
                 must_conditions.append(FieldCondition(key="tags", match=MatchAny(any=[tag])))
         if memory_type:
             must_conditions.append(FieldCondition(key="memory_type", match=MatchValue(value=memory_type)))
-        query_filter = Filter(must=must_conditions)
+        query_filter = _scoped_filter(must_conditions, "mnemos_memory", read_scope)
 
         per_collection = _HYBRID_TOP if (self._reranker and self._reranker.enabled) else limit
         hits = self._query_collection("mnemos_memory", dense_vec, sparse_vec, query_filter, per_collection, trace)

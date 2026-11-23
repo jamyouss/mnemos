@@ -1,27 +1,27 @@
-"""Dashboard-editable settings: the overrides file, precedence and live apply.
+"""Dashboard-editable settings: the overrides document, precedence and live apply.
 
-Precedence is override > env var > default. Overrides live in
-`<mnemos_state_dir>/settings.json` as `{key: value}`; only keys the registry
-marks editable are honoured. They are applied when the app is built, so a
-restart keeps them, and live on PATCH for `apply: live` keys.
+Precedence is override > env var > default. Overrides live in the `settings`
+config document (Qdrant, shared by every pod) as `{key: value}`; only keys the
+registry marks editable are honoured. They are applied when the app starts, on
+PATCH/DELETE on the pod that wrote them, and by the config sync on every other
+pod: `apply: live` keys reach the running components, the others wait for a
+restart and show up in `pending_restart`.
 """
 from __future__ import annotations
 
-import json
 import logging
 import os
-import tempfile
 import threading
-from pathlib import Path
 from typing import Any
 
+from core.config_store import ConfigDoc, ConfigDocStore, RevisionConflict
 from pydantic_settings import BaseSettings
 
 from server.settings_registry import FIELDS, FIELDS_BY_KEY, SECTIONS, FieldSpec, coerce
 
 logger = logging.getLogger("mnemos.settings")
 
-OVERRIDES_FILENAME = "settings.json"
+SETTINGS_KEY = "settings"
 
 
 class ConfigValidationError(ValueError):
@@ -32,84 +32,52 @@ class ConfigValidationError(ValueError):
         self.errors = errors
 
 
-def _read_overrides(path: Path) -> dict[str, Any]:
-    """Valid editable overrides from `path`; anything else is logged and dropped.
+def clean_overrides(data: object, origin: str) -> dict[str, Any]:
+    """Valid editable overrides from `data`; anything else is logged and dropped.
 
-    The server must boot whatever the file holds, so nothing here raises.
+    The server must run whatever the document holds, so nothing here raises.
     """
-    try:
-        raw = path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return {}
-    except OSError as exc:
-        logger.warning("Ignoring settings overrides %s: unreadable (%s)", path, exc)
-        return {}
-    try:
-        data = json.loads(raw)
-    except ValueError as exc:
-        logger.warning("Ignoring settings overrides %s: invalid JSON (%s)", path, exc)
-        return {}
     if not isinstance(data, dict):
-        logger.warning("Ignoring settings overrides %s: expected a JSON object", path)
+        logger.warning("Ignoring settings overrides from %s: expected an object", origin)
         return {}
-
     clean: dict[str, Any] = {}
     for key, value in data.items():
         spec = FIELDS_BY_KEY.get(key)
         if spec is None or not spec.editable:
-            logger.warning("Ignoring %s in %s: not an editable setting", key, path)
+            logger.warning("Ignoring %s in %s: not an editable setting", key, origin)
             continue
         try:
             clean[key] = coerce(spec, value)
         except ValueError as exc:
-            logger.warning("Ignoring %s in %s: %s", key, path, exc)
+            logger.warning("Ignoring %s in %s: %s", key, origin, exc)
     return clean
-
-
-def _write_atomic(path: Path, data: dict[str, Any]) -> None:
-    """Write via a temp file in the same dir + os.replace: never a torn file."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, indent=2, sort_keys=True)
-            fh.write("\n")
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp, path)
-    except BaseException:
-        Path(tmp).unlink(missing_ok=True)
-        raise
 
 
 class ConfigStore:
     """Owns the overrides of one `Settings` instance for the process lifetime."""
 
-    def __init__(self, settings: BaseSettings, path: Path) -> None:
+    def __init__(self, settings: BaseSettings, docs: ConfigDocStore) -> None:
         self._settings = settings
-        self._path = path
+        self._docs = docs
         self._lock = threading.Lock()
         # Env/default values, before any override: what DELETE reverts to.
         self._base = {f.key: getattr(settings, f.key) for f in FIELDS}
-        self._overrides = _read_overrides(path)
+        doc = docs.get(SETTINGS_KEY)
+        self._overrides = clean_overrides(doc.data, "the settings document") if doc else {}
+        self._revision = doc.revision if doc else 0
         for key, value in self._overrides.items():
             setattr(settings, key, value)
         # What the running components were built with: a restart key whose
         # configured value differs from this one waits for a restart.
         self._boot = {f.key: getattr(settings, f.key) for f in FIELDS}
 
-    @classmethod
-    def load(cls, settings: BaseSettings) -> ConfigStore:
-        """Read `<state_dir>/settings.json` and apply it to `settings`."""
-        return cls(settings, Path(settings.mnemos_state_dir) / OVERRIDES_FILENAME)
-
-    @property
-    def path(self) -> Path:
-        return self._path
-
     @property
     def writable(self) -> bool:
         return bool(self._settings.mnemos_ui_config_writable)
+
+    @property
+    def revision(self) -> int:
+        return self._revision
 
     # ------------------------------------------------------------------
     # Read
@@ -158,7 +126,7 @@ class ConfigStore:
         with self._lock:
             return {
                 "writable": self.writable,
-                "overrides_path": str(self._path),
+                "revision": self._revision,
                 "pending_restart": self.pending_restart(),
                 "sections": [
                     {
@@ -171,7 +139,7 @@ class ConfigStore:
             }
 
     # ------------------------------------------------------------------
-    # Write
+    # Apply
     # ------------------------------------------------------------------
 
     def _apply_live(self, spec: FieldSpec, value: Any, state: Any) -> None:
@@ -183,11 +151,52 @@ class ConfigStore:
         if component is not None:
             setattr(component, attr, value)
 
-    def update(self, values: dict[str, Any], state: Any) -> list[str]:
-        """Validate every key, persist, then apply the live ones.
+    def _replace(self, overrides: dict[str, Any], revision: int, state: Any) -> list[str]:
+        """Swap in `overrides` (caller holds the lock); return the live keys that changed."""
+        changed = []
+        for spec in FIELDS:
+            if spec.apply != "live":
+                continue
+            before = self._configured(spec.key)
+            after = overrides.get(spec.key, self._base[spec.key])
+            if after != before:
+                self._apply_live(spec, after, state)
+                changed.append(spec.key)
+        self._overrides = overrides
+        self._revision = revision
+        return changed
+
+    def apply_doc(self, doc: ConfigDoc, state: Any) -> list[str]:
+        """Adopt a `settings` document saved by any pod; older or equal revisions are no-ops."""
+        with self._lock:
+            if doc.revision <= self._revision:
+                return []
+            changed = self._replace(
+                clean_overrides(doc.data, "the settings document"), doc.revision, state,
+            )
+        if changed:
+            logger.info("Settings revision %d applied live: %s", doc.revision, ", ".join(changed))
+        return changed
+
+    # ------------------------------------------------------------------
+    # Write
+    # ------------------------------------------------------------------
+
+    def _current(self, revision: int | None) -> tuple[dict[str, Any], int]:
+        """The stored overrides, fresh from the database, after the revision check."""
+        doc = self._docs.get(SETTINGS_KEY)
+        current = doc.revision if doc else 0
+        if revision is not None and revision != current:
+            raise RevisionConflict(SETTINGS_KEY, current)
+        return (clean_overrides(doc.data, "the settings document") if doc else {}), current
+
+    def update(self, values: dict[str, Any], state: Any, revision: int | None = None) -> list[str]:
+        """Validate every key, persist, then apply.
 
         All-or-nothing: one bad key rejects the whole request before anything
-        is written. Returns the live keys applied, in request order.
+        is written. `revision`, when given, must be the stored one
+        (RevisionConflict otherwise). Returns the live keys of the request, in
+        request order.
         """
         errors: dict[str, str] = {}
         coerced: dict[str, Any] = {}
@@ -208,27 +217,22 @@ class ConfigStore:
             raise ConfigValidationError(errors)
 
         with self._lock:
-            new_overrides = {**self._overrides, **coerced}
-            _write_atomic(self._path, new_overrides)
-            self._overrides = new_overrides
-            applied = []
-            for key, value in coerced.items():
-                spec = FIELDS_BY_KEY[key]
-                if spec.apply == "live":
-                    self._apply_live(spec, value, state)
-                    applied.append(key)
-        logger.info("Settings overrides saved to %s: %s", self._path, ", ".join(coerced))
-        return applied
+            stored, current = self._current(revision)
+            # Merged onto the stored document, not this pod's copy: another
+            # pod's save not polled yet must survive.
+            new_overrides = {**stored, **coerced}
+            doc = self._docs.put(SETTINGS_KEY, new_overrides, expected_revision=current)
+            self._replace(new_overrides, doc.revision, state)
+        logger.info("Settings overrides saved: %s", ", ".join(coerced))
+        return [key for key in coerced if FIELDS_BY_KEY[key].apply == "live"]
 
-    def reset(self, key: str, state: Any) -> None:
+    def reset(self, key: str, state: Any, revision: int | None = None) -> None:
         """Drop the override of `key`; KeyError when there is none."""
         with self._lock:
-            if key not in self._overrides:
+            stored, current = self._current(revision)
+            if key not in stored:
                 raise KeyError(key)
-            new_overrides = {k: v for k, v in self._overrides.items() if k != key}
-            _write_atomic(self._path, new_overrides)
-            self._overrides = new_overrides
-            spec = FIELDS_BY_KEY[key]
-            if spec.apply == "live":
-                self._apply_live(spec, self._base[key], state)
-        logger.info("Settings override %s removed from %s", key, self._path)
+            new_overrides = {k: v for k, v in stored.items() if k != key}
+            doc = self._docs.put(SETTINGS_KEY, new_overrides, expected_revision=current)
+            self._replace(new_overrides, doc.revision, state)
+        logger.info("Settings override %s removed", key)

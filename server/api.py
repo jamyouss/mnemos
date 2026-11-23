@@ -14,15 +14,23 @@ from qdrant_client.models import (
     FieldCondition,
     Filter,
     FilterSelector,
+    MatchAny,
     MatchValue,
     PointStruct,
 )
 
 from core.cache import CACHE_COLLECTION
 from core.collections import COLLECTIONS, TAGS_PAYLOAD_FIELD
-from core.indexer import CHUNK_FACET_FIELDS, facet_fields
+from core.indexer import CHUNK_FACET_FIELDS, TAGGED_COLLECTIONS, facet_fields
 from core.llm import LLMError
 from server.config import settings
+from server.principal import (
+    Principal,
+    forbidden,
+    principal_of,
+    require_admin,
+    require_write_all,
+)
 from server.trace import RetrievalTrace
 
 # Handlers are plain `def` on purpose: every one of them calls blocking code
@@ -148,6 +156,7 @@ def _validate_path(file_path: str) -> Path:
 
 @api_router.post("/internal/reindex")
 def internal_reindex(body: ReindexInternalRequest, request: Request):
+    require_write_all(principal_of(request))
     safe_path = _validate_path(body.file_path)
 
     if body.event == "deleted":
@@ -180,12 +189,59 @@ def internal_reindex(body: ReindexInternalRequest, request: Request):
 # ---------------------------------------------------------------------------
 
 
+def _read_conditions(principal: Principal) -> list[FieldCondition]:
+    """The `must` conditions keeping a tagged collection to what `principal` may read."""
+    scope = principal.read_filter()
+    if scope is None:
+        return []
+    return [FieldCondition(key=TAGS_PAYLOAD_FIELD, match=MatchAny(any=scope))]
+
+
+def _require_push(principal: Principal, indexer, body: IndexPushRequest) -> None:
+    if principal.write_all:
+        return
+    if body.collection not in TAGGED_COLLECTIONS:
+        require_write_all(principal)
+    # An empty `tags` list is no override: the indexer resolves the tags itself.
+    if body.tags:
+        if not principal.can_write_declared(body.tags):
+            raise forbidden(
+                f"Tenant {principal.name!r} cannot write tags {sorted(set(body.tags))}"
+            )
+        return
+    resolved = indexer.resolve_tags(body.file_path, None)
+    if not principal.can_write_resolved(resolved):
+        raise forbidden(
+            f"Tenant {principal.name!r} cannot write {body.file_path!r} (tags {resolved})"
+        )
+
+
+def _require_delete(principal: Principal, qdrant, collection: str, file_path: str) -> None:
+    """Every stored chunk of the file must be writable; a file never indexed passes."""
+    if principal.write_all:
+        return
+    if collection not in TAGGED_COLLECTIONS:
+        require_write_all(principal)
+    chunks = _scroll_all(
+        qdrant,
+        collection,
+        Filter(must=[FieldCondition(key="file_path", match=MatchValue(value=file_path))]),
+        with_payload=[TAGS_PAYLOAD_FIELD],
+    )
+    for chunk in chunks:
+        tags = (chunk.payload or {}).get(TAGS_PAYLOAD_FIELD) or []
+        if not principal.can_write_resolved(tags):
+            raise forbidden(f"Tenant {principal.name!r} cannot delete {file_path!r} (tags {tags})")
+
+
 @api_router.post("/api/index")
 def push_index(body: IndexPushRequest, request: Request):
     if body.collection not in _VALID_COLLECTIONS:
         raise HTTPException(status_code=400, detail=f"Unknown collection: {body.collection}")
-    request.app.state.indexer.ensure_collection(body.collection)
-    count = request.app.state.indexer.index_file(
+    indexer = request.app.state.indexer
+    _require_push(principal_of(request), indexer, body)
+    indexer.ensure_collection(body.collection)
+    count = indexer.index_file(
         content=body.content,
         file_path=body.file_path,
         collection=body.collection,
@@ -198,6 +254,7 @@ def push_index(body: IndexPushRequest, request: Request):
 
 @api_router.delete("/api/index/{collection}/{file_path:path}")
 def delete_index(collection: str, file_path: str, request: Request):
+    _require_delete(principal_of(request), request.app.state.qdrant, collection, file_path)
     request.app.state.indexer.delete_file(
         file_path=file_path,
         collection=collection,
@@ -210,6 +267,9 @@ def list_indexed_files(collection: str, tag: str, request: Request):
     """Files indexed under one tag, with their `file_mtime` — the sync state of a connector."""
     if collection not in _VALID_COLLECTIONS:
         raise HTTPException(status_code=400, detail=f"Unknown collection: {collection}")
+    principal = principal_of(request)
+    if not principal.can_read([tag]):
+        raise forbidden(f"Tenant {principal.name!r} cannot read tag {tag!r}")
     files = request.app.state.indexer.list_files(collection, tag=tag)
     return {"collection": collection, "tag": tag, "files": files}
 
@@ -238,8 +298,14 @@ def index_facets(
         raise HTTPException(
             status_code=400, detail=f"Field {field!r} is not indexed on {collection}"
         )
+    conditions = (
+        _read_conditions(principal_of(request)) if collection in TAGGED_COLLECTIONS else []
+    )
     response = request.app.state.qdrant.facet(
-        collection_name=collection, key=field, limit=limit
+        collection_name=collection,
+        key=field,
+        limit=limit,
+        facet_filter=Filter(must=conditions) if conditions else None,
     )
     return {
         "collection": collection,
@@ -276,6 +342,7 @@ def search(body: SearchRequest, request: Request):
         use_cache=body.use_cache,
         trace=trace,
         source=body.source,
+        read_scope=principal_of(request).read_filter(),
     )
     return _respond(results, trace)
 
@@ -294,6 +361,7 @@ def search_code(body: SearchCodeRequest, request: Request):
         mode=body.mode,
         trace=trace,
         source=body.source,
+        read_scope=principal_of(request).read_filter(),
     )
     return _respond(results, trace)
 
@@ -331,6 +399,7 @@ def search_memory(body: SearchMemoryRequest, request: Request):
         mode=body.mode,
         trace=trace,
         source=body.source,
+        read_scope=principal_of(request).read_filter(),
     )
     # Map memory results to a search-result-compatible shape so eval/harness can consume them.
     rows = [
@@ -389,6 +458,7 @@ def eval_sample(body: EvalSampleRequest, request: Request):
     content — those make for unfair eval ground truth because no retrieval
     upgrade can rescue a question that points to a junk file.
     """
+    require_admin(principal_of(request))
     if body.collection not in _VALID_COLLECTIONS:
         raise HTTPException(status_code=400, detail=f"Unknown collection: {body.collection}")
 
@@ -510,6 +580,7 @@ def _run_reindex(
 
 @api_router.post("/api/reindex")
 def reindex(body: ReindexRequest, request: Request, background_tasks: BackgroundTasks):
+    require_write_all(principal_of(request))
     indexer = request.app.state.indexer
 
     if body.recreate:
@@ -608,7 +679,7 @@ def list_memory(
     The memory collection is small (thousands), so reading its payloads is
     milliseconds.
     """
-    must = []
+    must = _read_conditions(principal_of(request))
     if status:
         must.append(FieldCondition(key="status", match=MatchValue(value=status)))
     if memory_type:
@@ -650,7 +721,8 @@ def _utc_day(created_at) -> str | None:
 
 @api_router.get("/api/memory/stats")
 def memory_stats(request: Request):
-    """Counts over every memory, whatever its status. Payload fields only."""
+    """Counts over every readable memory, whatever its status. Payload fields only."""
+    readable = _read_conditions(principal_of(request))
     by_status: dict[str, int] = {}
     by_type: dict[str, int] = {}
     by_day: dict[str, int] = {}
@@ -658,6 +730,7 @@ def memory_stats(request: Request):
     for record in _scroll_all(
         request.app.state.qdrant,
         _MEMORY_COLLECTION,
+        Filter(must=readable) if readable else None,
         with_payload=["status", "memory_type", "created_at"],
     ):
         payload = record.payload or {}
@@ -680,6 +753,9 @@ def memory_stats(request: Request):
 @api_router.post("/api/memory")
 def create_memory(body: MemoryCreateRequest, request: Request):
     deduplicator = request.app.state.deduplicator
+    principal = principal_of(request)
+    if not principal.can_write_declared(body.tags):
+        raise forbidden(f"Tenant {principal.name!r} cannot write tags {sorted(set(body.tags))}")
 
     from core.models import ExtractedMemory
     memory = ExtractedMemory(
@@ -718,6 +794,10 @@ def review_memory(mem_id: str, body: MemoryReviewRequest, request: Request):
         raise HTTPException(status_code=404, detail=f"Memory entry '{mem_id}' not found.")
 
     record = results[0]
+    principal = principal_of(request)
+    stored_tags = record.payload.get(TAGS_PAYLOAD_FIELD) or []
+    if not principal.can_write_resolved(stored_tags):
+        raise forbidden(f"Tenant {principal.name!r} cannot review memory {mem_id!r} (tags {stored_tags})")
     updated_payload = {**record.payload, "status": new_status}
 
     qdrant.upsert(
@@ -735,6 +815,8 @@ def review_memory(mem_id: str, body: MemoryReviewRequest, request: Request):
 
 @api_router.post("/api/memory/extract")
 def extract_memories(body: MemoryExtractRequest, request: Request):
+    # The LLM picks the tags, so only a tenant allowed to write any tag may run it.
+    require_write_all(principal_of(request))
     extractor = request.app.state.memory_extractor
     deduplicator = request.app.state.deduplicator
 
@@ -817,6 +899,7 @@ def query_log(request: Request, limit: int = 500, intent: Optional[str] = None):
     traffic" or "nothing is being recorded". Conflating the two is how a
     logger that had been off for a week went unnoticed.
     """
+    require_admin(principal_of(request))
     # The running logger, not the setting: it can be toggled live from the
     # config page, and it stays off when its directory cannot be created.
     query_logger = getattr(request.app.state, "query_logger", None)
@@ -828,12 +911,13 @@ def query_log(request: Request, limit: int = 500, intent: Optional[str] = None):
 
 
 @api_router.get("/api/eval/runs")
-def eval_runs(tag: Optional[str] = None):
+def eval_runs(request: Request, tag: Optional[str] = None):
     """Eval runs on disk: summaries by default, one full run when `tag` is set.
 
     Per-question `results` carry indexed file paths, so they are only returned
     for an explicitly requested tag rather than in the listing.
     """
+    require_admin(principal_of(request))
     runs_dir = Path(settings.mnemos_eval_runs_path)
     if not runs_dir.is_dir():
         # No runs yet is a normal state for a listing, but asking for a

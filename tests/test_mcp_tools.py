@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 import mcp.types as types
 
 from server.mcp_tools import TOOL_DEFINITIONS, _dispatch_tool, create_mcp_server
+from server.principal import FULL_ACCESS
 
 
 def _call_tool_text(mcp_server, name: str, args: dict | None = None) -> str:
@@ -143,6 +144,7 @@ def test_dispatch_search_code_forwards_tag_filters():
     asyncio.run(
         _dispatch_tool(
             name="mnemos_search_code",
+            principal=FULL_ACCESS,
             args={
                 "query": "hybrid retrieval",
                 "tags_any": ["webshop", "corelib"],
@@ -171,6 +173,7 @@ def test_dispatch_search_memory_forwards_tag_filters():
     asyncio.run(
         _dispatch_tool(
             name="mnemos_search_memory",
+            principal=FULL_ACCESS,
             args={
                 "query": "past decisions",
                 "tags_any": ["webshop"],
@@ -255,6 +258,7 @@ def test_dispatch_search_wraps_results_in_envelope():
     result = asyncio.run(
         _dispatch_tool(
             name="mnemos_search",
+            principal=FULL_ACCESS,
             args={"query": "x"},
             search_service=search_service,
             indexer=indexer,
@@ -296,6 +300,7 @@ def test_dispatch_search_forwards_tag_filters():
     asyncio.run(
         _dispatch_tool(
             name="mnemos_search",
+            principal=FULL_ACCESS,
             args={
                 "query": "anything",
                 "tags_any": ["a"],
@@ -334,6 +339,7 @@ def test_dispatch_runs_concurrent_tool_calls_in_parallel():
         return await asyncio.gather(*(
             _dispatch_tool(
                 name="mnemos_search",
+                principal=FULL_ACCESS,
                 args={"query": q},
                 search_service=search_service,
                 indexer=MagicMock(),

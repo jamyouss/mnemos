@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-import json
-from unittest.mock import MagicMock, patch
-
 import pytest
-from fastapi.testclient import TestClient
 
+from server.auth import hash_key
 from server.config import settings
-from server.settings_registry import FIELDS
+from tests.config_fakes import InMemoryConfigQdrant, boot, doc_store, isolate_settings
 
 SENTINEL = "sk-ant-SENTINEL-do-not-leak-4242"
 
@@ -22,40 +19,24 @@ def _field(body: dict, key: str) -> dict:
 
 @pytest.fixture
 def make_client(tmp_path, monkeypatch):
-    """Build the app against a temp state dir, with real live components."""
-    # Every test may mutate the process-wide settings: restore them all.
-    for f in FIELDS:
-        monkeypatch.setattr(settings, f.key, getattr(settings, f.key))
-    monkeypatch.setattr(settings, "mnemos_state_dir", str(tmp_path / "state"))
-    monkeypatch.setattr(settings, "mnemos_query_log_path", str(tmp_path / "logs" / "q.jsonl"))
-    monkeypatch.setattr(settings, "mnemos_llm_api_key", SENTINEL)
+    """Boot the app (lifespan included) on an in-memory config database."""
     monkeypatch.setenv("MNEMOS_LLM_API_KEY", SENTINEL)
+    backend = InMemoryConfigQdrant()
+    clients = []
 
-    def build(writable: bool = True, overrides: dict | None = None) -> TestClient:
-        monkeypatch.setattr(settings, "mnemos_ui_config_writable", writable)
+    def build(writable: bool = True, overrides: dict | None = None, **extra):
+        isolate_settings(monkeypatch, tmp_path, mnemos_ui_config_writable=writable,
+                         mnemos_llm_api_key=SENTINEL, **extra)
         if overrides is not None:
-            (tmp_path / "state").mkdir(exist_ok=True)
-            (tmp_path / "state" / "settings.json").write_text(json.dumps(overrides))
-        with patch("server.main.QdrantClient"), patch("server.main.EmbeddingService"):
-            from server.main import create_app
-            app = create_app()
+            doc_store(backend).put("settings", overrides)
+        client = boot(monkeypatch, backend).__enter__()
+        clients.append(client)
+        return client
 
-        from core.cache import SemanticCache
-        from core.observability import QueryLogger
-        from core.reranker import CrossEncoderReranker
-        from server.search import SearchService
-
-        qdrant = MagicMock()
-        qdrant.collection_exists.return_value = False
-        embeddings = MagicMock(dimension=384)
-        app.state.qdrant = qdrant
-        app.state.reranker = CrossEncoderReranker(enabled=False)
-        app.state.cache = SemanticCache(qdrant, embeddings, enabled=False)
-        app.state.query_logger = QueryLogger(settings.mnemos_query_log_path, enabled=False)
-        app.state.search_service = SearchService(qdrant, embeddings, reranker=app.state.reranker)
-        return TestClient(app)
-
-    return build
+    build.backend = backend
+    yield build
+    for client in clients:
+        client.__exit__(None, None, None)
 
 
 def test_get_config_shape(make_client):
@@ -64,7 +45,8 @@ def test_get_config_shape(make_client):
     assert resp.status_code == 200
     body = resp.json()
     assert body["writable"] is False
-    assert body["overrides_path"].endswith("state/settings.json")
+    assert body["revision"] == 0
+    assert "overrides_path" not in body
     assert body["pending_restart"] == []
     assert [s["id"] for s in body["sections"]] == [
         "retrieval", "cache", "llm", "memory", "indexing", "observability",
@@ -92,18 +74,19 @@ def test_api_key_never_serialized(make_client):
         assert "SENTINEL" not in resp.text
     key = _field(get.json(), "mnemos_llm_api_key")
     assert key["value"] is None and key["is_set"] is True and key["type"] == "secret"
+    assert SENTINEL not in str(make_client.backend.points)
 
 
-def test_patch_and_delete_are_forbidden_when_not_writable(make_client, tmp_path):
+def test_patch_and_delete_are_forbidden_when_not_writable(make_client):
     client = make_client(writable=False, overrides={"mnemos_cache_enabled": True})
     resp = client.patch("/api/config", json={"values": {"mnemos_cache_enabled": False}})
     assert resp.status_code == 403
     assert "detail" in resp.json()
     assert client.delete("/api/config/mnemos_cache_enabled").status_code == 403
-    assert json.loads((tmp_path / "state" / "settings.json").read_text()) == {"mnemos_cache_enabled": True}
+    assert doc_store(make_client.backend).get("settings").data == {"mnemos_cache_enabled": True}
 
 
-def test_patch_validation_is_all_or_nothing(make_client, tmp_path):
+def test_patch_validation_is_all_or_nothing(make_client):
     client = make_client()
     resp = client.patch("/api/config", json={"values": {
         "mnemos_cache_enabled": True,          # valid
@@ -120,7 +103,7 @@ def test_patch_validation_is_all_or_nothing(make_client, tmp_path):
         "mnemos_mmr_lambda", "mnemos_rewriter_strategy", "mnemos_grader_enabled",
         "qdrant_host", "made_up",
     }
-    assert not (tmp_path / "state" / "settings.json").exists()
+    assert doc_store(make_client.backend).get("settings") is None
     assert client.app.state.cache.enabled is False
 
 
@@ -132,12 +115,11 @@ def test_live_patch_flips_the_running_cache(make_client):
     assert resp.status_code == 200
     body = resp.json()
     assert body["applied"] == ["mnemos_cache_enabled", "mnemos_cache_ttl_seconds"]
+    assert body["revision"] == 1
     field = _field(body, "mnemos_cache_enabled")
     assert (field["value"], field["source"]) == (True, "override")
     cache = client.app.state.cache
     assert cache.enabled is True and cache.ttl_seconds == 10
-    # Enabling a cache built disabled creates its collection.
-    client.app.state.qdrant.create_collection.assert_called_once()
 
 
 def test_live_patch_reaches_search_service_and_reranker(make_client):
@@ -172,7 +154,7 @@ def test_restart_key_lands_in_pending_restart(make_client):
     assert client.get("/api/config").json()["pending_restart"] == ["mnemos_llm_model"]
 
 
-def test_delete_reverts_override(make_client, monkeypatch):
+def test_delete_reverts_override(make_client):
     client = make_client()
     client.patch("/api/config", json={"values": {"mnemos_cache_enabled": True}})
 
@@ -186,10 +168,41 @@ def test_delete_reverts_override(make_client, monkeypatch):
     assert client.delete("/api/config/mnemos_cache_enabled").status_code == 404
 
 
-def test_overrides_file_applies_at_startup(make_client):
+def test_stored_overrides_apply_at_startup(make_client):
     client = make_client(overrides={"mnemos_mmr_lambda": 0.25, "mnemos_llm_model": "phi3"})
     body = client.get("/api/config").json()
     assert _field(body, "mnemos_mmr_lambda")["source"] == "override"
     assert settings.mnemos_mmr_lambda == 0.25
     assert settings.mnemos_llm_model == "phi3"
+    assert client.app.state.search_service.mmr_lambda == 0.25
     assert body["pending_restart"] == []
+    assert body["revision"] == 1
+
+
+def test_stale_revision_is_a_conflict(make_client):
+    client = make_client(overrides={"mnemos_cache_enabled": True})
+    resp = client.patch("/api/config", json={"values": {"mnemos_mmr_lambda": 0.3}, "revision": 0})
+    assert resp.status_code == 409
+    assert resp.json()["revision"] == 1 and "detail" in resp.json()
+
+    resp = client.delete("/api/config/mnemos_cache_enabled", params={"revision": 0})
+    assert resp.status_code == 409
+
+    ok = client.patch("/api/config", json={"values": {"mnemos_mmr_lambda": 0.3}, "revision": 1})
+    assert ok.status_code == 200 and ok.json()["revision"] == 2
+    assert client.delete("/api/config/mnemos_cache_enabled", params={"revision": 2}).status_code == 200
+
+
+def test_config_is_admin_only(make_client):
+    tenants = {
+        "root": {"key_sha256": hash_key("root"), "admin": True, "read": "*", "write": "*"},
+        "dev": {"key_sha256": hash_key("dev"), "admin": False, "read": "*", "write": "*"},
+    }
+    doc_store(make_client.backend).put("tenants", {"tenants": tenants})
+    client = make_client(mnemos_auth_enabled=True, qdrant_api_key="qk")
+    dev = {"Authorization": "Bearer dev"}
+    assert client.get("/api/config", headers=dev).status_code == 403
+    assert client.patch("/api/config", headers=dev,
+                        json={"values": {"mnemos_cache_enabled": True}}).status_code == 403
+    assert client.delete("/api/config/mnemos_cache_enabled", headers=dev).status_code == 403
+    assert client.get("/api/config", headers={"Authorization": "Bearer root"}).status_code == 200

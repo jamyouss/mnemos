@@ -111,6 +111,24 @@ def test_index_file_explicit_tags_override_wins(mock_qdrant, mock_embeddings, sa
         assert p.payload.get("tags") == ["override-a", "override-b"]
 
 
+def test_set_project_rules_replaces_tags_and_excludes(indexer):
+    """The config sync swaps the projects mapping on a live indexer."""
+    path = "/data/codebase/myproject/reports/exports/q1.csv"
+    assert indexer.resolve_tags(path, None) == [
+        "myproject", "myproject/reports", "myproject/reports/exports",
+    ]
+    assert indexer.should_skip(path) is False
+
+    indexer.set_project_rules(
+        {"myproject/": ["mine"]},
+        {"myproject/reports/": {"exts": [], "dirs": ["exports"]}},
+    )
+
+    assert indexer.resolve_tags(path, None) == ["mine"]
+    assert indexer.resolve_tags(path, ["explicit"]) == ["explicit"]
+    assert indexer.should_skip(path) is True
+
+
 def test_index_file_skips_tags_for_skills_and_docs(indexer, mock_qdrant, sample_go_code):
     indexer.index_file(
         content=sample_go_code,
@@ -381,6 +399,25 @@ def test_ensure_collection_backfills_indexes_on_existing_collections(mock_qdrant
     mock_qdrant.create_collection.assert_not_called()
     fields = [c.kwargs["field_name"] for c in mock_qdrant.create_payload_index.call_args_list]
     assert fields == ["language", "chunk_type"]
+
+
+def test_ensure_collection_survives_a_replica_creating_it_first(mock_qdrant, mock_embeddings):
+    """Two pods starting together both see the collection missing; the loser must not crash."""
+    mock_qdrant.collection_exists.side_effect = [False, True]
+    mock_qdrant.create_collection.side_effect = RuntimeError("409: already exists")
+
+    Indexer(qdrant_client=mock_qdrant, embedding_service=mock_embeddings).ensure_collection("mnemos_code")
+
+    fields = [c.kwargs["field_name"] for c in mock_qdrant.create_payload_index.call_args_list]
+    assert fields == ["tags", "language", "chunk_type"]
+
+
+def test_ensure_collection_reraises_a_real_creation_failure(mock_qdrant, mock_embeddings):
+    mock_qdrant.collection_exists.return_value = False
+    mock_qdrant.create_collection.side_effect = RuntimeError("Qdrant down")
+
+    with pytest.raises(RuntimeError, match="Qdrant down"):
+        Indexer(qdrant_client=mock_qdrant, embedding_service=mock_embeddings).ensure_collection("mnemos_code")
 
 
 def test_facet_fields_follow_tagging():

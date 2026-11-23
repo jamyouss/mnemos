@@ -13,21 +13,26 @@ from starlette.responses import Response
 from fastapi.staticfiles import StaticFiles
 
 from server.api import api_router
+from server.auth import BearerAuthMiddleware, TenantTable
 from server.config import settings
 from server.config_api import config_router
+from server.config_bootstrap import bootstrap_config
+from server.config_sync import ConfigSync, apply_projects
 from server.connectors_api import connectors_router
+from server.projects_api import projects_router
 from server.settings_store import ConfigStore
+from server.tenants_api import tenants_router
 
 logger = logging.getLogger("mnemos.server")
+from core.config_store import ConfigDocStore
 from core.embeddings import EmbeddingService
 from core.indexer import Indexer
 
 
 def create_app() -> FastAPI:
     _session_manager_holder: dict[str, StreamableHTTPSessionManager] = {}
-    # Before anything reads `settings`: overrides from the dashboard take
-    # precedence over env vars, and the lifespan builds components from them.
-    config_store = ConfigStore.load(settings)
+    # Filled from the database in the lifespan, replaced by the config sync.
+    tenant_table = TenantTable()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -37,6 +42,16 @@ def create_app() -> FastAPI:
             api_key=settings.qdrant_api_key or None,
             https=settings.qdrant_https,
         )
+        # Shared configuration first: the settings overrides it holds take
+        # precedence over env vars, and every component below is built from them.
+        app.state.config_docs = ConfigDocStore(app.state.qdrant)
+        app.state.config_docs.ensure_collection()
+        bootstrap_config(app.state.config_docs, settings)
+        app.state.config_store = ConfigStore(settings, app.state.config_docs)
+        projects_doc = app.state.config_docs.get("projects")
+        tenants_doc = app.state.config_docs.get("tenants")
+        connectors_doc = app.state.config_docs.get("connectors")
+
         app.state.embeddings = EmbeddingService(model_name=settings.embedding_model)
 
         # Reranker is constructed up-front with `enabled` flag wired through;
@@ -75,26 +90,17 @@ def create_app() -> FastAPI:
             enabled=settings.mnemos_contextual_enabled,
             workers=settings.mnemos_contextual_workers,
         )
-        # Optional YAML override for path → tags mapping. Missing file → empty dict,
-        # which means "cumulative path segments" everywhere by default.
-        from core.projects import load_path_excludes, load_path_tags
-        from pathlib import Path as _Path
-        _projects_config = _Path(settings.mnemos_projects_config_path)
-        app.state.path_tags = load_path_tags(_projects_config)
-        # Per-prefix ignore rules from the same file. Empty unless a project
-        # uses the extended entry form, so this costs nothing by default.
-        app.state.path_excludes = load_path_excludes(_projects_config)
-
         app.state.indexer = Indexer(
             qdrant_client=app.state.qdrant,
             embedding_service=app.state.embeddings,
             contextual_enricher=app.state.contextual,
-            path_tags=app.state.path_tags,
-            path_excludes=app.state.path_excludes,
             only_declared_paths=settings.mnemos_index_only_declared_paths,
             codebase_root=settings.codebase_path,
             max_chunk_chars=settings.mnemos_max_chunk_chars,
         )
+        # Path → tags and per-prefix ignore rules. No document → empty mapping,
+        # which means "cumulative path segments" everywhere by default.
+        apply_projects(app.state, projects_doc.data if projects_doc else {})
 
         # CRAG components (Phase 3): grader + rewriter
         from core.grader import DocumentGrader
@@ -185,16 +191,35 @@ def create_app() -> FastAPI:
         )
         _session_manager_holder["mgr"] = session_manager
 
-        async with session_manager.run():
-            yield
+        tenant_table.replace(tenants_doc.data if tenants_doc else {})
+        config_store = app.state.config_store
+        sync = ConfigSync(app.state.config_docs, settings.mnemos_config_poll_seconds)
+        sync.register(
+            "settings", lambda doc: config_store.apply_doc(doc, app.state), config_store.revision,
+        )
+        sync.register(
+            "projects", lambda doc: apply_projects(app.state, doc.data),
+            projects_doc.revision if projects_doc else 0,
+        )
+        sync.register(
+            "tenants", lambda doc: tenant_table.replace(doc.data),
+            tenants_doc.revision if tenants_doc else 0,
+        )
+        sync.register("connectors", None, connectors_doc.revision if connectors_doc else 0)
+        app.state.config_sync = sync
+        sync.start()
 
-        app.state.qdrant.close()
+        try:
+            async with session_manager.run():
+                yield
+        finally:
+            sync.stop()
+            app.state.qdrant.close()
 
     app = FastAPI(title="Mnemos MCP Server", lifespan=lifespan)
-    app.state.config_store = config_store
+    app.state.tenant_table = tenant_table
 
     if settings.mnemos_auth_enabled:
-        from server.auth import BearerAuthMiddleware, load_api_keys
         # Whoever reaches an open Qdrant reads and rewrites every collection,
         # API keys or not: refuse to pretend the instance is protected.
         if not settings.qdrant_api_key:
@@ -202,12 +227,8 @@ def create_app() -> FastAPI:
                 "MNEMOS_AUTH_ENABLED=true needs QDRANT_API_KEY: start Qdrant with "
                 "QDRANT__SERVICE__API_KEY and give the server the same key"
             )
-        # Loaded here, not in the lifespan: a broken tenants file must stop the
-        # boot instead of leaving an open server behind.
-        app.add_middleware(
-            BearerAuthMiddleware,
-            api_keys=load_api_keys(settings.mnemos_tenants_path),
-        )
+        # Empty until the lifespan loads the tenants: nothing gets through before.
+        app.add_middleware(BearerAuthMiddleware, tenants=tenant_table)
 
     # --- MCP Streamable HTTP transport ---
     async def mcp_http_handler(scope, receive, send):
@@ -240,6 +261,8 @@ def create_app() -> FastAPI:
     app.include_router(api_router)
     app.include_router(config_router)
     app.include_router(connectors_router)
+    app.include_router(projects_router)
+    app.include_router(tenants_router)
 
     # --- Dashboard ---
     # Mounted last and at the root, so it only catches what /mcp, /health and

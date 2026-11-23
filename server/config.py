@@ -16,9 +16,15 @@ class Settings(BaseSettings):
     codebase_path: str = "/data/codebase"
     claude_config_path: str = "/data/claude-config"
     # Require `Authorization: Bearer <key>` on /api, /internal and /mcp; keys
-    # come from the tenants file. The server refuses to start if it is unusable.
+    # are the tenants stored in Qdrant. The server refuses to start without one.
     mnemos_auth_enabled: bool = False
+    # Import source, read once when the database holds no tenant.
     mnemos_tenants_path: str = "/data/config/tenants.yaml"
+    # Without tenants in the database nor a tenants file, the first start
+    # creates an `admin` tenant with this key.
+    mnemos_bootstrap_admin_key: str = ""
+    # How often each pod checks the shared configuration for changes.
+    mnemos_config_poll_seconds: float = 5.0
     mnemos_state_dir: str = "/data/state"
     # LLM configuration (ollama | anthropic | openai)
     mnemos_llm_provider: str = "ollama"
@@ -77,18 +83,18 @@ class Settings(BaseSettings):
     mnemos_ui_path: str = "/app/ui"
     # Instance theme served at /theme.css. Absent → empty stylesheet.
     mnemos_ui_theme_path: str = "/app/config/theme.css"
-    # Let the dashboard write `<state_dir>/settings.json`. With auth off,
-    # anyone reaching the server can then change retrieval settings.
+    # Let the dashboard edit the shared configuration (settings, connectors,
+    # projects, tenants). With auth off, anyone reaching the server can.
     mnemos_ui_config_writable: bool = False
 
-    # Project detection (auto-detect + optional YAML override)
+    # Import source for the `projects` configuration, read once when the
+    # database holds none; edited from the dashboard afterwards.
     mnemos_projects_config_path: str = "/app/config/projects.yaml"
-    # Index only what config/projects.yaml declares. Off by default so an
-    # empty or absent config keeps indexing everything, as before.
+    # Index only the prefixes the projects configuration declares. Off by
+    # default so an empty configuration keeps indexing everything, as before.
     mnemos_index_only_declared_paths: bool = False
-    # Knowledge connectors file, edited from the dashboard's Connectors page
-    # (when MNEMOS_UI_CONFIG_WRITABLE) and read by `mnemos ingest serve`. Same
-    # variable name as the CLI's, since both mean the same file.
+    # Import source for the knowledge connectors, read once when the database
+    # holds none. Same variable name as the CLI's `--config` default.
     mnemos_connectors_config: str = "/app/config/connectors.yaml"
 
     class Config:

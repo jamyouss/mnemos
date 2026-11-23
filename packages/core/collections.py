@@ -12,6 +12,11 @@ SPARSE_VECTOR_NAME = "sparse"
 # Filtered at query time with MatchAny (OR) or AND-combined conditions.
 TAGS_PAYLOAD_FIELD = "tags"
 
+# Server configuration documents (connectors, projects, settings, tenants),
+# shared by every pod. Vectorless and kept out of COLLECTIONS: nothing in it
+# is searched, embedded, reindexed or migrated.
+CONFIG_COLLECTION = "mnemos_config"
+
 
 @dataclass
 class CollectionConfig:

@@ -4,7 +4,14 @@ from pathlib import Path
 
 import pytest
 
-from core.projects import detect_excludes, detect_tags, load_path_excludes, load_path_tags
+from core.projects import (
+    detect_excludes,
+    detect_tags,
+    load_path_excludes,
+    load_path_tags,
+    path_excludes_from,
+    path_tags_from,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -265,3 +272,30 @@ paths:
     excl = load_path_excludes(p)
     assert excl["ok/"]["exts"] == [".csv"]
     assert "broken-excludes/" not in excl
+
+
+# ---------------------------------------------------------------------------
+# Parsers over a mapping (the server's `projects` document)
+# ---------------------------------------------------------------------------
+
+
+def test_mapping_parsers_match_the_file_loaders(tmp_path: Path):
+    import yaml
+
+    raw = yaml.safe_load(EXTENDED_YAML)
+    p = _write(tmp_path, EXTENDED_YAML)
+    assert path_tags_from(raw) == load_path_tags(p)
+    assert path_excludes_from(raw) == load_path_excludes(p)
+
+
+@pytest.mark.parametrize("raw", [None, {}, {"paths": None}, {"paths": ["a/"]}, "paths"])
+def test_mapping_parsers_tolerate_any_shape(raw):
+    assert path_tags_from(raw) == {}
+    assert path_excludes_from(raw) == {}
+
+
+def test_mapping_parser_warns_with_its_origin(caplog):
+    with caplog.at_level("WARNING"):
+        out = path_tags_from({"paths": {"bad/": "x", "ok/": ["t"]}}, origin="the projects document")
+    assert out == {"ok/": ["t"]}
+    assert any("the projects document" in r.message and "bad/" in r.message for r in caplog.records)

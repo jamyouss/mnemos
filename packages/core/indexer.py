@@ -211,11 +211,16 @@ class Indexer:
         """
         tagged = collection_name in TAGGED_COLLECTIONS
         if not self._qdrant.collection_exists(collection_name):
-            create_hybrid_collection(
-                self._qdrant, collection_name, self._embeddings.dimension, tagged
-            )
-        else:
-            _ensure_payload_indexes(self._qdrant, collection_name, tagged)
+            try:
+                create_hybrid_collection(
+                    self._qdrant, collection_name, self._embeddings.dimension, tagged
+                )
+                return
+            except Exception:
+                # Replicas starting together race to create it; the loser carries on.
+                if not self._qdrant.collection_exists(collection_name):
+                    raise
+        _ensure_payload_indexes(self._qdrant, collection_name, tagged)
 
     def is_hybrid(self, collection_name: str) -> bool:
         """Return True if the collection already uses named hybrid (dense + sparse) vectors."""
@@ -280,7 +285,12 @@ class Indexer:
             ),
         )
 
-    def _resolve_tags(self, file_path: str, override: list[str] | None) -> list[str]:
+    def set_project_rules(self, path_tags: PathTags, path_excludes: PathExcludes) -> None:
+        """Swap the `projects` mapping the next file resolves against."""
+        self._path_tags = path_tags
+        self._path_excludes = path_excludes
+
+    def resolve_tags(self, file_path: str, override: list[str] | None) -> list[str]:
         """Decide which tag list to write into a chunk's payload.
 
         Order:
@@ -325,7 +335,7 @@ class Indexer:
         # Resolve tags once per file. Only relevant for the code/memory
         # collections; skills/docs leave the field unset.
         resolved_tags: list[str] = (
-            self._resolve_tags(file_path, tags)
+            self.resolve_tags(file_path, tags)
             if collection in TAGGED_COLLECTIONS
             else []
         )

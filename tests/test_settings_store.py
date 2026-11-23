@@ -6,8 +6,10 @@ from types import SimpleNamespace
 
 import pytest
 
+from core.config_store import ConfigDocStore, RevisionConflict
 from server.config import Settings
 from server.settings_store import ConfigStore, ConfigValidationError
+from tests.config_fakes import InMemoryConfigQdrant, doc_store
 
 
 def _field(snapshot: dict, key: str) -> dict:
@@ -26,20 +28,19 @@ def clean_env(monkeypatch):
     return monkeypatch
 
 
-def _store(tmp_path, overrides: dict | None = None, raw: str | None = None) -> tuple[Settings, ConfigStore]:
-    path = tmp_path / "settings.json"
-    if raw is not None:
-        path.write_text(raw)
-    elif overrides is not None:
-        path.write_text(json.dumps(overrides))
-    settings = Settings(mnemos_state_dir=str(tmp_path))
-    return settings, ConfigStore.load(settings)
+def _store(docs: ConfigDocStore | None = None, overrides: dict | None = None,
+           ) -> tuple[Settings, ConfigStore, ConfigDocStore]:
+    docs = docs or doc_store()
+    if overrides is not None:
+        docs.put("settings", overrides)
+    settings = Settings()
+    return settings, ConfigStore(settings, docs), docs
 
 
-def test_precedence_override_then_env_then_default(tmp_path, clean_env):
+def test_precedence_override_then_env_then_default(clean_env):
     clean_env.setenv("MNEMOS_CACHE_THRESHOLD", "0.9")
     clean_env.setenv("MNEMOS_CACHE_TTL_SECONDS", "60")
-    settings, store = _store(tmp_path, {"mnemos_cache_threshold": 0.8})
+    settings, store, _ = _store(overrides={"mnemos_cache_threshold": 0.8})
 
     snap = store.snapshot()
     threshold = _field(snap, "mnemos_cache_threshold")
@@ -51,54 +52,58 @@ def test_precedence_override_then_env_then_default(tmp_path, clean_env):
     assert (mmr["value"], mmr["source"], mmr["default"]) == (0.5, "default", 0.5)
 
 
-def test_env_source_is_case_insensitive(tmp_path, clean_env):
+def test_env_source_is_case_insensitive(clean_env):
     clean_env.setenv("mnemos_mmr_lambda", "0.3")
-    _, store = _store(tmp_path)
+    _, store, _ = _store()
     field = _field(store.snapshot(), "mnemos_mmr_lambda")
     assert (field["value"], field["source"]) == (0.3, "env")
 
 
-def test_update_persists_atomically_and_reloads_at_startup(tmp_path, clean_env):
-    _, store = _store(tmp_path)
+def test_snapshot_carries_the_revision(clean_env):
+    _, store, _ = _store()
+    assert store.snapshot()["revision"] == 0
+    store.update({"mnemos_cache_enabled": True}, SimpleNamespace())
+    snap = store.snapshot()
+    assert snap["revision"] == 1
+    assert "overrides_path" not in snap
+
+
+def test_update_persists_and_reloads_at_startup(clean_env):
+    _, store, docs = _store()
     store.update({"mnemos_cache_enabled": True, "mnemos_llm_model": "qwen2.5:7b"}, SimpleNamespace())
 
-    path = tmp_path / "settings.json"
-    assert json.loads(path.read_text()) == {"mnemos_cache_enabled": True, "mnemos_llm_model": "qwen2.5:7b"}
-    assert [p.name for p in tmp_path.iterdir()] == ["settings.json"]  # no temp file left
+    assert docs.get("settings").data == {"mnemos_cache_enabled": True, "mnemos_llm_model": "qwen2.5:7b"}
 
-    settings, reloaded = _store(tmp_path)
+    settings, reloaded, _ = _store(docs)
     assert settings.mnemos_cache_enabled is True
     assert settings.mnemos_llm_model == "qwen2.5:7b"
     # Loaded at boot: the restart key is no longer pending.
     assert reloaded.pending_restart() == []
 
 
-def test_failed_write_leaves_the_file_and_memory_untouched(tmp_path, clean_env, monkeypatch):
-    _, store = _store(tmp_path, {"mnemos_cache_enabled": False})
+def test_failed_write_leaves_the_document_and_memory_untouched(clean_env):
+    class Broken(InMemoryConfigQdrant):
+        broken = False
 
-    def broken_replace(src, dst):
-        raise OSError(28, "No space left on device")
+        def upsert(self, *args, **kwargs):
+            if self.broken:
+                raise ConnectionError("qdrant down")
+            super().upsert(*args, **kwargs)
 
-    monkeypatch.setattr("server.settings_store.os.replace", broken_replace)
-    with pytest.raises(OSError):
+    backend = Broken()
+    settings, store, docs = _store(doc_store(backend), {"mnemos_cache_enabled": False})
+    backend.broken = True
+    with pytest.raises(ConnectionError):
         store.update({"mnemos_cache_enabled": True}, SimpleNamespace())
 
-    assert json.loads((tmp_path / "settings.json").read_text()) == {"mnemos_cache_enabled": False}
-    assert [p.name for p in tmp_path.iterdir()] == ["settings.json"]
+    assert docs.get("settings").data == {"mnemos_cache_enabled": False}
     assert _field(store.snapshot(), "mnemos_cache_enabled")["value"] is False
-
-
-def test_corrupt_file_is_ignored_with_a_warning(tmp_path, clean_env, caplog):
-    with caplog.at_level(logging.WARNING, logger="mnemos.settings"):
-        settings, store = _store(tmp_path, raw="{not json")
-    assert str(tmp_path / "settings.json") in caplog.text
     assert settings.mnemos_cache_enabled is False
-    assert _field(store.snapshot(), "mnemos_cache_enabled")["source"] == "default"
 
 
-def test_unknown_and_non_editable_keys_in_file_are_ignored(tmp_path, clean_env, caplog):
+def test_invalid_document_entries_are_ignored_with_a_warning(clean_env, caplog):
     with caplog.at_level(logging.WARNING, logger="mnemos.settings"):
-        settings, store = _store(tmp_path, {
+        settings, store, _ = _store(overrides={
             "nope": 1,
             "qdrant_host": "evil",
             "mnemos_cache_threshold": 7,     # out of range
@@ -111,8 +116,8 @@ def test_unknown_and_non_editable_keys_in_file_are_ignored(tmp_path, clean_env, 
     assert _field(store.snapshot(), "qdrant_host")["source"] != "override"
 
 
-def test_validation_is_all_or_nothing(tmp_path, clean_env):
-    settings, store = _store(tmp_path)
+def test_validation_is_all_or_nothing(clean_env):
+    settings, store, docs = _store()
     with pytest.raises(ConfigValidationError) as exc:
         store.update({
             "mnemos_cache_enabled": True,
@@ -121,12 +126,12 @@ def test_validation_is_all_or_nothing(tmp_path, clean_env):
             "bogus": 1,
         }, SimpleNamespace())
     assert set(exc.value.errors) == {"mnemos_grader_workers", "qdrant_host", "bogus"}
-    assert not (tmp_path / "settings.json").exists()
+    assert docs.get("settings") is None
     assert settings.mnemos_cache_enabled is False
 
 
-def test_live_keys_apply_to_settings_and_component(tmp_path, clean_env):
-    settings, store = _store(tmp_path)
+def test_live_keys_apply_to_settings_and_component(clean_env):
+    settings, store, _ = _store()
     cache = SimpleNamespace(enabled=False, threshold=0.95)
     applied = store.update({"mnemos_cache_enabled": True, "mnemos_cache_threshold": 0.9},
                            SimpleNamespace(cache=cache))
@@ -135,8 +140,8 @@ def test_live_keys_apply_to_settings_and_component(tmp_path, clean_env):
     assert settings.mnemos_cache_enabled is True
 
 
-def test_restart_keys_wait_for_a_restart(tmp_path, clean_env):
-    settings, store = _store(tmp_path)
+def test_restart_keys_wait_for_a_restart(clean_env):
+    settings, store, _ = _store()
     applied = store.update({"mnemos_llm_model": "qwen2.5:7b"}, SimpleNamespace())
     assert applied == []
     assert store.pending_restart() == ["mnemos_llm_model"]
@@ -148,25 +153,72 @@ def test_restart_keys_wait_for_a_restart(tmp_path, clean_env):
     assert store.pending_restart() == []
 
 
-def test_reset_reverts_to_env_and_reapplies_live(tmp_path, clean_env):
+def test_reset_reverts_to_env_and_reapplies_live(clean_env):
     clean_env.setenv("MNEMOS_CACHE_THRESHOLD", "0.9")
-    settings, store = _store(tmp_path, {"mnemos_cache_threshold": 0.5})
+    settings, store, docs = _store(overrides={"mnemos_cache_threshold": 0.5})
     cache = SimpleNamespace(threshold=0.5)
 
     store.reset("mnemos_cache_threshold", SimpleNamespace(cache=cache))
 
     assert settings.mnemos_cache_threshold == 0.9
     assert cache.threshold == 0.9
-    assert json.loads((tmp_path / "settings.json").read_text()) == {}
+    assert docs.get("settings").data == {}
     field = _field(store.snapshot(), "mnemos_cache_threshold")
     assert (field["value"], field["source"]) == (0.9, "env")
     with pytest.raises(KeyError):
         store.reset("mnemos_cache_threshold", SimpleNamespace())
 
 
-def test_secret_value_never_in_snapshot(tmp_path, clean_env):
+def test_stale_revision_is_refused_and_saves_nothing(clean_env):
+    _, store, docs = _store(overrides={"mnemos_cache_enabled": True})
+    with pytest.raises(RevisionConflict) as exc:
+        store.update({"mnemos_mmr_lambda": 0.2}, SimpleNamespace(), revision=0)
+    assert exc.value.current == 1
+    with pytest.raises(RevisionConflict):
+        store.reset("mnemos_cache_enabled", SimpleNamespace(), revision=7)
+    assert docs.get("settings").data == {"mnemos_cache_enabled": True}
+
+    store.update({"mnemos_mmr_lambda": 0.2}, SimpleNamespace(), revision=1)
+    assert docs.get("settings").revision == 2
+
+
+def test_update_without_revision_keeps_another_pods_save(clean_env):
+    docs = doc_store()
+    _, pod_a, _ = _store(docs)
+    _, pod_b, _ = _store(docs)
+    pod_a.update({"mnemos_cache_enabled": True}, SimpleNamespace())
+    # pod_b has not polled yet: its save still merges onto the stored document.
+    pod_b.update({"mnemos_mmr_lambda": 0.2}, SimpleNamespace())
+    assert docs.get("settings").data == {"mnemos_cache_enabled": True, "mnemos_mmr_lambda": 0.2}
+
+
+def test_apply_doc_reaches_components_and_reports_pending_restart(clean_env):
+    docs = doc_store()
+    settings, store, _ = _store(docs)
+    cache = SimpleNamespace(enabled=False)
+    state = SimpleNamespace(cache=cache)
+
+    doc = docs.put("settings", {"mnemos_cache_enabled": True, "mnemos_llm_model": "phi3"})
+    assert store.apply_doc(doc, state) == ["mnemos_cache_enabled"]
+    assert cache.enabled is True and settings.mnemos_cache_enabled is True
+    assert store.pending_restart() == ["mnemos_llm_model"]
+    assert store.revision == 1
+
+    # Same or older revision: nothing to do.
+    cache.enabled = False
+    assert store.apply_doc(doc, state) == []
+    assert cache.enabled is False
+
+    # An override removed elsewhere reverts the live value.
+    cache.enabled = True
+    assert store.apply_doc(docs.put("settings", {}), state) == ["mnemos_cache_enabled"]
+    assert cache.enabled is False
+    assert store.pending_restart() == []
+
+
+def test_secret_value_never_in_snapshot(clean_env):
     clean_env.setenv("MNEMOS_LLM_API_KEY", "sk-SENTINEL-123")
-    _, store = _store(tmp_path)
+    _, store, _ = _store()
     snap = store.snapshot()
     key = _field(snap, "mnemos_llm_api_key")
     assert key["value"] is None and key["default"] is None

@@ -1,13 +1,20 @@
-"""REST surface of the dashboard's configuration page: /api/config."""
+"""REST surface of the dashboard's configuration page: /api/config.
+
+Also the helpers every configuration route shares: the write switch and the
+409 body of a stale revision.
+"""
 from __future__ import annotations
 
 from typing import Any
 
+from core.config_store import RevisionConflict
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from server.settings_store import ConfigStore, ConfigValidationError
+from server.config import settings
+from server.principal import principal_of, require_admin
+from server.settings_store import ConfigValidationError
 
 config_router = APIRouter()
 
@@ -18,49 +25,53 @@ _READ_ONLY = (
 
 class ConfigPatchRequest(BaseModel):
     values: dict[str, Any]
+    revision: int | None = None
 
 
-def writable_store(request: Request) -> ConfigStore:
-    store: ConfigStore = request.app.state.config_store
-    if not store.writable:
+def require_writable() -> None:
+    if not settings.mnemos_ui_config_writable:
         raise HTTPException(status_code=403, detail=_READ_ONLY)
-    return store
 
 
-def _persist_failed(store: ConfigStore, exc: OSError) -> HTTPException:
-    return HTTPException(
-        status_code=500,
-        detail=f"Could not write {store.path}: {exc.strerror or exc}",
-    )
+def require_admin_writer(request: Request) -> None:
+    require_admin(principal_of(request))
+    require_writable()
+
+
+def revision_conflict(exc: RevisionConflict) -> JSONResponse:
+    return JSONResponse(status_code=409, content={"detail": str(exc), "revision": exc.current})
 
 
 @config_router.get("/api/config")
 def get_config(request: Request):
+    require_admin(principal_of(request))
     return request.app.state.config_store.snapshot()
 
 
 @config_router.patch("/api/config")
 def patch_config(body: ConfigPatchRequest, request: Request):
-    store = writable_store(request)
+    require_admin_writer(request)
+    store = request.app.state.config_store
     try:
-        applied = store.update(body.values, request.app.state)
+        applied = store.update(body.values, request.app.state, revision=body.revision)
     except ConfigValidationError as exc:
         return JSONResponse(
             status_code=422,
             content={"detail": "Invalid settings, nothing was saved", "errors": exc.errors},
         )
-    except OSError as exc:
-        raise _persist_failed(store, exc) from exc
+    except RevisionConflict as exc:
+        return revision_conflict(exc)
     return {**store.snapshot(), "applied": applied}
 
 
 @config_router.delete("/api/config/{key}")
-def delete_config_override(key: str, request: Request):
-    store = writable_store(request)
+def delete_config_override(key: str, request: Request, revision: int | None = None):
+    require_admin_writer(request)
+    store = request.app.state.config_store
     try:
-        store.reset(key, request.app.state)
+        store.reset(key, request.app.state, revision=revision)
     except KeyError:
         raise HTTPException(status_code=404, detail=f"No override for {key!r}") from None
-    except OSError as exc:
-        raise _persist_failed(store, exc) from exc
+    except RevisionConflict as exc:
+        return revision_conflict(exc)
     return store.snapshot()
