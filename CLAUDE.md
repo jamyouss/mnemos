@@ -58,8 +58,9 @@ mnemos/
   tests/                  # pytest suite
   eval/                   # Eval harness (Phase 1.2, en cours)
   docs/                   # ROADMAP.md, EVAL.md, ARCHITECTURE.md
-  docker-compose.yml      # Local dev stack
-  docker-compose.prod.yml # Production overrides (auth par clé API)
+  docker-compose.yml      # Stack ; tous les réglages viennent de .env (env_file)
+  docker-compose.dev.yml  # Build local des images
+  docker-compose.prod.yml # Montage tenants.yaml, watcher désactivé
 ```
 
 ### Collections Qdrant

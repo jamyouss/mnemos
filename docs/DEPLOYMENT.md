@@ -52,21 +52,16 @@ Components:
 
 ## Single-team production
 
-For a personal or single-team box, the default setup is fine.
-Just lock it down:
+For a personal or single-team box, the default setup is fine. Settings go in
+`.env` (`MNEMOS_RERANKER_ENABLED=true`, …); only the port bindings need an
+override:
 
 ```yaml
 # docker-compose.override.yml
 services:
   rag-server:
-    environment:
-      MNEMOS_RERANKER_ENABLED: "true"
-      MNEMOS_CACHE_ENABLED: "true"
-      MNEMOS_QUERY_LOG_ENABLED: "true"
-    ports:
+    ports: !override
       - "127.0.0.1:8100:8100"     # localhost only — let the reverse proxy expose it
-  qdrant:
-    ports: []                     # remove from compose-up exposure
 ```
 
 Then put Caddy in front:
@@ -81,21 +76,31 @@ mnemos.internal {
 
 ## Authentication
 
-The bundled `docker-compose.prod.yml` turns API-key auth on and mounts
-`config/tenants.yaml` as the bootstrap source for the first tenants:
+Authentication is set in `.env`; `docker-compose.prod.yml` adds the
+`config/tenants.yaml` mount (bootstrap source for the first tenants) and
+disables the watcher:
 
 ```bash
 cp config/tenants.example.yaml config/tenants.yaml   # then replace CHANGE_ME
-echo "QDRANT_API_KEY=$(openssl rand -hex 32)" >> .env
-cp docker-compose.prod.yml docker-compose.override.yml
-docker compose up -d
+openssl rand -hex 32                                 # the Qdrant key
 ```
 
-The prod file gives the same `QDRANT_API_KEY` to Qdrant
-(`QDRANT__SERVICE__API_KEY`) and to `rag-server`, and refuses to render
-without it. The server also refuses to start with auth on and no Qdrant key.
-On Kubernetes, put the key in a Secret read by both pods, and add a
-NetworkPolicy that only lets the Mnemos pods reach Qdrant.
+```dotenv
+# .env
+MNEMOS_AUTH_ENABLED=true
+QDRANT_API_KEY=<the key>
+QDRANT__SERVICE__API_KEY=<the same key>
+```
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+```
+
+`QDRANT__SERVICE__API_KEY` is the key Qdrant requires, `QDRANT_API_KEY` the one
+the server sends: they must be equal. Never leave `QDRANT__SERVICE__API_KEY`
+empty, it locks every client out. The server refuses to start with auth on and
+no Qdrant key. On Kubernetes, put the key in a Secret read by both pods, and
+add a NetworkPolicy that only lets the Mnemos pods reach Qdrant.
 
 `config/tenants.yaml` is gitignored on purpose — it holds your real API
 keys. The template at `config/tenants.example.yaml` is what ships with

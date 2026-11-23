@@ -1,14 +1,12 @@
+# Every setting comes from .env: cp .env.example .env
 services:
   qdrant:
     image: qdrant/qdrant:latest
-    # Survive a daemon restart or a crash. Without this the stack stays
-    # down after a reboot and nothing says so — mnemos went dark for three
-    # days that way, dashboard included.
     restart: unless-stopped
+    env_file: .env
     volumes:
       - qdrant_data:/qdrant/storage
-    # Loopback only: host-side tools (embedding migration, purge script)
-    # reach it, the LAN does not. docker-compose.prod.yml adds an API key.
+    # Loopback only: host tools reach it, the LAN does not.
     ports:
       - "127.0.0.1:6333:6333"
     healthcheck:
@@ -19,95 +17,23 @@ services:
       retries: 5
 
   rag-server:
-    # Pre-built image from Docker Hub. Override with docker-compose.dev.yml
-    # to build locally during development (`docker compose -f docker-compose.yml
-    # -f docker-compose.dev.yml up -d --build rag-server`).
-    image: ${MNEMOS_SERVER_IMAGE:-jamyouss/mnemos-server:latest}
+    image: ${MNEMOS_SERVER_IMAGE}
     restart: unless-stopped
-    pull_policy: ${MNEMOS_PULL_POLICY:-missing}
+    pull_policy: ${MNEMOS_PULL_POLICY}
+    env_file: .env
     ports:
       - "8100:8100"
-    environment:
-      QDRANT_HOST: qdrant
-      QDRANT_PORT: 6333
-      EMBEDDING_MODEL: "${EMBEDDING_MODEL:-all-MiniLM-L6-v2}"
-      CODEBASE_PATH: /data/codebase
-      CLAUDE_CONFIG_PATH: /data/claude-config
-      MNEMOS_AUTH_ENABLED: "false"
-      MNEMOS_STATE_DIR: /data/state
-      # Let the dashboard save the shared configuration (settings overrides,
-      # connectors, projects, tenants), stored in Qdrant. With auth off,
-      # anyone reaching :8100 can then change it.
-      MNEMOS_UI_CONFIG_WRITABLE: "${MNEMOS_UI_CONFIG_WRITABLE:-false}"
-      # How often this server checks Qdrant for configuration saved elsewhere.
-      MNEMOS_CONFIG_POLL_SECONDS: "${MNEMOS_CONFIG_POLL_SECONDS:-5}"
-      # Index only the prefixes the projects mapping declares. The watcher
-      # walks the whole codebase mount and has no idea which repos you meant
-      # to index, so this is the only place that scope can be enforced.
-      MNEMOS_INDEX_ONLY_DECLARED_PATHS: "${MNEMOS_INDEX_ONLY_DECLARED_PATHS:-false}"
-      # LLM (ollama | anthropic | openai). See .env.example for full reference.
-      MNEMOS_LLM_PROVIDER: "${MNEMOS_LLM_PROVIDER:-ollama}"
-      MNEMOS_LLM_MODEL: "${MNEMOS_LLM_MODEL:-llama3.1:8b}"
-      MNEMOS_LLM_API_KEY: "${MNEMOS_LLM_API_KEY:-}"
-      MNEMOS_LLM_BASE_URL: "${MNEMOS_LLM_BASE_URL:-}"
-      # Left blank on purpose: core.llm.factory probes the bundled service,
-      # host.docker.internal and localhost, and picks the first one that has a
-      # model pulled. Hardcoding the bundled URL here defeated that and sent
-      # every LLM call to an empty container.
-      MNEMOS_OLLAMA_URL: "${MNEMOS_OLLAMA_URL:-}"
-      MNEMOS_DEDUP_THRESHOLD: "${MNEMOS_DEDUP_THRESHOLD:-0.80}"
-      MNEMOS_DEDUP_STRATEGY: "${MNEMOS_DEDUP_STRATEGY:-merge}"
-      # Indexing and ranking knobs measured in docs/EVAL.md
-      MNEMOS_MAX_CHUNK_CHARS: "${MNEMOS_MAX_CHUNK_CHARS:-0}"
-      MNEMOS_FUSION_DENSE_WEIGHT: "${MNEMOS_FUSION_DENSE_WEIGHT:-3.0}"
-      MNEMOS_RESPONSE_BUDGET_CHARS: "${MNEMOS_RESPONSE_BUDGET_CHARS:-32000}"
-      # Contextual retrieval (Anthropic-style preamble per chunk via LLM)
-      MNEMOS_CONTEXTUAL_ENABLED: "${MNEMOS_CONTEXTUAL_ENABLED:-false}"
-      MNEMOS_CONTEXTUAL_WORKERS: "${MNEMOS_CONTEXTUAL_WORKERS:-4}"
-      # Cross-encoder reranker (Phase 2B). Default model: bge-reranker-base (~280MB).
-      MNEMOS_RERANKER_ENABLED: "${MNEMOS_RERANKER_ENABLED:-false}"
-      MNEMOS_RERANKER_MODEL: "${MNEMOS_RERANKER_MODEL:-BAAI/bge-reranker-base}"
-      MNEMOS_RERANKER_TYPE: "${MNEMOS_RERANKER_TYPE:-cross-encoder}"
-      MNEMOS_RERANKER_MAX_LENGTH: "${MNEMOS_RERANKER_MAX_LENGTH:-256}"
-      MNEMOS_MMR_ENABLED: "${MNEMOS_MMR_ENABLED:-false}"
-      MNEMOS_MMR_LAMBDA: "${MNEMOS_MMR_LAMBDA:-0.5}"
-      # CRAG corrective loop (Phase 3)
-      MNEMOS_GRADER_ENABLED: "${MNEMOS_GRADER_ENABLED:-false}"
-      MNEMOS_GRADER_WORKERS: "${MNEMOS_GRADER_WORKERS:-4}"
-      MNEMOS_REWRITER_ENABLED: "${MNEMOS_REWRITER_ENABLED:-false}"
-      MNEMOS_REWRITER_STRATEGY: "${MNEMOS_REWRITER_STRATEGY:-expansion}"
-      MNEMOS_REWRITER_MAX_VARIANTS: "${MNEMOS_REWRITER_MAX_VARIANTS:-3}"
-      # Semantic cache (Phase 4E)
-      MNEMOS_CACHE_ENABLED: "${MNEMOS_CACHE_ENABLED:-false}"
-      MNEMOS_CACHE_THRESHOLD: "${MNEMOS_CACHE_THRESHOLD:-0.95}"
-      MNEMOS_CACHE_TTL_SECONDS: "${MNEMOS_CACHE_TTL_SECONDS:-3600}"
-      # Observability (Phase 9)
-      MNEMOS_QUERY_LOG_ENABLED: "${MNEMOS_QUERY_LOG_ENABLED:-false}"
-      MNEMOS_QUERY_LOG_PATH: "${MNEMOS_QUERY_LOG_PATH:-/data/state/query-log.jsonl}"
     volumes:
-      # Mount your source code so Mnemos can index it. Set MNEMOS_CODEBASE_HOST_PATH
-      # to a project root on your host, e.g. "~/code" or "/srv/projects".
-      - ${MNEMOS_CODEBASE_HOST_PATH:-./data/codebase}:/data/codebase:ro
-      # Optional: mount your Claude config (skills, docs) for agent indexing.
-      - ${MNEMOS_CLAUDE_CONFIG_HOST_PATH:-./data/claude-config}:/data/claude-config:ro
-      # Import sources (connectors.yaml, projects.yaml), read once at the
-      # first start for each configuration absent from Qdrant, and the
-      # instance theme.css. Read-only: the configuration lives in Qdrant and
-      # the server writes nothing here.
+      - ${MNEMOS_CODEBASE_HOST_PATH}:/data/codebase:ro
+      - ${MNEMOS_CLAUDE_CONFIG_HOST_PATH}:/data/claude-config:ro
+      # One-time import sources and theme.css; the server writes nothing here.
       - ./config:/app/config:ro
-      # projects.yaml is mounted as a file, not left to the directory mount
-      # above, so it can be a symlink into a dotfiles repo. Docker resolves a
-      # bind-mount source on the host; a symlink *inside* a mounted directory
-      # would dangle in the container.
+      # Mounted as a file so it can be a symlink: Docker resolves a bind-mount
+      # source on the host, a symlink inside a mounted directory would dangle.
       - ./config/projects.yaml:/app/config/projects.yaml:ro
-      # Eval runs, read-only: local artefacts the dashboard reads but the
-      # image must never carry.
       - ./evals/runs:/app/evals/runs:ro
       - rag_state:/data/state
-      # HuggingFace model cache. The default embedding model is baked into the
-      # image; this volume persists what is fetched at runtime instead: the
-      # reranker (~280 MB) and any other EMBEDDING_MODEL (~1.5 GB for
-      # EmbeddingGemma 2), so a restart does not download them again.
+      # Models fetched at runtime (reranker, a non-default EMBEDDING_MODEL).
       - hf_cache:/opt/hf_cache
     depends_on:
       qdrant:
@@ -120,42 +46,25 @@ services:
       retries: 3
 
   watcher:
-    image: ${MNEMOS_WATCHER_IMAGE:-jamyouss/mnemos-watcher:latest}
+    image: ${MNEMOS_WATCHER_IMAGE}
     restart: unless-stopped
-    pull_policy: ${MNEMOS_PULL_POLICY:-missing}
-    environment:
-      MNEMOS_SERVER_URL: http://rag-server:8100
-      # Needed only when rag-server runs with MNEMOS_AUTH_ENABLED=true.
-      MNEMOS_API_KEY: ${MNEMOS_API_KEY:-}
-      CODEBASE_PATH: /data/codebase
-      CLAUDE_CONFIG_PATH: /data/claude-config
-      WATCHER_DEBOUNCE_MS: 2000
+    pull_policy: ${MNEMOS_PULL_POLICY}
+    env_file: .env
     volumes:
-      - ${MNEMOS_CODEBASE_HOST_PATH:-./data/codebase}:/data/codebase:ro
-      - ${MNEMOS_CLAUDE_CONFIG_HOST_PATH:-./data/claude-config}:/data/claude-config:ro
+      - ${MNEMOS_CODEBASE_HOST_PATH}:/data/codebase:ro
+      - ${MNEMOS_CLAUDE_CONFIG_HOST_PATH}:/data/claude-config:ro
     depends_on:
       rag-server:
         condition: service_healthy
 
-  # Knowledge connectors (Confluence, Jira, web, git): reads the sources from
-  # the server (GET /api/connectors, edited on the dashboard's Connectors
-  # page), syncs at start-up, then every `interval`, and within 5 s of a
-  # saved change. Opt-in:
-  #   docker compose --profile connectors up -d
-  # Resync now: docker compose kill -s HUP ingester
-  # One ingester only: never scale this service.
+  # Knowledge connectors. Opt-in: docker compose --profile connectors up -d
+  # Resync now: docker compose kill -s HUP ingester. Never scale it.
   ingester:
-    image: ${MNEMOS_CLI_IMAGE:-jamyouss/mnemos-cli:latest}
+    image: ${MNEMOS_CLI_IMAGE}
     restart: unless-stopped
-    pull_policy: ${MNEMOS_PULL_POLICY:-missing}
+    pull_policy: ${MNEMOS_PULL_POLICY}
     command: ["ingest", "serve"]
-    # Tokens named by `token_env` (CONFLUENCE_TOKEN, …) and MNEMOS_API_KEY come
-    # from .env. With auth on, the key needs the admin role or write "*".
-    env_file:
-      - path: .env
-        required: false
-    environment:
-      MNEMOS_URL: http://rag-server:8100
+    env_file: .env
     depends_on:
       rag-server:
         condition: service_healthy

@@ -1,26 +1,19 @@
-# Development override — build images locally instead of pulling from Docker Hub.
-# Usage:
+# Build the images from this checkout:
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
-#
-# Useful when you've edited the server/watcher code and want to run YOUR
-# version rather than the published one. Production deployments should leave
-# this file out and rely on the published `:latest` (or a pinned `:v0.1.0`).
-
+# Set MNEMOS_*_IMAGE in .env to local tags (mnemos-server:dev, …) so a build
+# never shadows the published images.
 services:
   rag-server:
     build:
       context: .
       dockerfile: server/Dockerfile
-    image: mnemos-server:dev
 
   watcher:
     build:
       context: .
       dockerfile: watcher/Dockerfile
-    image: mnemos-watcher:dev
 
   ingester:
     build:
       context: .
       dockerfile: cli/Dockerfile
-    image: mnemos-cli:dev

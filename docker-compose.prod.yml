@@ -1,24 +1,10 @@
+# Deployed instance: set MNEMOS_AUTH_ENABLED=true, QDRANT_API_KEY and
+# QDRANT__SERVICE__API_KEY (same value) in .env.
 services:
-  # Same key on both sides, from .env. An empty QDRANT__SERVICE__API_KEY would
-  # lock Qdrant for everyone, hence `:?` rather than a default.
-  qdrant:
-    environment:
-      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:?set QDRANT_API_KEY in .env}
-
   rag-server:
-    environment:
-      MNEMOS_AUTH_ENABLED: "true"
-      QDRANT_API_KEY: ${QDRANT_API_KEY:?set QDRANT_API_KEY in .env}
-      # Alternative to tenants.yaml for the first start: creates tenant
-      # `admin` with this key when the database holds no tenant.
-      MNEMOS_BOOTSTRAP_ADMIN_KEY: ${MNEMOS_BOOTSTRAP_ADMIN_KEY:-}
     volumes:
-      # Bootstrap source for the first tenants, imported once when the database
-      # holds none; keys are managed from the dashboard's Tenants page after.
-      # The file stays out of git on purpose. Start from the template:
-      #   cp config/tenants.example.yaml config/tenants.yaml
-      # then replace every CHANGE_ME key (the import refuses it otherwise).
-      # Using MNEMOS_BOOTSTRAP_ADMIN_KEY instead? Drop this mount.
+      # First tenants, imported once when the database holds none. Using
+      # MNEMOS_BOOTSTRAP_ADMIN_KEY instead? Drop this mount.
       - ./config/tenants.yaml:/data/config/tenants.yaml:ro
 
   watcher:
