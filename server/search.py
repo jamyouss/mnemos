@@ -21,7 +21,7 @@ from core.cache import SemanticCache
 from core.collections import COLLECTIONS, DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME, TAGS_PAYLOAD_FIELD
 from core.embeddings import EmbeddingService
 from core.grader import DocumentGrader
-from core.indexer import TAGGED_COLLECTIONS
+from core.indexer import PATH_DIRS_FIELD, TAGGED_COLLECTIONS
 from core.models import (
     CodeSearchResult,
     MemoryResult,
@@ -59,6 +59,15 @@ _METADATA_KEEP: tuple[str, ...] = (
 
 def _filter_metadata(payload: dict) -> dict:
     return {k: payload[k] for k in _METADATA_KEEP if k in payload}
+
+
+def _path_condition(path_filter: str) -> Filter:
+    """One file by its exact path, or every file under a directory."""
+    directory = path_filter if path_filter.endswith("/") else f"{path_filter}/"
+    return Filter(should=[
+        FieldCondition(key="file_path", match=MatchValue(value=path_filter)),
+        FieldCondition(key=PATH_DIRS_FIELD, match=MatchValue(value=directory)),
+    ])
 
 
 def _scoped_filter(conditions: list, collection: str, read_scope: list[str] | None) -> Filter | None:
@@ -441,7 +450,7 @@ class SearchService:
         if file_types:
             must_conditions.append(FieldCondition(key="language", match=MatchAny(any=file_types)))
         if path_filter:
-            must_conditions.append(FieldCondition(key="file_path", match=MatchValue(value=path_filter)))
+            must_conditions.append(_path_condition(path_filter))
         if tags_any:
             # OR semantics across the provided tags — one MatchAny on `tags`.
             must_conditions.append(FieldCondition(key="tags", match=MatchAny(any=list(tags_any))))
@@ -545,7 +554,7 @@ class SearchService:
         if symbol_type:
             must_conditions.append(FieldCondition(key="chunk_type", match=MatchValue(value=symbol_type)))
         if path_filter:
-            must_conditions.append(FieldCondition(key="file_path", match=MatchValue(value=path_filter)))
+            must_conditions.append(_path_condition(path_filter))
         query_filter = _scoped_filter(must_conditions, "mnemos_code", read_scope)
 
         per_collection = _HYBRID_TOP if (self._reranker and self._reranker.enabled) else limit

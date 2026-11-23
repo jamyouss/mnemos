@@ -541,3 +541,50 @@ def test_fusion_weight_one_is_plain_rrf(mock_qdrant, mock_embeddings):
     _mock_query_points(mock_qdrant, [])
     SearchService(qdrant_client=mock_qdrant, embedding_service=mock_embeddings, dense_weight=1.0).search_code("q")
     assert mock_qdrant.query_points.call_args.kwargs["query"] == FusionQuery(fusion=Fusion.RRF)
+
+
+@pytest.fixture
+def indexed_service():
+    """A real (in-memory) Qdrant holding four files, searched through SearchService."""
+    from qdrant_client import QdrantClient
+
+    from core.indexer import Indexer
+
+    embeddings = MagicMock()
+    embeddings.dimension = 4
+    embeddings.embed_documents.side_effect = lambda texts, titles=None: [[0.1, 0.2, 0.3, 0.4]] * len(texts)
+    embeddings.embed_query.return_value = [0.1, 0.2, 0.3, 0.4]
+    qdrant = QdrantClient(":memory:")
+    indexer = Indexer(qdrant_client=qdrant, embedding_service=embeddings)
+    indexer.ensure_collection("mnemos_code")
+    for path in (
+        "/data/codebase/a/app/src/main.ts",
+        "/data/codebase/a/app/README.md",
+        "/data/codebase/a/app-old/x.ts",
+        "/data/codebase/b/main.go",
+    ):
+        indexer.index_file("export const auth = 1\nfunction login() {}\n", path, "mnemos_code", tags=["t"])
+    return SearchService(qdrant_client=qdrant, embedding_service=embeddings)
+
+
+def _paths(results) -> list[str]:
+    return sorted({r.file_path for r in results})
+
+
+@pytest.mark.parametrize("path_filter", ["/data/codebase/a/app", "/data/codebase/a/app/"])
+def test_path_filter_on_a_directory_keeps_every_file_under_it(indexed_service, path_filter):
+    results = indexed_service.search_code("login", path_filter=path_filter, limit=10)
+    # app-old shares the prefix as a string, not as a directory.
+    assert _paths(results) == ["/data/codebase/a/app/README.md", "/data/codebase/a/app/src/main.ts"]
+
+
+def test_path_filter_on_a_file_keeps_only_that_file(indexed_service):
+    results = indexed_service.search("login", collections=["mnemos_code"], path_filter="/data/codebase/b/main.go", limit=10)
+    assert _paths(results) == ["/data/codebase/b/main.go"]
+
+
+def test_language_filters_reach_files_their_chunker_does_not_label(indexed_service):
+    ts = ["/data/codebase/a/app-old/x.ts", "/data/codebase/a/app/src/main.ts"]
+    assert _paths(indexed_service.search_code("login", language="typescript", limit=10)) == ts
+    results = indexed_service.search("login", collections=["mnemos_code"], file_types=["markdown"], limit=10)
+    assert _paths(results) == ["/data/codebase/a/app/README.md"]

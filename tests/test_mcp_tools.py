@@ -280,12 +280,9 @@ def test_call_tool_returns_compact_json():
     mcp_server = create_mcp_server(search_service=search_service, indexer=indexer)
 
     text = _call_tool_text(mcp_server, "mnemos_search", {"query": "anything"})
-    # An indent=2 dump of `[]` is just "[]" too, so we use a tool with non-empty
-    # output: mnemos_search returns [] for no hits but we round-trip a dispatch
-    # that actually produces a dict — use mnemos_reindex which always returns one.
-    text = _call_tool_text(
-        mcp_server, "mnemos_reindex", {"collection": "mnemos_code", "mode": "incremental"}
-    )
+    # An indent=2 dump of `[]` is just "[]" too: round-trip a tool that returns
+    # a dict — mnemos_status without a Qdrant client answers with an error dict.
+    text = _call_tool_text(mcp_server, "mnemos_status", {})
     assert "\n" not in text, f"Response should be single-line compact JSON, got: {text!r}"
     # Compact JSON uses no spaces around separators.
     assert ", " not in text and ": " not in text
@@ -351,3 +348,61 @@ def test_dispatch_runs_concurrent_tool_calls_in_parallel():
     results = asyncio.run(two_calls())
 
     assert [r["results"] for r in results] == [[], []]
+
+
+def _reindex(tmp_path, monkeypatch, args):
+    """Run mnemos_reindex with `tmp_path` as the only allowed mount; return (result, run args)."""
+    monkeypatch.setattr("server.api._ALLOWED_BASE_DIRS", [str(tmp_path)])
+    started = threading.Event()
+    calls = []
+
+    def fake_run(*a, **kw):
+        calls.append((a, kw))
+        started.set()
+
+    monkeypatch.setattr("server.mcp_tools.run_reindex", fake_run)
+    cache = MagicMock(enabled=True)
+    indexer = MagicMock()
+    result = asyncio.run(_dispatch_tool(
+        name="mnemos_reindex", args=args, principal=FULL_ACCESS, search_service=MagicMock(),
+        indexer=indexer, qdrant_client=None, cache=cache,
+    ))
+    if isinstance(result, dict) and result.get("status") == "reindex_started":
+        assert started.wait(2)
+        cache.invalidate.assert_called_once()
+        indexer.ensure_collection.assert_called_once_with(args["collection"])
+    return result, calls
+
+
+def test_reindex_walks_a_directory(tmp_path, monkeypatch):
+    (tmp_path / "svc").mkdir()
+    result, calls = _reindex(tmp_path, monkeypatch, {"collection": "mnemos_code", "path": str(tmp_path / "svc")})
+
+    assert result["status"] == "reindex_started"
+    (_, collection, base_path, full), kwargs = calls[0]
+    assert (collection, str(base_path), full) == ("mnemos_code", str((tmp_path / "svc").resolve()), True)
+    assert kwargs["cache"].enabled is True
+
+
+def test_reindex_of_one_file_does_not_walk(tmp_path, monkeypatch):
+    (tmp_path / "a.go").write_text("package a\n")
+    _, calls = _reindex(tmp_path, monkeypatch, {"collection": "mnemos_code", "path": str(tmp_path / "a.go")})
+
+    assert calls[0][0][3] is False
+
+
+def test_reindex_refuses_a_path_outside_the_mounts(tmp_path, monkeypatch):
+    import pytest
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException, match="outside allowed directories"):
+        _reindex(tmp_path / "mount", monkeypatch, {"collection": "mnemos_code", "path": str(tmp_path)})
+
+
+def test_reindex_defaults_to_the_collection_root(tmp_path, monkeypatch):
+    from server.config import settings
+
+    monkeypatch.setattr(settings, "codebase_path", str(tmp_path))
+    _, calls = _reindex(tmp_path, monkeypatch, {"collection": "mnemos_code"})
+
+    assert str(calls[0][0][2]) == str(tmp_path.resolve())

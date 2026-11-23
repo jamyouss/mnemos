@@ -139,7 +139,27 @@ _ALLOWED_BASE_DIRS = [
 ]
 
 
-def _validate_path(file_path: str) -> Path:
+def invalidate_cache(cache) -> None:
+    """The index changed: no cached answer may outlive it, on any pod (the cache lives in Qdrant)."""
+    if cache is not None and cache.enabled:
+        cache.invalidate()
+
+
+def _index_changed(request: Request) -> None:
+    invalidate_cache(getattr(request.app.state, "cache", None))
+
+
+# Where a reindex walks when the caller names no path. Connector and memory
+# collections are pushed through the API: they have nothing to walk.
+def default_reindex_root(collection: str) -> str | None:
+    return {
+        "mnemos_code": settings.codebase_path,
+        "mnemos_skills": f"{settings.claude_config_path}/skills",
+        "mnemos_docs": f"{settings.claude_config_path}/docs",
+    }.get(collection)
+
+
+def validate_path(file_path: str) -> Path:
     """Resolve path and ensure it starts with an allowed base directory."""
     resolved = Path(file_path).resolve()
     for base in _ALLOWED_BASE_DIRS:
@@ -157,13 +177,14 @@ def _validate_path(file_path: str) -> Path:
 @api_router.post("/internal/reindex")
 def internal_reindex(body: ReindexInternalRequest, request: Request):
     require_write_all(principal_of(request))
-    safe_path = _validate_path(body.file_path)
+    safe_path = validate_path(body.file_path)
 
     if body.event == "deleted":
         request.app.state.indexer.delete_file(
             file_path=body.file_path,
             collection=body.collection,
         )
+        _index_changed(request)
         return {"status": "deleted", "file_path": body.file_path}
 
     if not safe_path.exists():
@@ -181,6 +202,7 @@ def internal_reindex(body: ReindexInternalRequest, request: Request):
         collection=body.collection,
         file_mtime=safe_path.stat().st_mtime,
     )
+    _index_changed(request)
     return {"status": "indexed", "file_path": body.file_path, "chunks": count}
 
 
@@ -249,6 +271,7 @@ def push_index(body: IndexPushRequest, request: Request):
         source_url=body.source_url,
         file_mtime=body.file_mtime,
     )
+    _index_changed(request)
     return {"status": "indexed", "file_path": body.file_path, "chunks": count}
 
 
@@ -259,6 +282,7 @@ def delete_index(collection: str, file_path: str, request: Request):
         file_path=file_path,
         collection=collection,
     )
+    _index_changed(request)
     return {"status": "deleted", "collection": collection, "file_path": file_path}
 
 
@@ -520,7 +544,7 @@ def _index_one_file(indexer, collection: str, fp, tags: list[str] | None = None)
         return -1  # sentinel for "skipped on error"
 
 
-def _run_reindex(
+def run_reindex(
     indexer,
     collection: str,
     base_path,
@@ -529,6 +553,7 @@ def _run_reindex(
     tags: list[str] | None = None,
     exclude_exts: list[str] | None = None,
     exclude_dirs: list[str] | None = None,
+    cache=None,
 ) -> None:
     """Background task: walk files and index them, optionally in parallel."""
     import logging
@@ -576,6 +601,8 @@ def _run_reindex(
         f"Reindex complete: collection={collection} files={len(files)} "
         f"indexed_chunks={indexed} skipped_files={skipped} workers={workers}"
     )
+    # Again at the end: answers cached while the walk ran predate part of it.
+    invalidate_cache(cache)
 
 
 @api_router.post("/api/reindex")
@@ -588,16 +615,13 @@ def reindex(body: ReindexRequest, request: Request, background_tasks: Background
     else:
         indexer.ensure_collection(body.collection)
 
-    # Semantic cache (if enabled) is invalidated on any reindex so stale results
-    # can never be served after the underlying index has changed.
     cache = getattr(request.app.state, "cache", None)
-    if cache is not None and cache.enabled:
-        cache.invalidate()
+    invalidate_cache(cache)
 
     if body.path:
-        base_path = _validate_path(body.path)
+        base_path = validate_path(body.path)
         background_tasks.add_task(
-            _run_reindex,
+            run_reindex,
             indexer,
             body.collection,
             base_path,
@@ -606,6 +630,7 @@ def reindex(body: ReindexRequest, request: Request, background_tasks: Background
             body.tags,
             body.exclude_exts,
             body.exclude_dirs,
+            cache,
         )
         return {
             "status": "reindex_started",
@@ -766,6 +791,7 @@ def create_memory(body: MemoryCreateRequest, request: Request):
     )
 
     result = deduplicator.deduplicate_and_store(memory, status=body.status)
+    _index_changed(request)
     return {"status": "created", "id": result.memory_id, "action": result.action}
 
 
@@ -810,6 +836,7 @@ def review_memory(mem_id: str, body: MemoryReviewRequest, request: Request):
             )
         ],
     )
+    _index_changed(request)
     return {"status": new_status, "id": mem_id}
 
 
@@ -844,6 +871,8 @@ def extract_memories(body: MemoryExtractRequest, request: Request):
             "status": dedup_result.status,
         })
 
+    if results:
+        _index_changed(request)
     return {"extracted": len(results), "memories": results}
 
 

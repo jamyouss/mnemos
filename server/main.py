@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -28,6 +29,18 @@ logger = logging.getLogger("mnemos.server")
 from core.config_store import ConfigDocStore
 from core.embeddings import EmbeddingService
 from core.indexer import Indexer
+
+
+def _backfill_path_fields(indexer: Indexer, collections: list[str]) -> None:
+    """Label chunks indexed before `path_dirs`, so path filters see them without a reindex."""
+    for name in collections:
+        try:
+            files = indexer.backfill_path_fields(name)
+        except Exception:
+            logger.exception("path_dirs backfill failed on %s", name)
+            continue
+        if files:
+            logger.info("path_dirs backfill: %d files of %s", files, name)
 
 
 def create_app() -> FastAPI:
@@ -176,6 +189,14 @@ def create_app() -> FastAPI:
                     f"or set EMBEDDING_MODEL back."
                 )
 
+        # Off the startup path: one set_payload per file of an older index.
+        threading.Thread(
+            target=_backfill_path_fields,
+            args=(app.state.indexer, [c.name for c in COLLECTIONS if c.name != "mnemos_memory"]),
+            name="path-backfill",
+            daemon=True,
+        ).start()
+
         from server.mcp_tools import create_mcp_server
         mcp_server = create_mcp_server(
             search_service=app.state.search_service,
@@ -183,6 +204,7 @@ def create_app() -> FastAPI:
             qdrant_client=app.state.qdrant,
             embedding_service=app.state.embeddings,
             deduplicator=app.state.deduplicator,
+            cache=app.state.cache,
         )
 
         # Streamable HTTP session manager

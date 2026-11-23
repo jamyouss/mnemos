@@ -388,7 +388,8 @@ def test_ensure_collection_indexes_facet_fields(mock_qdrant, mock_embeddings):
     ]
     assert indexed == [
         ("mnemos_code", "tags"), ("mnemos_code", "language"), ("mnemos_code", "chunk_type"),
-        ("mnemos_docs", "language"), ("mnemos_docs", "chunk_type"),
+        ("mnemos_code", "path_dirs"),
+        ("mnemos_docs", "language"), ("mnemos_docs", "chunk_type"), ("mnemos_docs", "path_dirs"),
     ]
 
 
@@ -398,7 +399,7 @@ def test_ensure_collection_backfills_indexes_on_existing_collections(mock_qdrant
 
     mock_qdrant.create_collection.assert_not_called()
     fields = [c.kwargs["field_name"] for c in mock_qdrant.create_payload_index.call_args_list]
-    assert fields == ["language", "chunk_type"]
+    assert fields == ["language", "chunk_type", "path_dirs"]
 
 
 def test_ensure_collection_survives_a_replica_creating_it_first(mock_qdrant, mock_embeddings):
@@ -409,7 +410,7 @@ def test_ensure_collection_survives_a_replica_creating_it_first(mock_qdrant, moc
     Indexer(qdrant_client=mock_qdrant, embedding_service=mock_embeddings).ensure_collection("mnemos_code")
 
     fields = [c.kwargs["field_name"] for c in mock_qdrant.create_payload_index.call_args_list]
-    assert fields == ["tags", "language", "chunk_type"]
+    assert fields == ["tags", "language", "chunk_type", "path_dirs"]
 
 
 def test_ensure_collection_reraises_a_real_creation_failure(mock_qdrant, mock_embeddings):
@@ -425,3 +426,60 @@ def test_facet_fields_follow_tagging():
 
     assert facet_fields("mnemos_code") == ("tags", "language", "chunk_type")
     assert facet_fields("mnemos_docs") == ("language", "chunk_type")
+
+
+def _memory_indexer():
+    from qdrant_client import QdrantClient
+
+    embeddings = MagicMock()
+    embeddings.dimension = 4
+    embeddings.embed_documents.side_effect = lambda texts, titles=None: [[0.1, 0.2, 0.3, 0.4]] * len(texts)
+    qdrant = QdrantClient(":memory:")
+    indexer = Indexer(qdrant_client=qdrant, embedding_service=embeddings)
+    indexer.ensure_collection("mnemos_code")
+    return indexer, qdrant
+
+
+def _payloads(qdrant) -> dict[str, dict]:
+    points, _ = qdrant.scroll("mnemos_code", limit=100, with_payload=True)
+    return {p.payload["file_path"]: p.payload for p in points}
+
+
+def test_index_file_labels_directories_and_language():
+    indexer, qdrant = _memory_indexer()
+    indexer.index_file("export const a = 1\n", "/data/codebase/web/src/api.ts", "mnemos_code", tags=["web"])
+    indexer.index_file("package x\n\nfunc A() {}\n", "/data/codebase/svc/a.go", "mnemos_code", tags=["svc"])
+
+    payloads = _payloads(qdrant)
+    ts = payloads["/data/codebase/web/src/api.ts"]
+    assert ts["language"] == "typescript"
+    assert ts["path_dirs"] == ["/data/", "/data/codebase/", "/data/codebase/web/", "/data/codebase/web/src/"]
+    assert payloads["/data/codebase/svc/a.go"]["language"] == "go"
+
+
+def test_backfill_labels_chunks_indexed_before_path_dirs():
+    from qdrant_client.models import PointStruct
+
+    from core.collections import DENSE_VECTOR_NAME
+
+    indexer, qdrant = _memory_indexer()
+    legacy = [
+        {"file_path": "/data/codebase/web/api.ts", "chunk_index": 0},
+        {"file_path": "/data/codebase/web/api.ts", "chunk_index": 1},
+        {"file_path": "/data/codebase/svc/a.go", "language": "go"},
+        {"file_path": "/data/codebase/notes.unknownext"},
+    ]
+    qdrant.upsert("mnemos_code", points=[
+        PointStruct(id=i, vector={DENSE_VECTOR_NAME: [0.1, 0.2, 0.3, 0.4]}, payload=p)
+        for i, p in enumerate(legacy)
+    ])
+
+    assert indexer.backfill_path_fields("mnemos_code") == 3
+
+    points, _ = qdrant.scroll("mnemos_code", limit=100, with_payload=True)
+    by_id = {p.id: p.payload for p in points}
+    assert by_id[0]["language"] == by_id[1]["language"] == "typescript"
+    assert by_id[1]["path_dirs"][-1] == "/data/codebase/web/"
+    assert by_id[2]["language"] == "go"
+    assert "language" not in by_id[3] and by_id[3]["path_dirs"][-1] == "/data/codebase/"
+    assert indexer.backfill_path_fields("mnemos_code") == 0

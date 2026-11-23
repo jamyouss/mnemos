@@ -418,7 +418,7 @@ def test_mcp_call_reads_the_principal_from_the_http_request():
     _call_tool(mcp_server, "mnemos_search_code", {"query": "q"}, request=request)
     assert search_service.search_code.call_args.kwargs["read_scope"] == ["acme"]
 
-    text = _call_tool(mcp_server, "mnemos_reindex", {}, request=request)
+    text = _call_tool(mcp_server, "mnemos_reindex", {"collection": "mnemos_code"}, request=request)
     assert text.startswith("Error: 403")
 
 

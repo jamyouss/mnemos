@@ -57,7 +57,7 @@ for per-phase numbers.
 > turns it on.
 - ✅ **Semantic cache** (`MNEMOS_CACHE_ENABLED`) — Qdrant-backed,
   cosine ≥ `MNEMOS_CACHE_THRESHOLD`, TTL via `MNEMOS_CACHE_TTL_SECONDS`,
-  invalidated on `reindex`.
+  wiped on every index write (push, delete, memory, reindex).
 
 ### Indexing
 - ✅ **Code-aware chunkers** — tree-sitter (Go), regex SFC (Vue),

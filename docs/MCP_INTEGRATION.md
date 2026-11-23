@@ -17,15 +17,15 @@ Once an MCP client is connected, the agent sees these 9 tools
 | `mnemos_memory` | Store a memory (`content`; optional `memory_type` — default `note` —, `tags`, `project`), deduplicated against existing ones. Written `approved`: searchable at once | `{id, status, action}` (`inserted` / `merged` / `replaced`) |
 | `mnemos_memory_list` | List memories, filtered by `project` / `status`; `limit` (20) | The raw entries, one call, no paging |
 | `mnemos_memory_review` | `approve` or `reject` a memory by `memory_id`, whatever its current status | `{memory_id, action}` |
-| `mnemos_reindex` | **Acknowledgement only**: it checks the caller may write every tag and answers, but starts no reindex. Use `mnemos reindex` / `POST /api/reindex` | `{collection, mode, message}` |
+| `mnemos_reindex` | Re-index a file or a directory tree of `mnemos_code`, `mnemos_skills` or `mnemos_docs` (`collection`, optional server-side `path`, default the collection's root: the codebase mount, `skills/` or `docs/`). Runs in the background; needs a key that may write every tag; the path must sit under the codebase or Claude config mount. Clears the semantic cache when the run starts and ends | `{status: reindex_started, collection, path}` |
 | `mnemos_status` | Qdrant health + per-collection counts | `{qdrant_healthy, collections: {name: {document_count, vector_size}}}` |
 
 The search tools' responses are capped at `MNEMOS_RESPONSE_BUDGET_CHARS`
 (32 000 characters): trailing results past it are dropped and counted in
-`dropped`. `path_filter` is an **exact** match on the stored `file_path` (the
-full container path, e.g. `/data/codebase/myproject/main.go`): use it to
-re-fetch a file you already found, not to scope a directory — `tags_any`
-does that.
+`dropped`. `path_filter` takes one file or one directory, as a stored
+container path: `/data/codebase/myproject/main.go` re-fetches that file,
+`/data/codebase/myproject/api` keeps every file under that directory (whole
+path segments: `api` does not match `api-old`).
 
 ## Claude Code
 

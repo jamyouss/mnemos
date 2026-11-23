@@ -322,10 +322,10 @@ code collection is small.
 | `MNEMOS_CACHE_THRESHOLD` | `0.95` | Cosine sim threshold for a cache hit |
 | `MNEMOS_CACHE_TTL_SECONDS` | `3600` | Entry expiry |
 
-Stored in a dedicated `mnemos_cache` Qdrant collection. Wiped when a bulk
-reindex starts (`POST /api/reindex`, `mnemos reindex`) while the cache is on.
-Per-file pushes (watcher, git hooks, connectors) do not wipe it: a cached
-answer can lag a changed file by up to `MNEMOS_CACHE_TTL_SECONDS`.
+Stored in a dedicated `mnemos_cache` Qdrant collection. Wiped on every write
+to an index while the cache is on: per-file pushes and deletes (watcher, git
+hooks, connectors), memory writes, and bulk reindexes at start and end. See
+[RETRIEVAL_PIPELINE.md](RETRIEVAL_PIPELINE.md).
 
 ## Memory pipeline
 

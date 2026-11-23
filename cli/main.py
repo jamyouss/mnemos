@@ -171,8 +171,8 @@ def status() -> None:
 @click.argument("query")
 @click.option("--limit", default=5, show_default=True, help="Number of results to return.")
 @click.option("--collection", multiple=True, help="Restrict to specific collections.")
-@click.option("--file-type", multiple=True, help="Restrict to specific file types.")
-@click.option("--path-filter", default=None, help="Only this file: its exact indexed path, not a prefix.")
+@click.option("--file-type", multiple=True, help="Restrict to languages (go, python, typescript, markdown…).")
+@click.option("--path-filter", default=None, help="One indexed file, or a directory: every file under it.")
 @click.option(
     "--tags",
     default=None,
@@ -234,7 +234,7 @@ def search(
 @cli.command("search-code")
 @click.argument("query")
 @click.option("--limit", default=3, show_default=True, help="Number of results to return.")
-@click.option("--language", default=None, help="Filter by programming language.")
+@click.option("--language", default=None, help="Filter by language (go, python, typescript, markdown…).")
 @click.option("--symbol-type", default=None, help="Filter by symbol type (func, type, etc.).")
 @click.option(
     "--tags",
@@ -248,7 +248,7 @@ def search(
     default=None,
     help="Comma-separated tags (AND filter). Example: --tags-all acme,vue3",
 )
-@click.option("--path-filter", default=None, help="Only this file: its exact indexed path, not a prefix.")
+@click.option("--path-filter", default=None, help="One indexed file, or a directory: every file under it.")
 @click.option(
     "--mode",
     type=click.Choice(["preview", "full"]),

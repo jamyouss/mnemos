@@ -62,8 +62,8 @@ mnemos search "rollback" --collection mnemos_knowledge --tags jira:OPS
 |------|------|---------|-------------|
 | `--limit` | int | `5` | Number of results |
 | `--collection` | str (repeatable) | _all but memory_ | Restrict to specific collections |
-| `--file-type` | str (repeatable) | _any_ | Filter on the chunk's `language`: only the Go, Vue and CSV/TSV chunkers set one (`go`, `vue`, `csv`, `tsv`) |
-| `--path-filter` | str | _none_ | **Exact** match on the stored `file_path` — the full container path, e.g. `/data/codebase/myproject/main.go`. Not a prefix or substring |
+| `--file-type` | str (repeatable) | _any_ | Filter on the chunk's `language`, derived from the file name: `go`, `python`, `typescript`, `javascript`, `vue`, `markdown`, `yaml`, `json`, `shell`, `sql`, `csv`, `tsv`… (`core.indexer.language_for`). Pushed content with no recognised extension carries none |
+| `--path-filter` | str | _none_ | One file or one directory, as a stored container path: `/data/codebase/myproject/main.go` keeps that file, `/data/codebase/myproject/api` (trailing `/` optional) every file under it. Matches whole path segments: `api` does not match `api-old` |
 | `--tags` | comma-separated | _none_ | OR filter on the `tags` payload (sent as `tags_any`) |
 | `--tags-all` | comma-separated | _none_ | AND filter: every tag must be present (sent as `tags_all`) |
 | `--mode` | `preview` / `full` | `preview` | `preview` truncates each chunk; `full` returns whole chunks |
@@ -81,11 +81,11 @@ mnemos search-code "auth"        --tags-all acme,vue3                 # AND
 | Flag | Description |
 |------|-------------|
 | `--limit` | Results count (default 3) |
-| `--language` | Exact `language` value: `go`, `vue`, `csv`, `tsv` (other files carry none) |
+| `--language` | Exact `language` value, as for `--file-type` on `search` |
 | `--symbol-type` | Exact `chunk_type` from the chunker: Go `function` (methods included), `type`, `header`; Vue `template`, `script`, `style`; Markdown `section`; CSV/TSV `rows`; fallback `file`, `window` |
 | `--tags` | Comma-separated tags (OR filter on the `tags` payload) |
 | `--tags-all` | Comma-separated tags (AND filter — every tag must be present) |
-| `--path-filter` | Exact match on the full stored `file_path`, as for `search` |
+| `--path-filter` | One file or a directory, as for `search` |
 | `--mode` | `preview` (default) or `full` |
 
 ### `mnemos search-skills QUERY`

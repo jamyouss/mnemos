@@ -73,10 +73,13 @@ does is look up a previously-served result with a sufficiently close query.
 - **Hit criterion**: cosine similarity ≥ `MNEMOS_CACHE_THRESHOLD` (0.95
   default) **and** namespace match **and** age ≤ `MNEMOS_CACHE_TTL_SECONDS`
   (3600 default).
-- **Invalidation**: every `POST /api/reindex` drops the whole cache before
-  scheduling the background reindex. Single-file pushes (`POST /api/index`
-  from the git hooks and connectors, the watcher's `/internal/reindex`) do
-  not: a cached result can lag those until its TTL expires.
+- **Invalidation**: every write to an index drops the whole cache — a
+  single-file push or delete (`POST /api/index`, `DELETE /api/index/...`,
+  the watcher's `/internal/reindex`), a memory written, reviewed or
+  extracted, and a bulk reindex (`POST /api/reindex`, MCP `mnemos_reindex`)
+  both when it starts and when its walk ends. The cache lives in Qdrant, so
+  the wipe reaches every pod. A burst of pushes empties it repeatedly: the
+  cache pays off on a quiet index, not during a sync.
 - **Failure mode**: fail-open. Any Qdrant error → cache miss → normal path.
 
 Cache hits also get logged (`cache_hit: true, cache_score: 0.97`) for analysis.

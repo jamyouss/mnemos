@@ -214,7 +214,8 @@ Every chunk carries:
 | `file_path` | str | Container path (or synthetic `memory/<id>` for memories) |
 | `content` | str | Chunk text |
 | `chunk_index` | int | Position in the file; with `file_path`, it makes the point id |
-| `language` | str | `go`, `vue`, `csv`, `tsv` — only set by those chunkers |
+| `language` | str | From the file name (`core.indexer.language_for`: `go`, `python`, `typescript`, `markdown`, `yaml`…); a chunker's own label wins. Absent when the extension is unknown |
+| `path_dirs` | list[str] | Every ancestor directory of `file_path`, slash-terminated (`/data/`, `/data/codebase/`, …): what a directory `path_filter` matches. Chunks written before the field existed get it from a background backfill at server start |
 | `chunk_type` | str | `function`, `type`, `header` (Go), `template` / `script` / `style` (Vue), `section` (Markdown), `rows`, `file`, `window`, `memory` |
 | `symbol_name` | str | Function / type name when AST-derived |
 | `tags` | list[str] | Scoping labels — first tag is primary (display). Filtered with `tags_any` (OR) and `tags_all` (AND). |

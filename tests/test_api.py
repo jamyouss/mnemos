@@ -373,6 +373,22 @@ async def test_api_delete_index(app):
     assert data["collection"] == "mnemos_code"
 
 
+@pytest.mark.anyio
+@pytest.mark.parametrize("method, url, body", [
+    ("POST", "/api/index", {"file_path": "/data/codebase/a.go", "collection": "mnemos_code", "content": "package a\n"}),
+    ("DELETE", "/api/index/mnemos_code/src/main.go", None),
+    ("POST", "/api/memory", {"content": "Use RRF", "tags": ["x"]}),
+])
+async def test_index_mutations_clear_the_semantic_cache(app, method, url, body):
+    """A cached answer must not outlive the chunks it was built from."""
+    app.state.cache = MagicMock(enabled=True)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.request(method, url, json=body)
+    assert response.status_code == 200
+    app.state.cache.invalidate.assert_called_once()
+
+
 # ---------------------------------------------------------------------------
 # /api/reindex
 # ---------------------------------------------------------------------------

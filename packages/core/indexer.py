@@ -16,9 +16,11 @@ from qdrant_client.models import (
     FieldCondition,
     Filter,
     FilterSelector,
+    IsEmptyCondition,
     KeywordIndexParams,
     MatchValue,
     Modifier,
+    PayloadField,
     PayloadSchemaType,
     PointStruct,
     SparseVectorParams,
@@ -104,6 +106,48 @@ TAGGED_COLLECTIONS = ("mnemos_code", "mnemos_memory", "mnemos_knowledge")
 # field a collection never carries (memories have no `language`) stays empty.
 CHUNK_FACET_FIELDS = ("language", "chunk_type")
 
+# Every ancestor directory of a chunk's file, slash-terminated: what a path
+# prefix filter matches, since Qdrant has no prefix match on a keyword.
+PATH_DIRS_FIELD = "path_dirs"
+
+# Language of a file the chunkers do not label themselves. Go, Vue, CSV and
+# TSV keep the names their chunkers already write.
+_LANGUAGE_BY_EXT = {
+    ".py": "python", ".pyi": "python",
+    ".ts": "typescript", ".tsx": "typescript", ".mts": "typescript", ".cts": "typescript",
+    ".js": "javascript", ".jsx": "javascript", ".mjs": "javascript", ".cjs": "javascript",
+    ".go": "go", ".vue": "vue", ".svelte": "svelte",
+    ".md": "markdown", ".mdx": "markdown",
+    ".json": "json", ".yaml": "yaml", ".yml": "yaml", ".toml": "toml", ".xml": "xml",
+    ".sh": "shell", ".bash": "shell", ".zsh": "shell",
+    ".sql": "sql", ".html": "html", ".css": "css", ".scss": "scss",
+    ".java": "java", ".kt": "kotlin", ".rs": "rust", ".rb": "ruby", ".php": "php",
+    ".cs": "csharp", ".c": "c", ".h": "c", ".cpp": "cpp", ".cc": "cpp", ".hpp": "cpp",
+    ".swift": "swift", ".tf": "terraform", ".proto": "protobuf",
+    ".csv": "csv", ".tsv": "tsv",
+}
+_LANGUAGE_BY_NAME = {"dockerfile": "dockerfile", "makefile": "makefile"}
+
+
+def language_for(file_path: str) -> str | None:
+    """Language of `file_path` from its name, or None when unknown."""
+    name = file_path.rsplit("/", 1)[-1].lower()
+    if name in _LANGUAGE_BY_NAME:
+        return _LANGUAGE_BY_NAME[name]
+    dot = name.rfind(".")
+    return _LANGUAGE_BY_EXT.get(name[dot:]) if dot > 0 else None
+
+
+def path_dirs(file_path: str) -> list[str]:
+    """Ancestor directories of `file_path`, each ending with `/`, root excluded."""
+    dirs: list[str] = []
+    current = ""
+    for part in file_path.split("/")[:-1]:
+        current += part + "/"
+        if current != "/":
+            dirs.append(current)
+    return dirs
+
 
 def facet_fields(collection_name: str) -> tuple[str, ...]:
     """Payload fields of `collection_name` that carry a keyword index."""
@@ -133,7 +177,7 @@ def create_hybrid_collection(
 
 def _ensure_payload_indexes(qdrant: QdrantClient, name: str, tagged: bool) -> None:
     """Idempotently create the keyword payload indexes `name` needs."""
-    fields = ((TAGS_PAYLOAD_FIELD,) if tagged else ()) + CHUNK_FACET_FIELDS
+    fields = ((TAGS_PAYLOAD_FIELD,) if tagged else ()) + CHUNK_FACET_FIELDS + (PATH_DIRS_FIELD,)
     for field in fields:
         try:
             qdrant.create_payload_index(
@@ -356,6 +400,8 @@ class Indexer:
         sparse_vectors = [bm25_sparse(t) for t in texts]
 
         now = datetime.now(timezone.utc).isoformat()
+        dirs = path_dirs(file_path)
+        language = language_for(file_path)
         points = []
         for chunk, dense, sparse in zip(chunks, dense_vectors, sparse_vectors):
             point_id = chunk_point_id(file_path, chunk.get("chunk_index", 0))
@@ -364,7 +410,10 @@ class Indexer:
                 **skill_fields,
                 "last_indexed_at": now,
                 "file_mtime": file_mtime or time.time(),
+                PATH_DIRS_FIELD: dirs,
             }
+            if language and not payload.get("language"):
+                payload["language"] = language
             if resolved_tags:
                 payload[TAGS_PAYLOAD_FIELD] = resolved_tags
             if source_url:
@@ -395,6 +444,46 @@ class Indexer:
                 )
             ),
         )
+
+    def backfill_path_fields(self, collection: str) -> int:
+        """Give chunks indexed before `path_dirs` existed their directories and,
+        where the chunker set none, a language. Returns the files updated.
+
+        Addressed by point id: `file_path` has no payload index, so a filter
+        on it would scan the whole collection once per file."""
+        missing = Filter(must=[IsEmptyCondition(is_empty=PayloadField(key=PATH_DIRS_FIELD))])
+        ids: dict[str, list] = {}
+        unlabelled: dict[str, list] = {}
+        offset = None
+        while True:
+            points, offset = self._qdrant.scroll(
+                collection_name=collection,
+                scroll_filter=missing,
+                with_payload=["file_path", "language"],
+                with_vectors=False,
+                limit=1000,
+                offset=offset,
+            )
+            for point in points:
+                payload = point.payload or {}
+                fp = payload.get("file_path")
+                if not fp:
+                    continue
+                ids.setdefault(fp, []).append(point.id)
+                if not payload.get("language"):
+                    unlabelled.setdefault(fp, []).append(point.id)
+            if offset is None:
+                break
+        for fp, point_ids in ids.items():
+            self._qdrant.set_payload(
+                collection_name=collection, payload={PATH_DIRS_FIELD: path_dirs(fp)}, points=point_ids,
+            )
+            language = language_for(fp)
+            if language and fp in unlabelled:
+                self._qdrant.set_payload(
+                    collection_name=collection, payload={"language": language}, points=unlabelled[fp],
+                )
+        return len(ids)
 
     def list_files(self, collection: str, tag: str) -> dict[str, float | None]:
         """Every file indexed under `tag`, mapped to its stored `file_mtime`.

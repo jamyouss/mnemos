@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import functools
 import json
+import threading
 from typing import Any
 
 import anyio
@@ -14,6 +15,7 @@ from qdrant_client import QdrantClient
 from core.collections import COLLECTIONS
 from core.embeddings import EmbeddingService
 from core.indexer import Indexer
+from server.api import default_reindex_root, invalidate_cache, run_reindex, validate_path
 from server.principal import Principal, forbidden, principal_from_scope, require_write_all
 from server.search import SearchService
 
@@ -100,11 +102,11 @@ TOOL_DEFINITIONS: list[types.Tool] = [
                 "file_types": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Optional list of file languages to filter by",
+                    "description": "Optional list of languages to filter by (e.g. go, python, typescript, markdown)",
                 },
                 "path_filter": {
                     "type": "string",
-                    "description": "Exact file_path of one indexed file (as returned in results); not a prefix",
+                    "description": "One indexed file (its file_path as returned in results) or a directory: every file under it",
                 },
                 "limit": {
                     "type": "integer",
@@ -157,7 +159,7 @@ TOOL_DEFINITIONS: list[types.Tool] = [
                 },
                 "path_filter": {
                     "type": "string",
-                    "description": "Exact file_path of one indexed file (as returned in results); not a prefix",
+                    "description": "One indexed file (its file_path as returned in results) or a directory: every file under it",
                 },
                 "limit": {
                     "type": "integer",
@@ -323,21 +325,28 @@ TOOL_DEFINITIONS: list[types.Tool] = [
     ),
     types.Tool(
         name="mnemos_reindex",
-        description="Trigger re-indexing of a collection or all collections.",
+        description=(
+            "Re-index a file or a directory tree into a collection, in the background. "
+            "Needs a key that may write every tag. Returns once the run has started; "
+            "the semantic cache is cleared when it starts and when it ends."
+        ),
         inputSchema={
             "type": "object",
             "properties": {
                 "collection": {
                     "type": "string",
-                    "description": "Optional specific collection name to reindex",
+                    "enum": ["mnemos_code", "mnemos_skills", "mnemos_docs"],
+                    "description": "Collection to fill. Memory and knowledge are pushed, not walked.",
                 },
-                "mode": {
+                "path": {
                     "type": "string",
-                    "enum": ["incremental", "full"],
-                    "description": "Reindex mode: incremental (default) or full",
-                    "default": "incremental",
+                    "description": (
+                        "Server-side path of a file or directory, under the codebase or the Claude "
+                        "config mount. Default: the collection's root (the whole codebase, skills/ or docs/)."
+                    ),
                 },
             },
+            "required": ["collection"],
         },
     ),
     types.Tool(
@@ -357,6 +366,7 @@ def create_mcp_server(
     qdrant_client: QdrantClient | None = None,
     embedding_service: EmbeddingService | None = None,
     deduplicator=None,
+    cache=None,
 ) -> Server:
     """Create and configure an MCP server with all 9 Mnemos tools."""
     server = Server("mnemos-mcp")
@@ -373,7 +383,7 @@ def create_mcp_server(
         try:
             principal = _caller(server)
             result = await _dispatch_tool(
-                name, args, principal, search_service, indexer, qdrant_client, deduplicator
+                name, args, principal, search_service, indexer, qdrant_client, deduplicator, cache
             )
             # Compact JSON: LLMs don't need pretty-printing. Roughly halves the
             # token cost of every MCP response.
@@ -410,12 +420,13 @@ async def _dispatch_tool(
     indexer: Indexer,
     qdrant_client: QdrantClient | None,
     deduplicator=None,
+    cache=None,
 ) -> Any:
     # Every tool blocks (torch, sync Qdrant, LLM): run it off the event loop so
     # one slow call does not stall the other MCP sessions and REST requests.
     return await anyio.to_thread.run_sync(
         functools.partial(
-            _run_tool, name, args, principal, search_service, indexer, qdrant_client, deduplicator
+            _run_tool, name, args, principal, search_service, indexer, qdrant_client, deduplicator, cache
         )
     )
 
@@ -428,6 +439,7 @@ def _run_tool(
     indexer: Indexer,
     qdrant_client: QdrantClient | None,
     deduplicator=None,
+    cache=None,
 ) -> Any:
     if name == "mnemos_search":
         results = search_service.search(
@@ -490,6 +502,7 @@ def _run_tool(
             tags=tags,
         )
         result = deduplicator.deduplicate_and_store(memory)
+        invalidate_cache(cache)
         return {"id": result.memory_id, "status": "approved", "action": result.action}
 
     if name == "mnemos_memory_list":
@@ -513,15 +526,28 @@ def _run_tool(
             action=args["action"],
             principal=principal,
         )
+        invalidate_cache(cache)
         return {"memory_id": args["memory_id"], "action": args["action"]}
 
     if name == "mnemos_reindex":
         require_write_all(principal)
-        return {
-            "collection": args.get("collection"),
-            "mode": args.get("mode", "incremental"),
-            "message": "Reindex triggered (watcher-driven; call from watcher service for full execution)",
-        }
+        collection = args["collection"]
+        root = args.get("path") or default_reindex_root(collection)
+        if root is None:
+            raise ValueError(f"{collection} is filled by pushes, not by a walk: name a path")
+        base_path = validate_path(root)
+        if not base_path.exists():
+            raise ValueError(f"Not found on the server: {root}")
+        indexer.ensure_collection(collection)
+        invalidate_cache(cache)
+        threading.Thread(
+            target=run_reindex,
+            args=(indexer, collection, base_path, base_path.is_dir()),
+            kwargs={"cache": cache},
+            name=f"reindex-{collection}",
+            daemon=True,
+        ).start()
+        return {"status": "reindex_started", "collection": collection, "path": str(base_path)}
 
     if name == "mnemos_status":
         if qdrant_client is None:

@@ -136,8 +136,7 @@ What's distinctive about the bundle Mnemos ships:
   retrieval fails
 - **Caller-chosen collections** — narrow a search to `mnemos_code`, `mnemos_docs`,
   `mnemos_skills`, `mnemos_knowledge` or `mnemos_memory`, or let it fan out
-- **Semantic cache** — Cosine-similarity cache with automatic invalidation
-  on reindex
+- **Semantic cache** — Cosine-similarity cache, wiped on every index write
 
 </td>
 <td width="50%" valign="top">
