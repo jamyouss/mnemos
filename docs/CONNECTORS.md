@@ -102,13 +102,16 @@ Where `mnemos ingest run` / `serve` read the sources: `--config FILE`, else
 `MNEMOS_CONNECTORS_CONFIG`, else the server's `GET /api/connectors` (on
 `MNEMOS_URL`, with an `MNEMOS_API_KEY` that has the admin role or
 `write: "*"`). A file is for one-off or local runs; deployed ingesters read
-the server.
+the server. Under Compose the `ingester` reads `.env` like every service, so
+an `MNEMOS_CONNECTORS_CONFIG` set there switches it to a file its container
+does not mount: leave that line commented.
 
 ### From the dashboard
 
 The **Connectors** page of the dashboard (`http://localhost:8100/connectors`)
 edits that configuration: one card per source, the `interval`, and per scope tag
-how many chunks `mnemos_knowledge` holds — `not synced yet` until the ingester
+how many chunks `mnemos_knowledge` (`mnemos_code` for a git source, by
+default) holds — `not synced yet` until the ingester
 has delivered something. The server validates with the ingester's own parser
 before saving, so a save the ingester would reject is refused (`422`) with
 every problem listed, and nothing is stored. A save carries the revision the
@@ -259,14 +262,15 @@ Crawl rules:
   (or `/guide`, or `/guide/index.html`) confines the crawl to `/guide/…`;
   a seed on `/` crawls the whole host. Other hosts are never fetched.
 - **robots.txt** is honoured (user agent token `mnemos`), including
-  `Crawl-delay`; `<meta name="robots" content="noindex|nofollow">` and
+  `Crawl-delay` (capped at 30 s); `<meta name="robots" content="noindex|nofollow">` and
   `rel="nofollow"` too. A missing robots.txt (404) allows everything; an
   unreadable one (401/403/5xx) fails the run without deleting anything.
 - URLs are normalised (lower-case host, no fragment, no default port);
   query strings are kept.
-- Only `text/html` answers become documents. The main content is
-  `<main>`, else `<article>`, else `<body>` minus nav/header/footer/aside,
-  scripts and styles. The title comes from `<title>`, else `<h1>`.
+- Only HTML answers (`text/html`, `application/xhtml+xml`) become documents.
+  Scripts, styles and `<nav>` are stripped; the main content is `<main>`,
+  else `<article>`, else `role="main"`, else `<body>` minus
+  header/footer/aside/forms. The title comes from `<title>`, else `<h1>`.
 - `updated` is the `Last-Modified` header. Pages served without it are
   re-pushed on every run (re-embedding cost: keep the scope tight).
 
@@ -479,7 +483,7 @@ All HTTP goes through `httpx` with its environment support on:
   set the variable, e.g. `-v /etc/ssl/corp-ca.pem:/certs/ca.pem:ro -e SSL_CERT_FILE=/certs/ca.pem`.
 
 Requests time out after 60 s (10 s to connect) on sources and 300 s on the
-Mnemos push (embedding is slow). 429 and 5xx answers, and connection
+Mnemos push (embedding is slow). 429, 500, 502, 503 and 504 answers, and connection
 errors, are retried with exponential backoff (1 s, 2 s, 4 s — 4 attempts in
 total), honouring `Retry-After` up to 60 s.
 

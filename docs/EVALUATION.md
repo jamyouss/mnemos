@@ -26,14 +26,14 @@ locally.
 ## The harness
 
 ```
-eval/
+evals/                   # MNEMOS_EVAL_ROOT, relative to where you run the CLI
   dataset/
     golden.yaml          # the questions + ground truth
+    golden.example.yaml  # the format, on three sample questions
     _candidates.yaml     # LLM-generated drafts, awaiting review
   runs/
     <tag>.json           # one file per `mnemos eval run --tag X`
-  …
-packages/eval/    # the Python library backing the CLI
+packages/eval/           # the Python library backing the CLI
   schema.py              # Pydantic models
   generator.py           # LLM-backed candidate generation
   loader.py              # YAML I/O
@@ -41,6 +41,10 @@ packages/eval/    # the Python library backing the CLI
   runner.py              # HTTP runner against a live server
   reporter.py            # Rich tables + JSON dumps
 ```
+
+`mnemos eval list` shows the runs saved so far. With authentication on, the
+CLI sends `MNEMOS_API_KEY` as a bearer key; `generate` samples chunks through
+an admin-only endpoint, so it needs an admin key.
 
 ---
 
@@ -56,6 +60,12 @@ mnemos eval generate --collection mnemos_code   --count 10
 mnemos eval generate --collection mnemos_skills --count 6
 mnemos eval generate --collection mnemos_docs   --count 5
 ```
+
+The CLI calls the LLM itself, from your machine: `--provider`, `--model`,
+`--api-key` and `--base-url` default to `MNEMOS_LLM_PROVIDER`,
+`MNEMOS_LLM_MODEL`, `MNEMOS_LLM_API_KEY` and `MNEMOS_LLM_BASE_URL` /
+`MNEMOS_OLLAMA_URL` in your shell. Sampling skips paths that make unfair
+ground truth (build output, backups, vendored code).
 
 The candidates land in `evals/dataset/_candidates.yaml`:
 
@@ -116,29 +126,35 @@ mnemos eval run --tag baseline
 
 That single command:
 1. Loads `golden.yaml`.
-2. For each question, calls the appropriate REST endpoint
-   (`/api/search`, `/api/search-code`, `/api/search-skills`,
-   `/api/search-memory`) based on `intent`.
-3. Records the top-K results, scores, and latency.
+2. For each question, calls the REST endpoint matching its `intent`:
+   `code_search` → `/api/search-code`, `memory_recall` →
+   `/api/search-memory`, `skill_discovery` → `/api/search` restricted to
+   `mnemos_skills`, anything else → `/api/search` restricted to the
+   question's `expected_collections` (all of them when empty).
+3. Records the top-K results (`--limit`, 10 by default), scores, and latency.
 4. Computes the metrics below.
 5. Writes `evals/runs/baseline.json` and prints a Rich table.
 
+Only `/api/search` runs the cache, grader and rewriter: a golden set made
+mostly of `code_search` questions cannot measure them. See
+[EVAL](EVAL.md#2026-09-07--grader-ab-on-the-current-index).
+
 ### Metrics
 
-For each value of `k ∈ {1, 3, 5, 10}` and each intent group:
+Per intent group, and overall:
 
-- **Recall@k** — proportion of expected files retrieved in the top-k.
-  Answers "did we find it at all?"
-- **Precision@k** — proportion of top-k that's in the expected set.
+- **Recall@k** (k ∈ {1, 3, 5, 10}) — proportion of expected files retrieved
+  in the top-k. Answers "did we find it at all?"
+- **Precision@5** — proportion of the top-5 that's in the expected set.
   Answers "how clean is what we returned?"
 - **MRR** — Mean Reciprocal Rank. Average of `1 / rank` of the first
   expected file. Sensitive to position: a hit at rank 1 is twice as good
   as a hit at rank 2.
-- **NDCG@k** — Normalized Discounted Cumulative Gain. Like MRR but
-  rewards relevance across the whole top-k, with logarithmic position
+- **NDCG@5** — Normalized Discounted Cumulative Gain. Like MRR but
+  rewards relevance across the whole top-5, with logarithmic position
   decay. Supports graded relevance (set `relevance_grades` in the golden
   item).
-- **Hit_rate@k** — binary: did **any** expected file land in the top-k?
+- **Hit@5** — binary: did **any** expected file land in the top-5?
   Useful as a quick sanity metric.
 
 Plus:
@@ -150,22 +166,27 @@ The golden set declares an `intent` on every question
 (`code_search`, `doc_lookup`, `skill_discovery`, `memory_recall`,
 `general`). The report shows one row per intent **plus** a global row.
 Per-intent numbers usually tell the real story — for example, the
-reranker doubled `code_search` MRR while leaving `doc_lookup` mostly
-unchanged.
+reranker tripled `code_search` MRR (0.114 → 0.348) while `doc_lookup`
+moved by a quarter.
 
 ---
 
 ## Step 5 — Compare
 
-Toggle a feature, restart the server, run again with a new tag:
+Toggle a feature, run again with a new tag:
 
 ```bash
-MNEMOS_RERANKER_ENABLED=true docker compose up -d rag-server
-# wait ~30s for the model to warm up (first call is slow)
+# Flip "Cross-encoder reranker" on the dashboard's Configuration page
+# (applies live), or set MNEMOS_RERANKER_ENABLED=true in .env and run
+# `docker compose up -d rag-server`.
+# The first rerank downloads and loads the model: send one query first.
 mnemos eval run --tag with-reranker
 
 mnemos eval compare baseline with-reranker
 ```
+
+Turn the semantic cache off between runs (or drop it with a reindex): with
+it on, the second run replays the first one's results.
 
 The compare output:
 
@@ -191,7 +212,7 @@ yours regularly:
 
 | Smell | What it means | Fix |
 |------|---------------|-----|
-| Many `expected_files` point at `.bak`, generated files, or build artefacts | Your sampler picked chunks from junk paths | Improve `_should_skip` (see `server/api.py`) and re-generate |
+| Many `expected_files` point at `.bak`, generated files, or build artefacts | Your sampler picked chunks from junk paths | Add the pattern to `core.path_filter` (or to the project's ignore rules), purge with `scripts/purge-filtered.py --apply`, and re-generate |
 | Questions look like the chunk verbatim | The LLM copied the answer | Strengthen the generator prompt (rare with `llama3.1+`) |
 | All questions are too literal | The LLM didn't generalise | Use a stronger LLM for generation (Anthropic Sonnet, OpenAI GPT-4o) |
 | You can answer every question by Ctrl-F | Mnemos won't shine here; it's good for **conceptual** questions | Mix in higher-level questions ("what's the convention for X?") |

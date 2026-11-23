@@ -5,38 +5,45 @@ Generated via `mnemos eval run --tag <tag>` against a live server.
 
 ## Golden set
 
-- **Size**: 25 questions
-- **Source**: semi-automated via Ollama (`llama3.1:latest`), auto-accepted for the initial baseline (review pending)
+- **Size**: 92 questions — code_search (59), skill_discovery (12),
+  doc_lookup (11), memory_recall (10)
+- **Source**: 22 LLM-generated questions, 70 agent-written (seed
+  20261122); history below
 - **Format**: `evals/dataset/golden.yaml`
-- **Intent distribution**: code_search (11), doc_lookup (8), skill_discovery (6)
 
-> ⚠️ The golden set was auto-accepted to establish a baseline. Several questions reference
-> files that should not have been indexed (`.bak`, generated `_nuxt/*.js`, `.terraform/`).
-> A clean re-generation is on the backlog and will push every absolute score up — but the
-> **deltas** between phases are still meaningful because each phase is measured against
-> the same set.
+> The golden set changed several times; numbers are comparable within a
+> campaign, not across them: 25 questions (May 2026, auto-accepted to
+> establish a baseline — several referenced files that should not have been
+> indexed: `.bak`, generated `_nuxt/*.js`, `.terraform/`), 31 (clean
+> regeneration), 24 (generated again in September), 62 then 92 (rebuilt on
+> 2026-11-22).
 
 ## Headline numbers
 
-Two campaigns: a **legacy** golden set (25 q, contained junk paths) and a
-**clean** golden set (31 q, after blocklist + tighter generator prompt).
-Phase numbers across the two golden sets are not strictly comparable —
-deltas within a campaign are.
+Phase numbers across golden sets are not strictly comparable — deltas
+within a campaign are. The sections below run in chronological order after
+the May campaigns; the most recent reference is
+[2026-11-22 (evening)](#2026-11-22-evening--fusion-weight-index-cleanup-chunk-size).
 
-### Clean golden set (31 q, current reference)
+### Clean golden set (31 q, 2026-05-15)
 
 | Run | MRR | NDCG@5 | R@5 | P@5 | p50 | What's enabled |
 |-----|------|--------|-----|-----|-----|----------------|
 | Hybrid only | 0.270 | 0.284 | 0.387 | 0.077 | **72 ms** | BM25 + dense + RRF |
-| + Reranker MiniLM + Router + Cache | **0.404** | **0.441** | **0.516** | 0.103 | 4 474 ms | (current default-on prod) |
+| + Reranker MiniLM + Router + Cache | **0.404** | **0.441** | **0.516** | 0.103 | 4 474 ms | (prod config at the time) |
 | + **CRAG grader (no rewriter)** | 0.404 | 0.441 | 0.516 | **0.133** | 3 211 ms | grader drops "low" chunks |
 | On cache hit (any of the above) | — | — | — | — | **100 ms** | |
+
+**Reranker over plain hybrid:** MRR +50 %, NDCG@5 +55 %, R@5 +33 %.
+**Grader over reranker:** P@5 +29 % (and +117 % on `doc_lookup` alone) — same
+top-K but cleaner; the grader rejects irrelevant chunks before ranking.
 
 > **Reading the "+ Router" row.** The router was enabled during that run but
 > never actually fired: measured later against the same index, its confidence
 > never cleared its own threshold on any query, so it always fell back to all
 > collections. Its contribution to those numbers is zero — the gain over
-> hybrid-only belongs to the reranker and the cache. It has since been
+> hybrid-only belongs to the reranker (the cache changes latency, not
+> results, and every question was unique). It has since been
 > removed; see [ROADMAP](ROADMAP.md).
 >
 > The grader row is worth a second look for the opposite reason: same MRR,
@@ -73,10 +80,6 @@ Also visible in that run, and unrelated to the grader: **`skill_discovery`
 scored 0.000 across every metric**, in both configurations. Four skill
 questions, zero hits, against a `mnemos_skills` collection holding ~2 000
 points. That is a retrieval failure worth its own investigation.
-
-**Reranker over plain hybrid:** MRR +50 %, NDCG@5 +55 %, R@5 +33 %.
-**Grader over reranker:** P@5 +29 % (and +117 % on `doc_lookup` alone) — same
-top-K but cleaner; the grader rejects irrelevant chunks before ranking.
 
 ### 2026-11-22 — golden set rebuilt (62 q), reranker and embedding A/B
 
@@ -200,8 +203,8 @@ at 14 s p50. MiniLM gives up ~3.7 MRR points for 3.8× speed-up.
 p50: 33 ms · p95: 74 ms
 
 > Slight regression on absolute numbers because of a **golden-set path bug** that
-> was fixed between baseline and Phase 2A.1 (`/data/codebase/myproject/` →
-> `/data/codebase/myproject/`). The baseline retrieved old paths
+> was fixed between baseline and Phase 2A.1 (the golden set pointed at an old
+> codebase mount path). The baseline retrieved old paths
 > that happened to align with the (then-old) golden set; once the paths were
 > corrected, some questions stopped matching because they reference files we
 > shouldn't be indexing in the first place. Phase 2B confirms the hybrid schema
@@ -238,23 +241,30 @@ Per-intent jumps vs Phase 2A.1:
 
 Configuration of this run:
 - `MNEMOS_RERANKER_ENABLED=true` (model: `BAAI/bge-reranker-base`, CPU)
-- `MNEMOS_ROUTER_ENABLED=true` (top-K = 2)
+- `MNEMOS_ROUTER_ENABLED=true` (top-K = 2; the router has since been removed)
 - `MNEMOS_CACHE_ENABLED=true` (warm-up done; no hits during this run because
   every question is unique)
 - Grader / Rewriter / MMR / Contextual: OFF
 
 ## Latency reality check
 
-The reranker is the dominant cost. **CPU-bound** reranking of 20-40 candidates
-through `BAAI/bge-reranker-base` takes 12-50 seconds per query on a M-series
-laptop. This is **not viable for interactive use** without one of:
+Recorded 2026-05-15. The reranker is the dominant cost. **CPU-bound**
+reranking of 20-40 candidates through `BAAI/bge-reranker-base` took 12-50
+seconds per query on a M-series laptop. This is **not viable for interactive
+use** without one of:
 - GPU (CUDA / MPS) — reduces to ~50-200 ms easily
 - A smaller model (e.g. `cross-encoder/ms-marco-MiniLM-L-6-v2`, ~80 MB) — likely 1-3 s on CPU
-- Reduced `HYBRID_TOP` (currently 20 per collection) — linear improvement at the cost of recall
+- Reduced `_HYBRID_TOP` in `server/search.py` (20 per collection) — linear improvement at the cost of recall
 - Quantised reranker checkpoint
 
-For now: `MNEMOS_RERANKER_ENABLED=false` is the right default for local dev,
-and `true` is for prod boxes with GPU.
+Conclusion at the time: `MNEMOS_RERANKER_ENABLED=false` as the default for
+local dev, `true` for prod boxes with GPU. It is still off by default.
+
+> **Update 2026-11-22.** Re-measured at 1.1 s per 20 candidates on CPU, and
+> about half that with pairs truncated to 256 tokens — now the default
+> (`MNEMOS_RERANKER_MAX_LENGTH`). With EmbeddingGemma 2, retrieval without a
+> reranker already beats MiniLM with one; see
+> [2026-11-22](#2026-11-22--golden-set-rebuilt-62-q-reranker-and-embedding-ab).
 
 ## Comparing runs
 
@@ -270,9 +280,9 @@ mnemos eval compare baseline-2026-05-14 <new-tag>
 | Phase 2A.1 — Hybrid + RRF      | No regression vs baseline              | ⚠️ -0.025 MRR (golden path bug, see notes) |
 | Phase 2A.2 — Contextual        | NDCG@5 ≥ Phase 2A.1 + 5 pts            | ❌ No gain, skipped pending golden cleanup |
 | Phase 2B — Reranker + MMR      | NDCG@5 ≥ Phase 2A.1 + 10 pts → ≥ 0.43  | ✅ **0.481** (+0.153) |
-| Phase 3 — CRAG grader/rewriter | precision@5 ≥ Phase 2B + 5 pts         | ⏳ Scaffolded, off by default until Phase 2B is GPU-fast |
-| Phase 4D — Router              | latency p50 ≤ baseline (35 ms)         | ✅ shipped (active in Phase 2B run, no isolated number) |
-| Phase 4E — Cache               | latency p50 (cached) ≤ 10 ms           | ⏳ shipped; needs repeated queries to verify |
+| Phase 3 — CRAG grader/rewriter | precision@5 ≥ Phase 2B + 5 pts         | ❌ grader +3.0 pts (0.103 → 0.133); 384× p50 on 2026-09-07, kept off. Rewriter never measured |
+| Phase 4D — Router              | latency p50 ≤ baseline (35 ms)         | ❌ removed 2026-09-07 — it never fired (see above) |
+| Phase 4E — Cache               | latency p50 (cached) ≤ 10 ms           | ❌ 122 ms p50 on hits (`cache-hit-2026-05-15`); shipped, off by default |
 
 ## Runs index
 
@@ -288,3 +298,8 @@ mnemos eval compare baseline-2026-05-14 <new-tag>
 | `phase2a1-clean-2026-05-15`          | 2026-05-15 | clean 31  | Hybrid only on clean golden             |
 | `phase2b-clean-2026-05-15`           | 2026-05-15 | clean 31  | + MiniLM reranker + router + cache      |
 | `phase3-grader-2026-05-15`           | 2026-05-15 | clean 31  | + CRAG document grader (no rewriter)    |
+| `grader-off` / `grader-on`           | 2026-09-07 | 24        | Through `EvalRunner`: identical, the grader never ran (see 2026-09-07) |
+| `live-minilm-0.6.0-2026-11-22`       | 2026-11-22 | 62        | Live server, MiniLM, no reranker        |
+| `live-embeddinggemma2-2026-11-22`    | 2026-11-22 | 62        | Live server, EmbeddingGemma 2           |
+| `live-92q-before-fusion-2026-11-22`  | 2026-11-22 | 92        | Plain RRF 1:1, index cleaned            |
+| `live-92q-fusion3-2026-11-22`        | 2026-11-22 | 92        | RRF dense 3:1                           |

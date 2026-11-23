@@ -50,22 +50,24 @@ search.
 **Mnemos** is that layer, self-hosted, and built specifically for coding agents.
 
 - 🧠 **Memories from your commits.** A pre-push hook extracts decisions,
-  patterns, and lessons from every diff via an LLM, dedupes them, and queues
-  them for your approval. The agent recalls them on demand.
-- 🔍 **Production-grade retrieval.** Hybrid BM25 + dense + RRF fusion,
-  cross-encoder reranker, CRAG corrective loop, semantic cache.
-  Every component is feature-flagged so you upgrade safely.
+  patterns, and lessons from every diff via an LLM, dedupes them, and stores
+  them, searchable right away; you reject the wrong ones. The agent recalls
+  them on demand.
+- 🔍 **Production-grade retrieval.** Hybrid BM25 + dense fusion is always on;
+  the cross-encoder reranker, CRAG corrective loop and semantic cache are
+  feature flags you switch on once measured.
 - 🌳 **Code-aware chunking.** Tree-sitter for Go, SFC sections for Vue,
   heading splits for Markdown — your symbols stay intact across embeddings.
-- 🪡 **MCP-native.** Drop `http://localhost:8100/mcp` into your Claude Code
-  config and your agent gets 9 new tools immediately.
+- 🪡 **MCP-native.** Point Claude Code at `http://localhost:8100/mcp/` and
+  your agent gets 9 new tools immediately.
 - 🏠 **100% self-hosted.** Qdrant + sentence-transformers + your choice of
   LLM (Ollama / Anthropic / any OpenAI-compatible endpoint). Nothing leaves
-  your machine.
+  your machine unless you point it at a cloud LLM.
 
-> **Measured:** Mnemos full pipeline scores **+47% MRR** and **+37% NDCG@5**
-> over plain dense retrieval on the same golden set. See [`docs/EVAL.md`](docs/EVAL.md)
-> for the methodology and the per-phase numbers.
+> **Measured:** with the cross-encoder reranker on (it is off by default),
+> Mnemos scored **+47% MRR** and **+37% NDCG@5** over plain dense retrieval
+> on the same golden set. See [`docs/EVAL.md`](docs/EVAL.md) for the
+> methodology and the per-phase numbers.
 
 ---
 
@@ -80,14 +82,14 @@ What's distinctive about the bundle Mnemos ships:
 
 - **Memories extracted from your git history.** A pre-push hook reads each
   diff through an LLM, structures it into decisions / patterns / lessons,
-  dedupes against what's already known, and queues it for your approval.
-  The agent recalls those memories on demand. This pipeline — git → LLM →
-  dedup → human review → searchable memory — isn't something we've seen in
-  other coding tools.
+  dedupes against what's already known, and stores it. The agent recalls
+  those memories on demand. This pipeline — git → LLM → dedup → searchable,
+  reviewable memory — isn't something we've seen in other coding tools.
 
-- **A human-in-the-loop approval gate** on every extracted memory. Only
-  approved entries surface in search. You get the benefit of automatic
-  capture without the noise of letting an LLM auto-decide what to remember.
+- **Every memory stays reviewable.** A memory is searchable as soon as it is
+  written, and keeps a status: reject a wrong one from the dashboard's
+  Memories page or `mnemos memory reject`, and it leaves search. You get
+  automatic capture without trusting an LLM blindly.
 
 - **Agent-skill and agent-doc indexing as first-class citizens.** Alongside
   your code, Mnemos indexes your `~/.claude/skills/` and `~/.claude/docs/`
@@ -98,11 +100,11 @@ What's distinctive about the bundle Mnemos ships:
   and you get 9 tools immediately: cross-collection search, code-only
   search, skill search, memory search, memory mutations, reindex, status.
 
-- **Production-grade retrieval, all opt-in.** Hybrid BM25 + dense + RRF
-  fusion, cross-encoder reranker, contextual chunking, CRAG corrective
-  loop (grader + rewriter), semantic cache — every
-  component is feature-flagged so you upgrade behaviour without breaking
-  reproducibility.
+- **Production-grade retrieval, switched on once measured.** Hybrid BM25 +
+  dense fusion is always on. Cross-encoder reranker, contextual chunking,
+  CRAG corrective loop (grader + rewriter), MMR and semantic cache each sit
+  behind a flag, editable live from the dashboard, so you change behaviour
+  without breaking reproducibility.
 
 - **Self-hosted, LLM-agnostic.** Qdrant + sentence-transformers + your
   choice of LLM (Ollama / Anthropic / any OpenAI-compatible endpoint,
@@ -112,7 +114,7 @@ What's distinctive about the bundle Mnemos ships:
 - **Open eval harness with measured numbers.** Bench your own retrieval
   changes: `mnemos eval run` against a golden set, MRR / NDCG / R@k /
   P@k reported, runs diffable across configurations. The +47 % MRR
-  headline comes from this same harness on the clean golden set.
+  headline comes from this same harness on the first (25-question) golden set.
 
 ---
 
@@ -124,8 +126,9 @@ What's distinctive about the bundle Mnemos ships:
 
 ### 🔍 Retrieval
 
-- **Hybrid search** — Dense (`EMBEDDING_MODEL`, MiniLM by default) + Sparse (BM25) fused with
-  Reciprocal Rank Fusion `k=60`
+- **Hybrid search** — Dense (`EMBEDDING_MODEL`, MiniLM by default) + Sparse (BM25)
+  fused server-side by Qdrant's Reciprocal Rank Fusion, dense weighted 3:1
+  (`MNEMOS_FUSION_DENSE_WEIGHT`)
 - **Cross-encoder reranker** — `BAAI/bge-reranker-base` by default, swap to
   `bge-reranker-v2-m3` for max quality
 - **MMR diversification** — Avoid near-duplicate results in your top-K
@@ -143,12 +146,12 @@ What's distinctive about the bundle Mnemos ships:
 
 - **Auto-extraction** — Pre-push git hook → LLM analyses commit diffs →
   structured memories (decisions, patterns, conventions, lessons)
-- **LLM-powered dedup** — Cosine ≥ 0.85 triggers merge or replace strategies
-- **Approval workflow** — `pending → approved` gate keeps the search
-  surface clean
+- **LLM-powered dedup** — Cosine ≥ `MNEMOS_DEDUP_THRESHOLD` (0.80 in
+  `.env.example`) triggers merge or replace strategies
+- **Reviewable** — searchable once written; a rejected memory leaves search
 - **Tag-based scoping** — Multi-tag payload (`tags_any` / `tags_all`) for
   targeted recall across projects, technos, teams
-- **Temporal context** — Every memory carries its origin commit + timestamp
+- **Timestamped** — every memory carries its creation time
 
 </td>
 </tr>
@@ -198,9 +201,10 @@ What's distinctive about the bundle Mnemos ships:
 ```bash
 # 1. Configure, then boot the stack — every setting lives in .env
 cp .env.example .env                       # set MNEMOS_CODEBASE_HOST_PATH
+cp config/projects.example.yaml config/projects.yaml   # mounted as a file
 docker compose up -d
 docker compose --profile llm up -d        # adds bundled Ollama
-ollama pull llama3.1:8b
+docker compose exec ollama ollama pull llama3.1:8b
 
 # 2. Install the CLI
 make install
@@ -208,7 +212,7 @@ source venv/bin/activate
 export MNEMOS_URL=http://localhost:8100
 
 # 3. Index your code into the single mnemos_code collection, tagged for scoping
-mnemos reindex --recreate --full --collection mnemos_code \
+mnemos reindex --full --collection mnemos_code \
                 --path /data/codebase/myproject --tags myproject,go
 
 # 4. Search it (optionally scope by tags — OR with --tags, AND with --tags-all)
@@ -221,14 +225,14 @@ mnemos search-code "JWT validation middleware" --tags-all myproject,go
     --watch-index ~/code --watch ~/code/your-org
 
 # 6. Plug it into Claude Code
-# → add { "type": "url", "url": "http://localhost:8100/mcp" }
-#   to your ~/.claude/settings.json mcpServers
+claude mcp add --transport http --scope user mnemos http://localhost:8100/mcp/
 ```
 
 🪤 **First reranker query takes longer** — the embedding model is baked into
 the image, but if you enable the optional cross-encoder reranker
 (`MNEMOS_RERANKER_ENABLED=true` in `.env`, or from the dashboard's
-Configuration page) it pulls ~280 MB the first time it's used.
+Configuration page once `MNEMOS_UI_CONFIG_WRITABLE=true`) it downloads
+~1.1 GB the first time it's used.
 
 Then open **http://localhost:8100/** for the dashboard — what is indexed, what
 is being searched, what has been remembered, and how retrieval scored. See
@@ -253,6 +257,7 @@ is being searched, what has been remembered, and how retrieval scored. See
 | **Results history** | [`docs/EVAL.md`](docs/EVAL.md) | Measured numbers per phase |
 | **Roadmap** | [`docs/ROADMAP.md`](docs/ROADMAP.md) | What's next, design decisions |
 | **Deployment** | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Authentication, push API, CI/CD |
+| **Dashboard** | [`docs/DASHBOARD.md`](docs/DASHBOARD.md) | Sign-in, every screen, what each page can edit |
 | **Connectors** | [`docs/CONNECTORS.md`](docs/CONNECTORS.md) | Confluence, Jira and web → `mnemos_knowledge`; git repositories → `mnemos_code` |
 | **Agent guide** | [`CLAUDE.md`](CLAUDE.md) | Instructions for Claude Code when touching this repo |
 
@@ -264,12 +269,12 @@ is being searched, what has been remembered, and how retrieval scored. See
 |-------|------|-----|
 | Server | FastAPI + MCP Streamable HTTP | Async, type-safe, native MCP |
 | Vector DB | Qdrant (named hybrid vectors) | Single store for dense + sparse, server-side RRF + IDF |
-| Embeddings | `EMBEDDING_MODEL`: `all-MiniLM-L6-v2` (default, 384d, fast on CPU) or `google/embeddinggemma-2` (768d, ~2× code-search MRR, slower to index) | Vector size read from the model; switching migrates every collection |
+| Embeddings | `EMBEDDING_MODEL`: `all-MiniLM-L6-v2` (default, 384d, fast on CPU) or `google/embeddinggemma-2` (768d, ~2× code-search MRR, slower to index) | Vector size read from the model; switching migrates every collection (`python -m core.embedding_migration`) |
 | Sparse | In-house BM25 encoder | No model download; camelCase/snake-aware tokenizer |
 | Reranker | `BAAI/bge-reranker-base` (default) | Open-weight, SOTA on MS-MARCO |
 | LLM | Pluggable (Ollama / Anthropic / OpenAI-compatible) | Use local for dev, cloud for prod |
 | CLI | Click + Rich | Polished terminal UX |
-| Tests | pytest, 179 unit + 46 integration | High-confidence refactors |
+| Tests | pytest (~950 tests) + Vitest for the dashboard | High-confidence refactors |
 
 ---
 
@@ -300,8 +305,10 @@ retrieval feature is a single file with its own tests.
 For local dev:
 
 ```bash
-pip install -e packages/core packages/eval cli/
+pip install -e packages/core -e packages/eval -e packages/connectors -e cli/
+pip install -r server/requirements.txt -r watcher/requirements.txt pytest pytest-asyncio
 pytest tests/
+(cd ui && npm ci && npm test)   # dashboard
 ```
 
 ---
@@ -311,13 +318,14 @@ pytest tests/
 Only hybrid retrieval (dense + BM25) is on by default. Every other stage —
 reranker, MMR, cache, grader, rewriter, contextual chunking — ships wired but
 off, behind a flag you can flip from the dashboard. The cross-encoder
-reranker is the biggest measured gain (**+47 % MRR** over plain dense on our
-golden set) but costs ~14 s per query on CPU. The next iteration turns
-measurements into defaults:
+reranker was the biggest gain of the first campaign (**+47 % MRR** over plain
+dense) at ~14 s p50 on CPU; capped at 256 tokens per pair and on top of
+EmbeddingGemma 2, it now adds ~+0.10 MRR for ~0.8 s per query on a Mac CPU.
+The next iteration turns measurements into defaults:
 
 | Item | Why it matters | Status |
 |------|---------------|--------|
-| **GPU host for the reranker** | `bge-reranker-base` on CPU takes ~14 s p50; on GPU it's ~250 ms. Unlocks the reranker as a default-on feature, not an opt-in. | 🔜 |
+| **GPU host for the reranker** | `bge-reranker-base` still costs ~0.8 s per query on CPU, more inside Docker. A GPU makes it cheap enough to turn on by default. | 🔜 |
 | **CRAG grader + rewriter on a fast LLM** (Anthropic Haiku, Groq) | Both ship wired but off — on local Ollama they push per-query latency past 100 s. With a cloud LLM they should land at +5–10 % recall on vague queries. | 🔜 |
 | **Contextual chunking, second measurement** | The first run, on a noisy golden set, showed no gain. Worth measuring again on the cleaned set, through the Anthropic API with prompt caching. | 🔜 |
 | **MMR, measured** | Ships wired but off. Turn it on by default only if it cuts near-duplicates in the top 5 without hurting NDCG@5. | 🔜 |

@@ -20,23 +20,27 @@ Optional:
 ## 1. Clone and configure
 
 ```bash
-git clone https://github.com/your-org/mnemos.git
+git clone https://github.com/jamyouss/mnemos.git
 cd mnemos
 cp .env.example .env
+cp config/projects.example.yaml config/projects.yaml
 ```
 
 Edit `.env` to taste — the defaults are sensible for local dev (everything OFF
-except the hybrid retrieval, which is always on).
+except the hybrid retrieval, which is always on). Every service reads it
+through `env_file`, so a variable set in your shell in front of
+`docker compose` never reaches the containers.
 
-> Want to point Mnemos at your codebase? Edit `docker-compose.yml` and change
-> the bind mounts for `rag-server` + `watcher`:
-> ```yaml
-> volumes:
->   - ~/code:/data/codebase:ro
->   - ~/.claude:/data/claude-config:ro
+`config/projects.yaml` is bind-mounted as a file: copy it before the first
+`docker compose up`, or Docker creates a directory in its place.
+
+> Want to point Mnemos at your codebase? Set the host directories in `.env`:
+> ```dotenv
+> MNEMOS_CODEBASE_HOST_PATH=~/code
+> MNEMOS_CLAUDE_CONFIG_HOST_PATH=~/.claude
 > ```
-> Map whatever host directories you want to be available as `/data/codebase`
-> inside the container.
+> They are mounted read-only at `/data/codebase` and `/data/claude-config`
+> in the `rag-server` and `watcher` containers.
 
 ## 2. Start the stack
 
@@ -47,11 +51,14 @@ docker compose up -d
 # + local Ollama (recommended for first run)
 docker compose --profile llm up -d
 
-# Pull the default model
-ollama pull llama3.1:8b
+# Pull the default model into the bundled Ollama (host Ollama: `ollama pull llama3.1:8b`)
+docker compose exec ollama ollama pull llama3.1:8b
 ```
 
-> **Building from source instead?** Layer in the dev override:
+> **Building from source instead?** Set `MNEMOS_SERVER_IMAGE`,
+> `MNEMOS_WATCHER_IMAGE` and `MNEMOS_CLI_IMAGE` in `.env` to local tags
+> (`mnemos-server:dev`, …) so a build never shadows the published images,
+> then layer in the dev override:
 > ```bash
 > docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 > ```
@@ -67,9 +74,10 @@ ollama pull llama3.1:8b
 >   jamyouss/mnemos-server:latest
 > ```
 
-Three containers come up:
+Three containers come up (four with `--profile llm`, which adds
+`mnemos-ollama-1`):
 - `mnemos-qdrant-1` — vector DB on `localhost:6333`
-- `mnemos-rag-server-1` — FastAPI + MCP server on `localhost:8100`
+- `mnemos-rag-server-1` — FastAPI + MCP server and dashboard on `localhost:8100`
 - `mnemos-watcher-1` — filesystem watcher (incremental indexing)
 
 Check health:
@@ -96,46 +104,45 @@ and `/data/claude-config`. Paths passed to `mnemos reindex --path` are
 
 ```bash
 # Skills (the agent's playbook directory)
-mnemos reindex --recreate --full \
+mnemos reindex --full \
        --collection mnemos_skills \
        --path /data/claude-config/skills
 
 # Markdown docs
-mnemos reindex --recreate --full \
+mnemos reindex --full \
        --collection mnemos_docs \
        --path /data/claude-config/docs
 
 # A specific project's code — single mnemos_code collection, tagged for scoping
-mnemos reindex --recreate --full \
+mnemos reindex --full \
        --collection mnemos_code \
        --path /data/codebase/myproject \
        --tags myproject,go
 
-# Index another project into the same collection (no --recreate this time)
+# Index another project into the same collection
 mnemos reindex --full \
        --collection mnemos_code \
        --path /data/codebase/otherproject \
        --tags otherproject,vue3
 ```
 
-The `--recreate` flag drops the collection before reindexing. **You need it
-once per collection** to migrate to the hybrid (named-vector) schema. After
-that, drop the flag for incremental re-runs. The `--tags` list is stored in
+The server creates every collection with the hybrid (named-vector) schema at
+start-up, so a fresh install needs no `--recreate`. That flag drops the
+collection before reindexing: it only serves to migrate a collection created
+before hybrid retrieval, and on `mnemos_code` it wipes every project, not just
+the one under `--path`. The `--tags` list is stored in
 each chunk's `tags` payload — searches scope with `--tags` (OR) and
 `--tags-all` (AND). Without `--tags`, Mnemos derives tags from the projects
 mapping (imported from `config/projects.yaml` at the first start, then edited
 from the dashboard) or cumulative path segments by default. See
 [`CONFIGURATION.md`](CONFIGURATION.md#tags--scoping-chunks-across-projects).
 
-Monitor progress:
+The reindex runs in the background on the server. Monitor progress:
 
 ```bash
 mnemos status
-# Collections
-# ─────────────────────────────────────────────────────
-# mnemos_skills    737 points     status=green
-# mnemos_docs       79 points     status=green
-# mnemos_code    6755 points      status=green
+# Status: healthy, then a Collections table: vectors, points and status of
+# each collection — the point counts grow while the reindex runs.
 ```
 
 ## 5. Search it from the CLI
@@ -150,14 +157,20 @@ mnemos search-memory "API routing decision"
 
 ## 6. Plug it into Claude Code
 
-Add to `~/.claude/settings.json`:
+Register the server once, for every project:
+
+```bash
+claude mcp add --transport http --scope user mnemos http://localhost:8100/mcp/
+```
+
+Or, for one repository, in its `.mcp.json`:
 
 ```json
 {
   "mcpServers": {
     "mnemos": {
-      "type": "url",
-      "url": "http://localhost:8100/mcp"
+      "type": "http",
+      "url": "http://localhost:8100/mcp/"
     }
   }
 }
@@ -178,7 +191,7 @@ into your `~/.claude/CLAUDE.md`:
 
 1. **First**: Use Mnemos MCP tools based on intent:
    - `mnemos_search_code` — looking for functions, types, patterns, implementations
-   - `mnemos_search` — general cross-collection search (docs + code + skills)
+   - `mnemos_search` — general cross-collection search (code, docs, skills, knowledge; memory only on request)
    - `mnemos_search_skills` — finding relevant agent skills
    - `mnemos_search_memory` — past decisions, conventions, lessons learned
    - `mnemos_status` — check if Mnemos is available and collections are populated
@@ -190,10 +203,12 @@ into your `~/.claude/CLAUDE.md`:
 
    Then use Grep / Glob / Read as usual.
 
-   **On scores:** hybrid fusion puts a normal top-1 around **0.5–0.8**. `0.54` is
-   typical, not weak. There is no absolute threshold that separates good from
-   bad, so do not treat one. Compare results against each other and read what
-   came back.
+   **On scores:** they are rank-fusion scores, not similarities. With the
+   default fusion (dense weighted 3:1) a top-1 lands between **0.75** (first
+   in the dense ranking only) and **1.25** (first in both dense and BM25), so
+   `0.75` is typical, not weak. There is no absolute threshold that separates
+   good from bad, so do not treat one. Compare results against each other and
+   read what came back.
 
 ### When to skip Mnemos
 
@@ -216,10 +231,10 @@ non-obvious constraint, the root cause of a bug that cost real time.
   survives; "we use X" does not, because nobody can tell whether it still
   applies.
 
-⚠️ **A stored memory is not immediately searchable.** `mnemos_memory` writes
-with status `pending`, and `mnemos_search_memory` only returns `approved`
-entries. It waits for human review — `mnemos memory review` walks the queue.
-Do not store something and assume you can read it back in the same session.
+A stored memory is searchable at once: `mnemos_memory` writes it `approved`,
+merged into a near-duplicate when one exists. A human can still reject it
+later (`mnemos memory reject`, or the dashboard's Memories page), which takes
+it out of search.
 
 ### Mnemos memory vs. built-in agent memory
 
@@ -230,7 +245,7 @@ They are not interchangeable, and the split matters:
 | Scope | one working directory | global, sliced at query time by tags |
 | Cost | loaded into context every session | nothing until you search |
 | Retrieval | you read an index of titles | semantic search over full content |
-| Review | written directly | `pending` → `approved` |
+| Review | written directly | searchable once written; rejected entries leave search |
 
 Built-in memory is **siloed per project directory**: what you learn in one repo
 is invisible from another. It also grows the context of every session, so it
@@ -244,7 +259,7 @@ does not scale past a few dozen entries.
 
 ### Rationale
 
-Mnemos is indexed with language-aware chunking (AST for Go/Vue, SFC for Vue,
+Mnemos is indexed with language-aware chunking (AST for Go, SFC sections for Vue,
 headings for Markdown, column-aware for CSV/TSV), hybrid dense + BM25
 retrieval, and memories auto-extracted from git history. A single
 `mnemos_search_code` call often replaces 5-10 Grep invocations. Use it.
@@ -275,25 +290,28 @@ stay useful only while they come from repos where real decisions get made.
 `~/.config/mnemos/config`, so hooks fired from a GUI git client or an IDE —
 which never read your shell profile — still resolve container paths.
 
-Memories land in `pending`; approve them with:
+Extracted memories are searchable as soon as they are stored. Prune the wrong
+ones:
 
 ```bash
-mnemos memory list                  # see what's queued
-mnemos memory approve <id>          # accept one
-mnemos memory reject <id>           # drop one
+mnemos memory list --status approved   # what was stored (defaults to pending)
+mnemos memory reject <id>              # take one out of search
 ```
+
+The dashboard's Memories page does the same.
 
 Details: [`MEMORY_PIPELINE.md`](MEMORY_PIPELINE.md).
 
 ## 8. Enable advanced retrieval features (optional)
 
 Every advanced feature is off by default. Turn one on from the dashboard's
-Configuration page (applies live, no restart), or set it in `.env` and
+Configuration page (applies live, no restart; saving needs an admin key, or
+auth off, and `MNEMOS_UI_CONFIG_WRITABLE=true`), or set it in `.env` and
 recreate the server:
 
 ```bash
 # .env
-MNEMOS_RERANKER_ENABLED=true   # cross-encoder reranker (+47% MRR; 12-50 s/query on CPU)
+MNEMOS_RERANKER_ENABLED=true   # cross-encoder reranker (+47% MRR in the first campaign; ~0.8 s/query on CPU)
 MNEMOS_CACHE_ENABLED=true      # semantic cache (instant replies for repeated queries)
 ```
 
@@ -314,29 +332,33 @@ The collection is empty. Run `mnemos reindex` first.
 ### Reindex returns 0 points
 The `--path` is a **container path**. Inspect what's actually mounted:
 ```bash
-docker exec mnemos-rag-server-1 ls /data/codebase
+docker compose exec rag-server ls /data/codebase
 ```
 
-### First search takes 60 s, subsequent ones are fast
-That's the embedding (and reranker, if enabled) cold-starting. Subsequent
-queries reuse the in-memory model.
+### First reranked search is slow, subsequent ones are fast
+The reranker model is downloaded (~1.1 GB, kept in the `hf_cache` volume) and
+loaded on the first rerank, then stays in memory. The embedding model loads
+at server start, before `/health` answers.
 
 ### `Path traversal detected`
 Mnemos refuses to index paths outside the mounted directories. Either
 update the bind mounts or move your code under one of the allowed roots.
 
 ### Container can't reach Ollama (`connection refused`)
-If you installed Ollama on the host (not via the `llm` profile), the
-container needs to reach it via `host.docker.internal:11434` on Mac /
-Windows, or the host gateway IP on Linux. Set `MNEMOS_OLLAMA_URL` in `.env`
-accordingly.
+With `MNEMOS_OLLAMA_URL` empty, the server tries the bundled `ollama` service,
+then `host.docker.internal:11434`, then `localhost:11434`, and keeps the first
+one with a model pulled. An Ollama installed on a Linux host is not reachable
+as `host.docker.internal` by default: set `MNEMOS_OLLAMA_URL` in `.env` to the
+host gateway IP (e.g. `http://172.17.0.1:11434`) and make Ollama listen on it.
 
 ### Slow reranker
-Use a smaller checkpoint, in `.env` (or the Configuration page):
+Use a smaller checkpoint, in `.env` (or the Configuration page, applied at the
+next restart):
 ```bash
 MNEMOS_RERANKER_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2
 ```
-then `docker compose up -d rag-server` — or move to a GPU host.
+then `docker compose up -d rag-server` (`docker compose restart rag-server`
+after a Configuration-page save) — or move to a GPU host.
 
 ## Next steps
 

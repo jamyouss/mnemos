@@ -5,8 +5,8 @@
 ## Mission
 
 Mnemos est un **RAG dev-centric self-hosted** qui sert de couche mémoire pour les agents AI (Claude Code, Claude Desktop). Il combine :
-- **Code retrieval** : indexing AST-aware (Go via tree-sitter, Vue SFC, Markdown)
-- **Memory pipeline** : extraction automatique depuis git, dedup LLM, workflow d'approbation
+- **Code retrieval** : indexing AST-aware (Go via tree-sitter, Vue SFC, Markdown, CSV/TSV)
+- **Memory pipeline** : extraction automatique depuis git, dedup LLM, statut pour élaguer
 - **Agent context** : indexing des skills Claude et docs d'architecture
 
 Exposé comme MCP server (Streamable HTTP) sur `localhost:8100/mcp`.
@@ -16,20 +16,24 @@ Exposé comme MCP server (Streamable HTTP) sur `localhost:8100/mcp`.
 ### Pipeline RAG actuel
 
 ```
-INDEXING (watcher / push API / CLI):
-  file → chunker (par extension) → embedder → Qdrant upsert
-         AST Go (tree-sitter) | Vue SFC | MD headings | Fallback
+INDEXING (watcher / push API / CLI / connecteurs):
+  file → chunker (par extension) → [split, contextual : opt.] → embedder → Qdrant upsert
+         AST Go (tree-sitter) | Vue SFC | MD headings | CSV/TSV | Fallback
          EMBEDDING_MODEL (défaut all-MiniLM-L6-v2 384d ; google/embeddinggemma-2 768d)
 
 RETRIEVAL (MCP / REST):
-  query → cache → hybrid dense+BM25 sparse (RRF)   [collections choisies par l'appelant]
-        → cross-encoder rerank → MMR → CRAG grader (+rewriter) → cache + query log
+  query → cache → hybrid dense+BM25 sparse (RRF pondéré dense 3:1)
+        → CRAG grader (+rewriter) → cross-encoder rerank → MMR → cache + query log
+         [collections choisies par l'appelant]
          Tout est câblé (server/main.py + server/search.py). Sauf l'hybrid,
-         chaque étage est derrière un flag MNEMOS_*_ENABLED, off par défaut.
+         chaque étage est derrière un flag MNEMOS_*_ENABLED, off par défaut,
+         modifiable à chaud depuis le dashboard. Cache, grader et rewriter
+         ne tournent que sur `mnemos_search` (/api/search).
 
 MEMORY (git hook / API):
-  git commit → Ollama extract decisions/patterns/lessons →
-  dedup (cos sim ≥ 0.85, merge ou replace) → pending → review → approved
+  git push (ou commit) → LLM extrait decisions/patterns/conventions/lessons →
+  dedup (cos sim ≥ MNEMOS_DEDUP_THRESHOLD, merge ou replace) → approved
+  (cherchable aussitôt ; `reject` l'en retire)
 ```
 
 ### Stack technique
@@ -40,7 +44,7 @@ MEMORY (git hook / API):
 | Vector DB | Qdrant (cosine, taille lue sur le modèle) |
 | Embeddings | `EMBEDDING_MODEL` via `core.embeddings` (profils : prompts de requête, cadrage des documents) — changer de modèle = `python -m core.embedding_migration` |
 | LLM | Pluggable provider (ollama / anthropic / openai-compatible) — extraction + dedup merge, contextual chunking, grader, rewriter |
-| Chunkers | tree-sitter (Go), regex SFC (Vue), heading-based (MD) |
+| Chunkers | tree-sitter (Go), regex SFC (Vue), heading-based (MD), lignes CSV/TSV, fenêtre glissante (fallback) |
 | Watcher | `watchdog`, debounce 2s |
 | CLI | `click` + `rich` |
 
@@ -48,7 +52,7 @@ MEMORY (git hook / API):
 
 ```
 mnemos/
-  packages/core/      # Lib partagée (chunkers, embeddings, indexer, path_filter, dedup, memory_extractor)
+  packages/core/      # Lib partagée (chunkers, embeddings, indexer, path_filter, dedup, memory_extractor, llm)
   server/                 # FastAPI + MCP server (port 8100)
   watcher/                # File watcher (watchdog)
   cli/                    # Click CLI client
@@ -56,8 +60,10 @@ mnemos/
   packages/connectors/    # Connecteurs (Confluence, Jira, web, git) → push API ; `mnemos ingest run|serve`
   scripts/hooks/          # Global git hooks (memory extraction + incremental indexing)
   tests/                  # pytest suite
-  eval/                   # Eval harness (Phase 1.2, en cours)
-  docs/                   # ROADMAP.md, EVAL.md, ARCHITECTURE.md
+  packages/eval/          # Harness d'eval (`mnemos eval …`)
+  evals/                  # Golden set (dataset/) + runs (runs/)
+  ui/                     # Dashboard Nuxt, servi par le server sur /
+  docs/                   # ARCHITECTURE, RETRIEVAL_PIPELINE, MEMORY_PIPELINE, CONFIGURATION, EVAL, ROADMAP…
   docker-compose.yml      # Stack ; tous les réglages viennent de .env (env_file)
   docker-compose.dev.yml  # Build local des images
   docker-compose.prod.yml # Montage tenants.yaml, watcher désactivé
@@ -73,6 +79,7 @@ mnemos/
 | `mnemos_code` | codebase + connecteur git (défaut) | _(tout le reste)_ | via `tags` payload (filtres `tags_any` / `tags_all`) |
 | `mnemos_knowledge` | connecteurs (Confluence, Jira, web, git avec `collection: mnemos_knowledge`) → push API | _(aucun)_ | via `tags` payload (`<source>`, `<source>:<scope>`, ex. `confluence:ENG`) |
 | `mnemos_config` | config partagée (connectors, projects, settings, tenants) | — | **non cherchable** : sans vecteur, hors `COLLECTIONS` (constante `CONFIG_COLLECTION`) |
+| `mnemos_cache` | cache sémantique (si `MNEMOS_CACHE_ENABLED`) | — | hors `COLLECTIONS`, vidée à chaque `/api/reindex` |
 
 Une seule collection `mnemos_code` héberge **tous** les projets. Chaque chunk
 porte un champ `tags: list[str]` — le premier tag sert de label primaire
@@ -111,7 +118,11 @@ mnemos_search_code(query="auth", tags_all=["acme", "vue3"])
   dériver) : lecture = un tag partagé ; écriture tags résolus = un tag,
   tags déclarés = tous ; skills/docs écrits seulement en write-all.
 - Auth activée sans tenant (ni `tenants.yaml` ni `MNEMOS_BOOTSTRAP_ADMIN_KEY`)
-  → refus de démarrer.
+  → refus de démarrer. Idem sans `QDRANT_API_KEY` : un Qdrant ouvert
+  contournerait les clés.
+- `MNEMOS_BOOTSTRAP_ADMIN_KEY` = tenant racine `admin`, resynchronisé à chaque
+  démarrage ; ni éditable, ni rotatable, ni supprimable depuis l'API ou le
+  dashboard (changer la variable et redémarrer pour le faire tourner).
 
 ### MCP Tools exposés (9)
 
@@ -131,7 +142,7 @@ défaut** — un gain non mesuré reste un gain non acquis : activer d'abord
 `MNEMOS_QUERY_LOG_ENABLED`, mesurer, puis lever les flags un par un.
 
 **Différenciateurs solides à préserver** :
-- Memory pipeline from git (extraction + dedup + approval) — unique sur le marché
+- Memory pipeline from git (extraction + dedup + élagage par statut) — unique sur le marché
 - Skills indexing (écosystème Claude) — unique
 - Self-hosted complet zéro SaaS — rare
 
@@ -140,12 +151,13 @@ défaut** — un gain non mesuré reste un gain non acquis : activer d'abord
 ### Setup local
 
 ```bash
-# Démarrer la stack
+# Démarrer la stack — tous les réglages viennent de .env (obligatoire)
+cp .env.example .env
 docker compose up -d                       # qdrant + rag-server + watcher
 docker compose --profile llm up -d         # + ollama
 
 # CLI
-make install                               # crée venv + installe mnemos CLI
+make install                               # crée venv + installe core, eval, connectors et le CLI
 source venv/bin/activate
 export MNEMOS_URL=http://localhost:8100
 mnemos status
@@ -165,11 +177,14 @@ Note : paths sont les **chemins container** (mount via `docker-compose.yml`).
 ### Tests
 
 ```bash
-pip install pytest pytest-asyncio
-pip install -e packages/core/
-pip install -r server/requirements.txt
-pytest tests/
+make install
+venv/bin/pip install pytest pytest-asyncio -r server/requirements.txt -r watcher/requirements.txt
+venv/bin/pytest tests/                     # ~960 tests
+cd ui && npm ci && npm test                # suite vitest du dashboard
 ```
+
+`make test` exclut les suites API, CLI et MCP (`test_api.py`, `test_cli.py`,
+`test_mcp_*.py`…) ; `pytest tests/` passe tout.
 
 Conventions tests :
 - Un fichier par module testé (`test_<module>.py`)
@@ -186,15 +201,21 @@ Conventions tests :
 - Handlers FastAPI en `def` (pas `async def`) dès qu'ils appellent du bloquant (torch, client Qdrant sync, LLM) : FastAPI les passe au threadpool. Un `async def` bloquant fige l'event loop et sérialise toutes les requêtes. Côté MCP, le dispatch passe par `anyio.to_thread.run_sync`
 
 ### Architecture
-- `core/` est **pure logique** — pas d'I/O server ni HTTP
-- `server/` est **transport-only** — wrappe `core` derrière FastAPI/MCP
-- `watcher/` et `cli/` consomment `server/` via HTTP, jamais directement `core`
+- `core/` est la **logique** — pas de transport (FastAPI, MCP, routes) ; le
+  client Qdrant et le `LLMProvider` lui sont injectés
+- `server/` est la **couche transport** — wrappe `core` derrière FastAPI/MCP
+  (plus l'orchestration de la recherche, `server/search.py`)
+- `watcher/` et `cli/` lisent et écrivent l'index via l'API HTTP de `server/`,
+  jamais via `core` ; ils n'en importent que des briques pures
+  (`path_filter`, `collections`, `llm` pour `mnemos eval generate`)
 - Collections sont déclarées dans `core/collections.py` — single source of truth
 
 ### Memory entries
 - `id` toujours UUID
-- `status` ∈ {`pending`, `approved`, `rejected`}
-- `memory_type` ∈ {`decision`, `pattern`, `lesson`, `convention`}
+- `status` ∈ {`pending`, `approved`, `rejected`} ; les écritures arrivent
+  `approved`, `pending` seulement si l'appelant le demande
+- `memory_type` : texte libre — `decision`, `pattern`, `lesson`, `convention`
+  à l'extraction ; `general` (CLI / `POST /api/memory`) ou `note` (MCP) par défaut
 - `tags: list[str]` — scoping multi-label (project, techno, équipe). Filtrable
   via `tags_any` (OR) et `tags_all` (AND).
 - Search ne retourne **que** les `approved`
@@ -221,11 +242,12 @@ source, nulle part. Le bruit propre à un projet (`exports/`, un `.csv` génér�
 va dans la config `projects`, en `exclude_dirs` / `exclude_exts` par préfixe.
 
 1. `should_skip_path` reste une **fonction pure**. Ne jamais y charger de
-   config : la résolution par préfixe vit dans `Indexer._resolve_excludes`,
-   calquée sur `resolve_tags`.
+   config : la résolution par préfixe vit dans `core.indexer.resolve_skip`
+   (via `core.projects.detect_excludes`, calquée sur `detect_tags`).
 2. Tout call site qui décide « faut-il ignorer ce fichier ? » passe par
-   `Indexer.should_skip`, jamais par `should_skip_path` en direct — c'est le
-   seul endroit qui unit built-in + config + extras.
+   `Indexer.should_skip` — ou `core.indexer.resolve_skip` sans `Indexer`
+   (`scripts/purge-filtered.py`) —, jamais par `should_skip_path` en direct :
+   c'est le seul endroit qui unit built-in + config + extras.
 3. Les trois sources **s'additionnent**. Rien ne peut ré-autoriser ce qu'une
    règle built-in refuse.
 4. Le watcher pré-filtre sur les built-ins seuls : il ne lit pas la config
@@ -237,20 +259,23 @@ va dans la config `projects`, en `exclude_dirs` / `exclude_exts` par préfixe.
    `packages/core/path_filter.py` (`IGNORE_DIRS`, `IGNORE_EXTS`,
    `IGNORE_FILENAMES`, `IGNORE_PATH_SUBSTRINGS`, `IGNORE_BASENAME_SUBSTRINGS`).
    Ne jamais re-déclarer une liste locale dans `watcher/`, `server/` ou
-   ailleurs — les call sites importent `should_skip_path`.
+   ailleurs.
 2. Ajouter un test dans `tests/test_path_filter.py` :
    - un cas positif (le pattern skip)
    - un cas négatif non-régression (un path légitime proche n'est PAS skippé,
      ex. `my_node_modules_helper/` ne doit pas matcher `node_modules`)
-3. Le filtre est appliqué à 3 endroits, **automatiquement** : watcher (early),
-   bulk reindex walker (`_should_skip`), et `Indexer.index_file`
-   (defense-in-depth pour la push API). Aucun wiring supplémentaire à faire.
-4. Pour qu'un nouveau pattern s'applique aux chunks déjà indexés, lancer un
-   `./scripts/reindex-all.py --recreate`.
+3. Le filtre est appliqué à 3 endroits, **automatiquement** : watcher (early,
+   `should_skip_path`), bulk reindex walker (`_run_reindex` via
+   `Indexer.should_skip`), et `Indexer.index_file` (defense-in-depth pour la
+   push API). Aucun wiring supplémentaire à faire.
+4. Pour retirer les chunks déjà indexés qu'un nouveau pattern refuse :
+   `./scripts/purge-filtered.py --apply` (supprime juste ces points), ou
+   `./scripts/reindex-all.py --recreate` (ré-embedde tout).
 
 ### Modifications des git hooks (`scripts/hooks/`)
 
-Quatre hooks, deux rôles, **deux listes de repos distinctes** :
+Quatre hooks, deux rôles, **deux listes de repos distinctes** (plus un
+`pre-commit` global qui ne fait que chaîner celui du repo) :
 
 | Hook | Rôle | Gate | Coût |
 |---|---|---|---|
@@ -291,17 +316,18 @@ C'est pour ça que le chemin nominal est l'incrémental, pas le cron.
 ### Modifications memory pipeline
 1. Toute extraction passe par `MemoryExtractor` (LLM provider injecté)
 2. Toute écriture passe par `Deduplicator` (jamais d'upsert direct sur `mnemos_memory`)
-3. Préserver le workflow `pending → approved`
+3. Préserver le filtre `status = approved` côté search : les écritures sont
+   `approved` par défaut, `reject` sert à élaguer (pas de gate de review)
 
 ### LLM provider — abstraction (`core.llm`)
-Toute composante qui appelle un LLM (extractor, dedup merge, futur contextual chunker, grader, rewriter, eval generator) **doit** :
+Toute composante qui appelle un LLM (extractor, dedup merge, contextual chunker, grader, rewriter, eval generator) **doit** :
 1. Recevoir un `LLMProvider` par constructeur (jamais instancier en interne)
 2. Utiliser uniquement `complete()` ou `complete_prompt()` de l'interface
 3. Gérer `LLMError` (fallback ou propagation)
 
 Providers supportés :
 - `ollama` (par défaut, local, self-hosted)
-- `anthropic` (cloud, prompt caching, idéal pour contextual chunking)
+- `anthropic` (cloud)
 - `openai` (cloud OU endpoint compatible : vLLM, LM Studio, Together, Groq, OpenRouter…)
 
 Switch via `MNEMOS_LLM_PROVIDER` env var (voir `.env.example`).
@@ -335,5 +361,9 @@ Détails : [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 - [`README.md`](README.md) — Quick start utilisateur
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — Plan d'amélioration CRAG/SOTA
-- [`docs/EVAL.md`](docs/EVAL.md) — Métriques baseline + runs (à venir Phase 1.3)
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — Détails techniques (à venir)
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — Détails techniques
+- [`docs/RETRIEVAL_PIPELINE.md`](docs/RETRIEVAL_PIPELINE.md) — Étapes de la recherche, flags
+- [`docs/MEMORY_PIPELINE.md`](docs/MEMORY_PIPELINE.md) — Extraction, dedup, statut des mémoires
+- [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) — Variables, config partagée, tenants
+- [`docs/EVALUATION.md`](docs/EVALUATION.md) — Mesurer sur ses propres données
+- [`docs/EVAL.md`](docs/EVAL.md) — Mesures et historique des runs

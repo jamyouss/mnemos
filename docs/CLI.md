@@ -2,7 +2,7 @@
 
 The `mnemos` CLI is the developer-facing companion to the MCP server. It
 wraps the REST API and is the easiest way to drive indexing, evaluation,
-and memory management from the terminal.
+memory management and the knowledge connectors from the terminal.
 
 ## Install
 
@@ -23,8 +23,9 @@ mnemos --help
 | `MNEMOS_LLM_MODEL` | `llama3.1:8b` | `eval generate` |
 | `MNEMOS_LLM_API_KEY` | _empty_ | `eval generate` (anthropic / openai) |
 | `MNEMOS_LLM_BASE_URL` | _empty_ | `eval generate` |
-| `MNEMOS_OLLAMA_URL` | `http://localhost:11434` | `eval generate` (fallback for ollama) |
+| `MNEMOS_OLLAMA_URL` | _empty_ | `eval generate`, when `MNEMOS_LLM_BASE_URL` is empty. Both empty with ollama: probes `http://ollama:11434`, `http://host.docker.internal:11434`, then `http://localhost:11434` |
 | `MNEMOS_EVAL_ROOT` | `evals` | Where `mnemos eval *` reads/writes |
+| `MNEMOS_CONNECTORS_CONFIG` | _empty_ | `ingest run` / `ingest serve`: read the sources from this file instead of the server, see [`CONNECTORS.md`](CONNECTORS.md) |
 
 ---
 
@@ -32,9 +33,13 @@ mnemos --help
 
 ```bash
 mnemos status
+mnemos doctor
 ```
 
-Prints server health and per-collection point counts.
+`status` prints server health and, per collection, its vector count, point
+count and status. `doctor` runs an end-to-end check — `/health`, the
+collections behind `/api/status`, the five core collections present, at least
+one with points, a `/api/search` round-trip — and exits 1 if a check fails.
 
 ---
 
@@ -42,41 +47,46 @@ Prints server health and per-collection point counts.
 
 ### `mnemos search QUERY`
 
-Cross-collection semantic search.
+Cross-collection semantic search (every collection but `mnemos_memory`
+unless `--collection` says otherwise).
 
 ```bash
 mnemos search "JWT validation"
 mnemos search "JWT validation" --limit 10
 mnemos search "JWT validation" --collection mnemos_code
 mnemos search "logger init" --file-type go
-mnemos search "config" --path-filter /data/codebase/myproject/
+mnemos search "rollback" --collection mnemos_knowledge --tags jira:OPS
 ```
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--limit` | int | `5` | Number of results |
-| `--collection` | str (repeatable) | _all_ | Restrict to specific collections |
-| `--file-type` | str (repeatable) | _any_ | Filter by `language` field |
-| `--path-filter` | str | _none_ | Substring filter on `file_path` |
+| `--collection` | str (repeatable) | _all but memory_ | Restrict to specific collections |
+| `--file-type` | str (repeatable) | _any_ | Filter on the chunk's `language`: only the Go, Vue and CSV/TSV chunkers set one (`go`, `vue`, `csv`, `tsv`) |
+| `--path-filter` | str | _none_ | **Exact** match on the stored `file_path` — the full container path, e.g. `/data/codebase/myproject/main.go`. Not a prefix or substring |
+| `--tags` | comma-separated | _none_ | OR filter on the `tags` payload (sent as `tags_any`) |
+| `--tags-all` | comma-separated | _none_ | AND filter: every tag must be present (sent as `tags_all`) |
+| `--mode` | `preview` / `full` | `preview` | `preview` truncates each chunk; `full` returns whole chunks |
 
 ### `mnemos search-code QUERY`
 
-Code-only search with structured filters.
+Code-only search (`mnemos_code`) with structured filters.
 
 ```bash
-mnemos search-code "ride cancel" --tags myproject --language go --symbol-type func
+mnemos search-code "ride cancel" --tags myproject --language go --symbol-type function
 mnemos search-code "auth"        --tags acme,webshop                  # OR
-mnemos search-code "auth"        --tags-all acme,vue3              # AND
+mnemos search-code "auth"        --tags-all acme,vue3                 # AND
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--limit` | Results count (default 5) |
-| `--language` | `go`, `vue`, `typescript`, etc. |
-| `--symbol-type` | `function`, `type`, `method` (from chunker metadata) |
+| `--limit` | Results count (default 3) |
+| `--language` | Exact `language` value: `go`, `vue`, `csv`, `tsv` (other files carry none) |
+| `--symbol-type` | Exact `chunk_type` from the chunker: Go `function` (methods included), `type`, `header`; Vue `template`, `script`, `style`; Markdown `section`; CSV/TSV `rows`; fallback `file`, `window` |
 | `--tags` | Comma-separated tags (OR filter on the `tags` payload) |
 | `--tags-all` | Comma-separated tags (AND filter — every tag must be present) |
-| `--path-filter` | Substring on `file_path` |
+| `--path-filter` | Exact match on the full stored `file_path`, as for `search` |
+| `--mode` | `preview` (default) or `full` |
 
 ### `mnemos search-skills QUERY`
 
@@ -87,6 +97,24 @@ mnemos search-skills "performance debugging"
 mnemos search-skills "performance debugging" --limit 5
 ```
 
+`--limit` defaults to 3.
+
+### `mnemos search-memory QUERY`
+
+Search memories. Only `approved` entries come back.
+
+```bash
+mnemos search-memory "why flat REST paths"
+mnemos search-memory "retry policy" --type decision --tags webshop
+```
+
+| Flag | Description |
+|------|-------------|
+| `--limit` | Results count (default 5) |
+| `--type` | `memory_type` filter (`decision`, `pattern`, `lesson`, `convention`, `note`…) |
+| `--tags` / `--tags-all` | Comma-separated, OR / AND |
+| `--mode` | `preview` (default) or `full` |
+
 ---
 
 ## Indexing
@@ -96,13 +124,13 @@ mnemos search-skills "performance debugging" --limit 5
 Trigger a server-side reindex.
 
 ```bash
-# Initial: drop + recreate with the hybrid schema, full directory scan, 4 workers
-mnemos reindex --recreate --full --workers 4 \
+# First index of an empty collection: full directory scan, 4 workers
+mnemos reindex --full --workers 4 \
        --collection mnemos_code \
        --path /data/codebase/myproject \
        --tags myproject,go
 
-# Subsequent incremental: just re-index a single file (tags from the projects mapping)
+# Re-index a single file (tags from the projects mapping)
 mnemos reindex --collection mnemos_code \
        --path /data/codebase/myproject/services/handler.go
 ```
@@ -110,11 +138,11 @@ mnemos reindex --collection mnemos_code \
 | Flag | Description |
 |------|-------------|
 | `--collection` (required) | Collection name (e.g. `mnemos_code`, `mnemos_docs`) |
-| `--path` | Container path of a file or directory |
+| `--path` | Container path of a file or directory. Without it, nothing is indexed (`no_path`) |
 | `--tags` | Comma-separated tags applied to every file under `--path`. Overrides the tags resolved from the server's projects mapping. First tag is the primary (display label). |
 | `--full` | Recursively walk `--path`. Without `--full`, only the path itself is indexed. |
-| `--recreate` | Drop + recreate the collection before indexing. Required to migrate to hybrid. |
-| `--workers` | Parallel worker threads (use 4 with contextual chunking on) |
+| `--recreate` | Drop + recreate the **whole** collection before indexing — every project in it, git connector files included, not just `--path`. Only for a schema migration (e.g. to hybrid) or a deliberate rebuild |
+| `--workers` | Parallel worker threads (default 1; use 4 with contextual chunking on) |
 | `--exclude-ext` | Extra extension to skip **for this run**, repeatable, leading dot optional (`--exclude-ext .proto --exclude-ext csv`) |
 | `--exclude-dir` | Extra directory name to skip **for this run**, repeatable, matched anywhere in the path (`--exclude-dir mocks`) |
 
@@ -129,12 +157,19 @@ Without `--tags`, Mnemos resolves tags from the projects mapping stored on
 the server (longest path-prefix wins). Without a matching entry, it falls
 back to cumulative path segments. See [`CONFIGURATION.md`](CONFIGURATION.md#tags--scoping-chunks-across-projects).
 
-The reindex runs as a **background task** server-side. The CLI returns
-immediately with `reindex_started`. Watch progress with `mnemos status`.
+Reindexing a file replaces its chunks, so re-running without `--recreate` is
+how to re-tag or re-chunk a project. The reindex runs as a **background
+task** server-side: the CLI returns immediately with `reindex_started`.
+`mnemos status` shows the point counts moving.
 
 ---
 
 ## Memory
+
+Every write path — `mnemos memory add`, the `mnemos_memory` MCP tool and
+the git-hook extraction — stores memories as `approved`, so they are
+searchable at once. Review is for taking a bad one back out, not for letting
+good ones in.
 
 ### `mnemos memory list`
 
@@ -144,36 +179,39 @@ mnemos memory list --status approved
 mnemos memory list --status rejected
 ```
 
+The default `pending` is usually empty: nothing writes that status unless a
+client asks for it through `POST /api/memory`.
+
 ### `mnemos memory add CONTENT`
 
-Insert a memory directly, skipping extraction. **Lands as `approved`**, so it is
-searchable immediately — you are the author, there is nothing to review.
+Insert a memory directly, skipping extraction. Lands as `approved`.
 
 ```bash
 mnemos memory add "Chose flat REST paths over nested ones: nesting encoded a \
 hierarchy that changed twice in a year" \
        --project myproject \
        --type decision \
-       --tags routing,api
+       --tags routing --tags api
 ```
 
-`--type` is one of `decision`, `pattern`, `lesson`, `convention`, `note`.
-`--tags` is how a memory is found later from another project — an untagged
-entry is reachable by wording alone.
+`--type` defaults to `general`; prefer `decision`, `pattern`, `lesson`,
+`convention` or `note`. `--tags` is **repeatable**, one tag per flag (a
+comma-separated value would be stored as one tag). Tags are how a memory is
+found later from another project — an untagged entry is reachable by wording
+alone.
 
 Prefer recording the reasoning over the conclusion: "chose X over Y because Z"
 stays useful when the context shifts, "we use X" does not.
 
-> **The three write paths do not agree on status.** `mnemos memory add` writes
-> `approved`; the `mnemos_memory` MCP tool and the git-hook extraction both
-> write `pending`. Only `approved` entries come back from a search, so anything
-> an agent or a commit produced stays invisible until reviewed. That is
-> deliberate — a human authored the first, a model authored the others — but it
-> does mean an agent cannot read back what it just stored.
+### `mnemos memory reject <id>` / `mnemos memory approve <id>`
+
+Act on a single entry. `reject` takes a wrong memory out of search;
+`approve` puts it back. The dashboard's Memories page does the same with one
+click per entry.
 
 ### `mnemos memory review`
 
-Walk the pending queue one entry at a time — full content, then approve,
+Walk the `pending` entries one at a time — full content, then approve,
 reject, skip or quit.
 
 ```bash
@@ -181,16 +219,28 @@ mnemos memory review
 mnemos memory review --approve-all    # bulk, asks for confirmation first
 ```
 
-This exists because reviewing was the bottleneck, not extracting. Approving by
-hand meant reading a table that truncates the content, copying a UUID out of
-it and running one command per entry — so in practice nothing got approved,
-and since search only returns `approved` entries, nothing extracted was ever
-searchable.
+It dates from when every extracted memory waited as `pending`; with writes
+now approved, it only has entries left from that time or written `pending`
+on purpose.
 
-### `mnemos memory approve <id>` / `mnemos memory reject <id>`
+---
 
-Act on a single entry when you already have its id. `mnemos memory list`
-(defaults to `status=pending`) shows what is waiting.
+## Knowledge connectors
+
+`mnemos ingest` syncs Confluence, Jira, web sites and remote git
+repositories into Mnemos:
+
+```bash
+mnemos ingest run                       # every source of the server's connectors
+mnemos ingest serve                     # same, then on a timer (the compose `ingester`)
+mnemos ingest confluence --space ENG    # one source, from flags
+mnemos ingest jira --project OPS
+mnemos ingest web https://docs.example.com/guide/
+mnemos ingest git https://github.com/acme/app.git
+mnemos ingest -v run                    # log every pushed / deleted document
+```
+
+Options, environment and sync rules: [`CONNECTORS.md`](CONNECTORS.md).
 
 ---
 
@@ -214,10 +264,10 @@ mnemos eval generate --collection mnemos_skills --count 5 \
 |------|-------------|
 | `--collection` (required) | Source collection |
 | `--count` | Number of candidates to generate (default 10) |
-| `--provider` | `ollama` / `anthropic` / `openai` (default $MNEMOS_LLM_PROVIDER) |
-| `--model` | Model name (default $MNEMOS_LLM_MODEL) |
-| `--api-key` | API key for cloud providers |
-| `--base-url` | Override base URL (vLLM, LM Studio, …) |
+| `--provider` | `ollama` / `anthropic` / `openai` (default `$MNEMOS_LLM_PROVIDER`, else `ollama`) |
+| `--model` | Model name (default `$MNEMOS_LLM_MODEL`, else `llama3.1:8b`) |
+| `--api-key` | API key for cloud providers (default `$MNEMOS_LLM_API_KEY`) |
+| `--base-url` | Override base URL (vLLM, LM Studio, …; default `$MNEMOS_LLM_BASE_URL`, else `$MNEMOS_OLLAMA_URL`) |
 | `--seed` | Reproducible sampling |
 
 Candidates land in `evals/dataset/_candidates.yaml`. Edit the file, set
@@ -236,12 +286,13 @@ rejected candidates are discarded; un-reviewed ones stay for next time.
 
 ```bash
 mnemos eval run --tag baseline-2026-05-15
-mnemos eval run --tag with-reranker --limit 10
+mnemos eval run --tag with-reranker --limit 5
 ```
 
-Runs the golden set against the live Mnemos server. Computes recall@k,
-precision@k, MRR, NDCG@k, hit_rate@k and per-intent breakdown. Saves to
-`evals/runs/<tag>.json` and prints a Rich table.
+Runs the golden set against the live Mnemos server (`--limit`, the top-K per
+query, defaults to 10). Computes recall@k, precision@k, MRR, NDCG@k,
+hit_rate@k and per-intent breakdown. Saves to `evals/runs/<tag>.json` and
+prints a Rich table.
 
 ### `mnemos eval compare TAG_A TAG_B`
 
@@ -263,9 +314,11 @@ Lists every run currently in `evals/runs/`.
 
 ## Tips
 
-- **Test a flag toggle quickly**: `MNEMOS_RERANKER_ENABLED=true docker compose
-  up -d rag-server` (no rebuild needed for env flips).
+- **Test a flag toggle quickly**: flip it on the dashboard's Configuration
+  page (live for the retrieval switches), or set it in `.env` and run
+  `docker compose up -d rag-server` — a variable in front of `docker compose`
+  does not reach the container.
 - **One-shot search to another server**: set `MNEMOS_URL` to its endpoint and
   `MNEMOS_API_KEY` to your key when it has auth enabled.
-- **Use `--collection` to avoid the router** when you know exactly which
-  collection holds the answer — saves a routing decision.
+- **Pass `--collection`** when you know which collection holds the answer:
+  nothing picks it for you, and fewer collections means fewer unrelated hits.

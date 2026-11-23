@@ -13,7 +13,8 @@
 # stops the run before anything is synced.
 
 # How often `mnemos ingest serve` resyncs after the start-up sync: 45s, 30m,
-# 6h, 1d… Omit it to sync only at start-up, on file change and on SIGHUP.
+# 6h, 1d… Omit it to sync only at start-up, when the sources change (a
+# dashboard save, or this file under --config) and on SIGHUP.
 interval: 6h
 
 sources:

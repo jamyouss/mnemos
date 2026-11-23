@@ -6,21 +6,29 @@
 
 ---
 
-## What ships in v0.1.0
+## What ships today
 
-Default-on production setup measured at **+47 % MRR** and **+37 % NDCG@5**
-over plain dense retrieval on the clean golden set. See [`EVAL.md`](EVAL.md)
+Default setup: hybrid retrieval only, every other stage behind a flag. On
+the 92-question golden set the live server scores MRR 0.834 with
+EmbeddingGemma 2 and dense-weighted fusion; the reranker gave +47 % MRR over
+plain dense retrieval on the first, 25-question set. See [`EVAL.md`](EVAL.md)
 for per-phase numbers.
 
 ### Retrieval pipeline
 - ✅ **Hybrid retrieval** — Qdrant named vectors (dense + sparse BM25) fused
-  server-side with Reciprocal Rank Fusion (k=60).
+  server-side with Reciprocal Rank Fusion, the dense side weighted 3:1
+  (`MNEMOS_FUSION_DENSE_WEIGHT`).
 - ✅ **Cross-encoder reranker** — `BAAI/bge-reranker-base` by default,
-  pluggable via `MNEMOS_RERANKER_MODEL`. Feature-flagged.
+  pluggable via `MNEMOS_RERANKER_MODEL`, pairs capped at 256 tokens.
+  Feature-flagged.
+- ✅ **MMR diversification** — `MNEMOS_MMR_ENABLED`, on top of the reranker.
 - ✅ **Contextual chunking** — Anthropic-style LLM-generated preambles
   per chunk, gated by `MNEMOS_CONTEXTUAL_ENABLED`.
 - ✅ **CRAG corrective loop** — Document grader (`MNEMOS_GRADER_ENABLED`) +
   query rewriter (`MNEMOS_REWRITER_ENABLED`), both feature-flagged.
+- ✅ **Configurable embedding model** — `EMBEDDING_MODEL` (default
+  `all-MiniLM-L6-v2`; `google/embeddinggemma-2` measured best), migrated
+  without downtime by `python -m core.embedding_migration sync|switch`.
 - ❌ **Semantic router** — built, measured, removed (2026-09-07).
 
 > **Why it is gone.** Routing compared the query
@@ -53,36 +61,40 @@ for per-phase numbers.
 
 ### Indexing
 - ✅ **Code-aware chunkers** — tree-sitter (Go), regex SFC (Vue),
-  heading-based (Markdown), fallback windowed.
-- ✅ **Single `mnemos_code` collection** with tag-based scoping — every chunk
-  carries `tags: list[str]`, search filters via `tags_any` (OR) and `tags_all`
+  heading-based (Markdown), CSV/TSV rows, fallback windowed.
+- ✅ **Single `mnemos_code` collection** with tag-based scoping (2026-05-18,
+  replacing the single `project` filter) — every chunk carries
+  `tags: list[str]`, search filters via `tags_any` (OR) and `tags_all`
   (AND). Mapping `path → tags` declared in the projects configuration (stored
   in Qdrant, edited from the dashboard), with a cumulative-segment fallback.
-  `--tags` flag on `mnemos reindex`
-  overrides per-run.
-- ✅ **Tags-based scoping (replaces single `project` filter)** — ✅ shipped 2026-05-18.
-  Chunks carry `tags: list[str]`; search filters with `tags_any` (OR) and `tags_all` (AND).
-  See [CONFIGURATION.md](CONFIGURATION.md) for the projects mapping schema.
+  `--tags` flag on `mnemos reindex` overrides per-run. See
+  [CONFIGURATION.md](CONFIGURATION.md) for the projects mapping schema.
 - ✅ **Watcher** — `watchdog` with 2 s debounce, incremental push to the
   server.
 > ⚠️ The watcher only survives a large codebase thanks to the inotify prune
 > patch in `watcher/main.py` (`_install_inotify_prune`). Without it, the
 > recursive walk watches every directory — `node_modules` included — and the
 > process dies at startup with `OSError: [Errno 28] inotify watch limit
-> reached`. Published images up to `0.3.0` predate the patch: rebuild locally
-> (`docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
-> --build watcher`) or publish a newer tag.
+> reached`. Published images up to `0.3.0` predate the patch; `0.3.1` and
+> later include it.
 
-- ✅ **`_should_skip` rules** — `.bak`, `_nuxt/*.js`, `.terraform/`, etc.
-  filtered out at index time.
+- ✅ **Git hooks for incremental indexing** — `post-merge` / `post-checkout`
+  push the files a pull changed; `scripts/nightly-reindex.sh` catches the rest.
+- ✅ **Ignore rules** — built-in policy in `core.path_filter` (`.bak`,
+  `_nuxt/`, `.terraform/`, lockfiles…) plus per-project `exclude_dirs` /
+  `exclude_exts`, enforced at every ingestion path; `scripts/purge-filtered.py`
+  removes what was indexed before a rule existed.
 
 ### Memory pipeline
-- ✅ **Auto-extraction from git** — pre-push hook runs the diff through the
-  configured LLM, produces structured decisions/patterns/lessons.
-- ✅ **LLM-powered deduplication** — cosine ≥ 0.85 triggers `merge` or
+- ✅ **Auto-extraction from git** — pre-push (or post-commit) hook runs the
+  diff through the configured LLM, produces structured
+  decisions/patterns/conventions/lessons.
+- ✅ **LLM-powered deduplication** — cosine ≥ `MNEMOS_DEDUP_THRESHOLD`
+  (0.85 server default, 0.80 in `.env.example`) triggers `merge` or
   `replace`, configurable via `MNEMOS_DEDUP_STRATEGY`.
-- ✅ **Approval workflow** — `pending → approved`. Search only returns
-  approved memories.
+- ✅ **Write-first memories** — memories are stored `approved`, searchable at
+  once (2026-09-07: a review gate nobody opened left the pool empty). Search
+  only returns approved memories, so rejecting one prunes it.
 - ✅ **Tag-based scoping on memories** — same `tags` payload field as code,
   filtered via `tags_any` / `tags_all`.
 
@@ -98,12 +110,16 @@ for per-phase numbers.
   settings overrides and tenants shared by every server pod, propagated
   within `MNEMOS_CONFIG_POLL_SECONDS`; `config/` files are first-start
   import sources only.
-- ✅ **`mnemos_knowledge` collection + connectors** — Confluence, Jira and web
-  pushed through the API, tagged `<source>:<scope>`, with `source_url`.
+- ✅ **`mnemos_knowledge` collection + connectors** — Confluence, Jira, web
+  and git pushed through the API, tagged `<source>:<scope>`, with
+  `source_url`; `mnemos ingest run|serve` reads them from the server.
+- ✅ **Dashboard** — Nuxt SPA served at `/`: overview, search log,
+  playground, memories, connectors, projects, tenants and configuration
+  (retrieval flags editable live), behind a sign-in page when auth is on.
 - ✅ **Observability** (`MNEMOS_QUERY_LOG_ENABLED`) — JSONL query log with
-  top-K, scores, latencies, grader hits.
-- ✅ **Eval harness** — `mnemos eval generate|promote|run|compare`,
-  golden set in YAML, metrics (MRR, NDCG@k, R@k, P@k, hit@k).
+  top-K, scores, latencies and which stages ran.
+- ✅ **Eval harness** — `mnemos eval generate|promote|run|compare|list`,
+  golden set in YAML, metrics (MRR, NDCG@5, R@k, P@5, hit@5).
 - ✅ **Multi-arch Docker images** (`linux/amd64`, `linux/arm64`) at
   ~500 MB compressed, CPU-only PyTorch, default embedding pre-baked.
 
@@ -111,7 +127,7 @@ for per-phase numbers.
 
 ## Backlog
 
-### 🔜 Retrieval quality
+### Retrieval quality
 - **MMR diversification — mesure** — Shippé wired, off par défaut
   (`MNEMOS_MMR_ENABLED`). Reste à mesurer : l'activer par défaut seulement
   s'il réduit les near-duplicates du top-K sans dégrader NDCG@5.
@@ -123,32 +139,35 @@ for per-phase numbers.
   pousse la latence p50 au-delà de 100 s. Avec un LLM cloud rapide,
   estimé +5–10 % de recall sur les queries vagues.
 
-### 🔜 Performance
-- **GPU host for the reranker** — `bge-reranker-base` sur CPU = ~14 s p50,
-  sur GPU ~250 ms. Bloque l'activation par défaut du reranker.
+### Performance
+- **GPU host for the reranker** — `bge-reranker-base` sur CPU ≈ 1,1 s pour
+  20 candidats (moitié moins tronqué à 256 tokens, le défaut) ; ~14 s p50
+  mesurés en mai. Avec EmbeddingGemma 2 le gain du reranker se réduit
+  (MRR 0.556 → 0.658) : à remesurer avant tout default-on.
 - **Sparse model upgrade** — Investiguer SPLADE-v3 ou ColBERT en remplacement
   du BM25 in-house.
 
-### 🔜 Production-ready
+### Production-ready
 - **A/B testing infra** — Feature flags par tenant, 10 % de sampling sur les
   variantes, log dédié pour mesurer l'impact des changements retrieval en
   conditions réelles.
 - **Authn richer than API key** — OAuth/OIDC, rotation automatique des clés
-  (les scopes par projet et la clé root existent déjà).
+  (les scopes par tag, la rotation manuelle et la clé root existent déjà).
 - **Quotas par tenant** — Les tenants ont des scopes de lecture/écriture par
   tag, mais aucune limite de volume ni de débit.
 - **Helm chart** — Pour les déploiements Kubernetes.
 
-### 🔜 Écosystème
+### Écosystème
 - **Plus de chunkers** — TypeScript/TSX (AST), Python (AST), Rust, Java.
 - **Webhook outputs** — Notifier Slack / Discord quand une mémoire est
-  proposée à la review.
+  écrite.
 
 ---
 
 ## Métriques cibles pour les prochaines phases
 
-Critères de done quand un item du backlog ship (vs baseline v0.1.0) :
+Critères de done quand un item du backlog ship (vs la référence courante,
+hybrid seul — voir [EVAL](EVAL.md)) :
 
 | Composant | Métrique seuil |
 |---|---|
@@ -164,7 +183,7 @@ Aucun item ne ship si une métrique régresse.
 ## Historique — plan initial (2026-05-13)
 
 > Le plan ci-dessous était le brief de démarrage. La quasi-totalité a été
-> implémentée et figure désormais dans la section "What ships in v0.1.0".
+> implémentée et figure désormais dans la section "What ships today".
 > Conservé tel quel pour référence et pour l'archéologie des choix de design.
 
 **Contraintes initiales :**

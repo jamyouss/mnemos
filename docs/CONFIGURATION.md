@@ -1,9 +1,14 @@
 # Mnemos — Configuration
 
-Every Mnemos knob is an **environment variable**, passed through Docker
-Compose. The full surface lives in [`.env.example`](../.env.example); this
-doc explains what each variable does and when to flip it. A subset can also
-be changed from the dashboard, see [Dashboard overrides](#dashboard-overrides).
+Every Mnemos knob is an **environment variable**. Under Docker Compose every
+service reads them from `.env` (`env_file: .env`, required:
+`cp .env.example .env`); [`.env.example`](../.env.example) holds the full
+surface with comments. A variable set in the shell in front of
+`docker compose` does **not** reach the containers: edit `.env`, then
+`docker compose up -d`. This doc explains what each variable does and when
+to flip it. Most retrieval, cache, LLM, memory and indexing settings can also
+be changed from the dashboard, where a saved value wins over `.env`: see
+[Dashboard overrides](#dashboard-overrides).
 
 ## Defaults at a glance
 
@@ -15,7 +20,7 @@ be changed from the dashboard, see [Dashboard overrides](#dashboard-overrides).
 | CRAG grader / rewriter | OFF |
 | Semantic cache | OFF |
 | Query log (observability) | OFF |
-| Memory dedup | ON (threshold 0.85, strategy `merge`) |
+| Memory dedup | ON (threshold 0.80 in `.env.example`, 0.85 when unset; strategy `merge`) |
 | LLM provider | `ollama` (local) |
 
 The defaults give you a working RAG without any LLM calls at retrieval time —
@@ -23,18 +28,32 @@ fast, predictable. Every "advanced" feature is opt-in.
 
 ---
 
+## Compose wiring
+
+Read by `docker-compose.yml` itself (interpolation) or by one container only.
+
+| Var | `.env.example` | Notes |
+|-----|----------------|------|
+| `MNEMOS_CODEBASE_HOST_PATH` | `./data/codebase` | Host directory mounted read-only at `/data/codebase` (server, watcher) |
+| `MNEMOS_CLAUDE_CONFIG_HOST_PATH` | `./data/claude-config` | Host directory mounted at `/data/claude-config` (skills + docs) |
+| `MNEMOS_SERVER_IMAGE` / `MNEMOS_WATCHER_IMAGE` / `MNEMOS_CLI_IMAGE` | `jamyouss/mnemos-*:latest` | Images of `rag-server`, `watcher`, `ingester`; `mnemos-*:dev` with `docker-compose.dev.yml` |
+| `MNEMOS_PULL_POLICY` | `missing` | Keep `missing` for local images, which cannot be pulled |
+| `MNEMOS_SERVER_URL` | `http://rag-server:8100` | Server the watcher pushes to |
+| `MNEMOS_URL` | `http://rag-server:8100` | Server the ingester talks to (host clients default to `http://localhost:8100`) |
+| `QDRANT__SERVICE__API_KEY` | _(commented)_ | Read by the Qdrant container; same value as `QDRANT_API_KEY`, see [Authentication](#authentication) |
+
 ## Storage and embeddings
 
 | Var | Default | Notes |
 |-----|--------|------|
-| `QDRANT_HOST` | `qdrant` | Hostname inside the compose network |
+| `QDRANT_HOST` | `qdrant` (`.env.example`; `localhost` when unset) | Hostname inside the compose network |
 | `QDRANT_PORT` | `6333` | |
 | `QDRANT_API_KEY` | _(unset)_ | Sent to Qdrant as `api-key`. Must equal Qdrant's `QDRANT__SERVICE__API_KEY`. **Required when `MNEMOS_AUTH_ENABLED=true`**: the server refuses to start without it. Also read by `core.embedding_migration` and `scripts/purge-filtered.py` |
 | `QDRANT_HTTPS` | `false` | Connect to Qdrant over TLS (Qdrant Cloud, a TLS-terminated Qdrant). qdrant-client would otherwise switch to TLS as soon as a key is set |
 | `EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | Any sentence-transformers model; vector size is read from the model. `google/embeddinggemma-2` is profiled (query prompts, `title: <path>` document framing, 512 tokens). **Change on an existing index → migrate**, see [Changing the embedding model](#changing-the-embedding-model). |
-| `CODEBASE_PATH` | `/data/codebase` | Root for code. Override the bind mount, not this var. |
-| `CLAUDE_CONFIG_PATH` | `/data/claude-config` | Root for skills + docs. |
-| `MNEMOS_STATE_DIR` | `/data/state` | Persistent state (query logs, etc.) |
+| `CODEBASE_PATH` | `/data/codebase` | Container path of the code mount. To change what is mounted, set `MNEMOS_CODEBASE_HOST_PATH`, not this var. |
+| `CLAUDE_CONFIG_PATH` | `/data/claude-config` | Container path of skills + docs (`MNEMOS_CLAUDE_CONFIG_HOST_PATH` on the host side). |
+| `MNEMOS_STATE_DIR` | `/data/state` | Persistent state: the query log, and a legacy `settings.json` imported once (see [Shared configuration](#shared-configuration)) |
 
 ## LLM provider
 
@@ -47,7 +66,7 @@ You pick one at startup; every component that needs an LLM uses the same one.
 | `MNEMOS_LLM_MODEL` | `llama3.1:8b` | Provider-specific model name |
 | `MNEMOS_LLM_API_KEY` | _empty_ | Required for `anthropic` and `openai` |
 | `MNEMOS_LLM_BASE_URL` | _empty_ | Override base URL — works with vLLM, LM Studio, Together, Groq, OpenRouter… |
-| `MNEMOS_OLLAMA_URL` | `http://ollama:11434` | Legacy fallback (used when provider=ollama and `MNEMOS_LLM_BASE_URL` is empty) |
+| `MNEMOS_OLLAMA_URL` | empty (`.env.example`; `http://localhost:11434` when unset) | Ollama endpoint, used when provider=ollama and `MNEMOS_LLM_BASE_URL` is empty. Empty: probes `http://ollama:11434`, `http://host.docker.internal:11434`, then `http://localhost:11434`, and keeps the first one with a model pulled |
 
 ### Recipes
 
@@ -88,8 +107,10 @@ MNEMOS_LLM_BASE_URL=http://host.docker.internal:1234/v1
 | `MNEMOS_CONTEXTUAL_ENABLED` | `false` | Phase 2A.2 — prepend an LLM preamble to every chunk |
 | `MNEMOS_CONTEXTUAL_WORKERS` | `4` | Parallel LLM calls during indexing |
 
-Enabling contextual chunking forces a full reindex on the next ingest. Plan a
-maintenance window — see [`RETRIEVAL_PIPELINE.md`](RETRIEVAL_PIPELINE.md#contextual-chunking).
+Contextual chunking only enriches what is indexed after it is switched on;
+chunks already in Qdrant keep their old text until their files are
+reindexed (`mnemos reindex --full …`). Each chunk costs one LLM call: plan for
+it on a large codebase.
 
 ### Tags — scoping chunks across projects
 
@@ -233,12 +254,17 @@ mnemos_search_code(query="auth", tags_all=["acme", "vue3"])
 
 A saved projects mapping applies on every pod within
 `MNEMOS_CONFIG_POLL_SECONDS`, from the next indexing event on.
-Re-tag an existing project with:
+Re-tag an existing project by reindexing it: each file's chunks are replaced
+with freshly tagged ones.
 
 ```bash
-mnemos reindex --recreate --full --collection mnemos_code \
-       --path /data/codebase/myproject --tags myproject,go
+mnemos reindex --full --collection mnemos_code --path /data/codebase/myproject
 ```
+
+Add `--tags` only to override the mapping. Do **not** add `--recreate` for
+this: it drops the whole collection — every other project, and the
+repositories the git connector synced into `mnemos_code` — before indexing
+`--path` alone.
 
 ## Retrieval
 
@@ -257,12 +283,13 @@ With EmbeddingGemma 2 the reranker adds ~+0.10 MRR for ~0.8 s per query on a
 Mac CPU (more inside Docker), so it stays off by default. Without the length
 cap, `bge-reranker-v2-m3` reads whole chunks and took 68 s per query.
 
-### Fusion and chunk size
+### Fusion, chunk size, response size
 
 | Var | Default | Description |
 |-----|--------|------|
 | `MNEMOS_FUSION_DENSE_WEIGHT` | `3.0` | Weight of the dense side in the dense/BM25 RRF fusion. `1.0` is plain RRF, which let BM25 noise outrank dense matches (MRR 0.70 vs 0.84, docs/EVAL.md) |
 | `MNEMOS_MAX_CHUNK_CHARS` | `0` (off) | Upper bound on a chunk; longer ones are split into overlapping windows on line boundaries. Off by default: at 1 500 (≈ what the embedder reads) MRR fell 0.835 → 0.789, the extra chunks crowding out the right file (docs/EVAL.md). Changing it on an existing index needs a rebuild: `core.embedding_migration sync --max-chunk-chars N`, then `switch` with the same flag |
+| `MNEMOS_RESPONSE_BUDGET_CHARS` | `32000` | Cap on the JSON size of one MCP search tool response (≈ 8 K tokens). Trailing results past it are dropped and counted in the response's `dropped`; the first result is always kept. Read once at start-up by `server/mcp_tools.py`: env only, not on the dashboard. REST endpoints are not capped |
 
 ### CRAG corrective loop (Phase 3)
 
@@ -281,7 +308,7 @@ production use.
 ### Choosing collections
 
 There is no automatic collection routing, by design — see
-[ROADMAP](ROADMAP.md#retrieval-quality). The caller knows the intent, so the
+[RETRIEVAL_PIPELINE](RETRIEVAL_PIPELINE.md#stage-1--choosing-collections). The caller knows the intent, so the
 caller narrows: pass `collections` to `mnemos_search`, or use the dedicated
 tool (`mnemos_search_code`, `mnemos_search_skills`, `mnemos_search_memory`).
 Searching all of them costs nothing measurable anyway — everything except the
@@ -295,16 +322,18 @@ code collection is small.
 | `MNEMOS_CACHE_THRESHOLD` | `0.95` | Cosine sim threshold for a cache hit |
 | `MNEMOS_CACHE_TTL_SECONDS` | `3600` | Entry expiry |
 
-Stored in a dedicated `mnemos_cache` Qdrant collection. Automatically wiped
-on every reindex (`POST /api/reindex`).
+Stored in a dedicated `mnemos_cache` Qdrant collection. Wiped when a bulk
+reindex starts (`POST /api/reindex`, `mnemos reindex`) while the cache is on.
+Per-file pushes (watcher, git hooks, connectors) do not wipe it: a cached
+answer can lag a changed file by up to `MNEMOS_CACHE_TTL_SECONDS`.
 
 ## Memory pipeline
 
 | Var | Default | Description |
 |-----|--------|------|
-| `MNEMOS_DEDUP_THRESHOLD` | `0.80` | Cosine threshold above which a new memory merges into an existing one. Calibrated against a real corpus, not a constant — see below |
+| `MNEMOS_DEDUP_THRESHOLD` | `0.80` (`.env.example`; `0.85` when unset) | Cosine threshold above which a new memory merges into an existing one. Calibrated against a real corpus, not a constant — see below |
 | `MNEMOS_DEDUP_STRATEGY` | `merge` | `merge` (LLM consolidates) or `replace` (newer wins) |
-| `MNEMOS_HOOK_TRIGGER` | `pre-push` | Git hook trigger mode (used by `scripts/install-hooks.sh`) |
+| `MNEMOS_HOOK_TRIGGER` | `pre-push` | `pre-push` or `post-commit`: the git hook that runs memory extraction. Read on the host by `scripts/install-hooks.sh` and the hooks, see [Git hooks](#git-hooks-host-side) |
 
 Memories are written **searchable** — `status: approved` — rather than held for
 review. Gating them made the empty state the default: six days of extraction
@@ -312,9 +341,11 @@ produced fifteen entries and zero approvals, so nothing the pipeline learned
 could be retrieved. No comparable system gates writes this way; Mem0 dropped
 its write-time reconciliation pass in v3 and lets retrieval ranking sort
 conflicting facts out at read time. `status` remains for taking a bad memory
-back out, and `mnemos memory review` walks the queue for pruning.
+back out: reject it from the dashboard's Memories page or with
+`mnemos memory reject <id>`.
 
-On the dedup threshold: 0.85 was a guess. On a real 15-memory corpus the one
+On the dedup threshold: 0.85 — still the default when the variable is unset —
+was a guess. On a real 15-memory corpus the one
 genuine near-duplicate pair scored 0.844 and the next closest 0.646, so the
 old value missed the duplicate by six thousandths while 0.80 sits in the
 middle of that gap. Re-measure as the corpus grows.
@@ -342,7 +373,7 @@ that never source a shell profile, where an exported variable would be lost.
 
 | Var | Default | Description |
 |-----|--------|------|
-| `MNEMOS_QUERY_LOG_ENABLED` | `false` | Append every retrieval call to a JSONL log. **Required by the dashboard's Search screen** — without it there is nothing to display |
+| `MNEMOS_QUERY_LOG_ENABLED` | `false` | Append every retrieval call to a JSONL log. **Required by the dashboard's Search log and search charts** — without it there is nothing to display |
 | `MNEMOS_EVAL_RUNS_PATH` | `/app/evals/runs` | Where `GET /api/eval/runs` reads eval runs. Bind-mounted read-only: runs are local artefacts, never baked into the image |
 | `MNEMOS_UI_PATH` | `/app/ui` | Built dashboard. Absent → the server serves the API alone |
 | `MNEMOS_UI_THEME_PATH` | `/app/config/theme.css` | Instance stylesheet served at `/theme.css`, see [Instance theme](#instance-theme) |
@@ -369,8 +400,8 @@ Each line is a flat JSON object:
 | Var | Default | Description |
 |-----|--------|------|
 | `MNEMOS_AUTH_ENABLED` | `false` | Require `Authorization: Bearer <api-key>` on every `/api`, `/internal` and `/mcp` path. `/health` and the dashboard files stay open |
-| `MNEMOS_TENANTS_PATH` | `/data/config/tenants.yaml` | Import source: read once, at the first start, when the database holds no tenant. Ignored afterwards |
-| `MNEMOS_BOOTSTRAP_ADMIN_KEY` | _(unset)_ | Key of the root tenant `admin`, created or updated at every start. The root cannot be edited, rotated or deleted from the dashboard or the API; change the variable and restart to rotate its key |
+| `MNEMOS_TENANTS_PATH` | `/data/config/tenants.yaml` | Import source: read once, at a start where the database holds no tenant; every key in it becomes an admin with every tag. Ignored afterwards |
+| `MNEMOS_BOOTSTRAP_ADMIN_KEY` | _(unset)_ | Key of the root tenant `admin`, created or updated at every start, whatever other tenants exist. The root cannot be edited, rotated or deleted from the dashboard or the API; change the variable and restart to rotate its key |
 | `QDRANT_API_KEY` | _(unset)_ | Required with auth on, see [Storage](#storage-and-embeddings): API keys protect nothing if Qdrant itself is open |
 | `MNEMOS_API_KEY` | _(unset)_ | Client side: the key sent by the CLI, watcher, ingester, `scripts/*` and git hooks |
 
@@ -383,14 +414,16 @@ refuses to start. Scope rules and endpoints:
 
 ## Knowledge connectors
 
-Confluence spaces, Jira projects and web sites synced into `mnemos_knowledge`
-are declared in the `connectors` configuration, stored in the database and
-edited from the dashboard's Connectors page (`PUT /api/connectors`). The
-tokens stay in environment variables named by each source's `token_env`.
+Confluence spaces, Jira projects, web sites and remote git repositories
+(synced into `mnemos_knowledge`, or `mnemos_code` for git by default) are
+declared in the `connectors` configuration, stored in the database and edited
+from the dashboard's Connectors page (`PUT /api/connectors`). The tokens stay
+in the ingester's environment, in the variables named by each source's
+`token_env`.
 
 | Var | Default | Description |
 |-----|--------|------|
-| `MNEMOS_CONNECTORS_CONFIG` | _(unset)_ (CLI) · `/app/config/connectors.yaml` (server) | Server: import source, read once at the first start when the database holds no connectors. CLI: when set (like `--config`), `mnemos ingest run` / `serve` read this file instead of the server |
+| `MNEMOS_CONNECTORS_CONFIG` | _(unset)_ (CLI) · `/app/config/connectors.yaml` (server) | Server: import source, read once at the first start when the database holds no connectors. CLI: when set (like `--config`), `mnemos ingest run` / `serve` read this file instead of the server. Every compose service reads `.env`, so setting it there also points the `ingester` container at a path it does not mount: leave it commented unless you mount the file there |
 
 `mnemos ingest serve` (the opt-in `ingester` compose service) syncs at
 start-up, then every `interval`. Without `--config` it reads the sources from
@@ -429,16 +462,22 @@ searchable). Every server pod reads the same documents.
 |-----|--------|------|
 | `MNEMOS_UI_CONFIG_WRITABLE` | `false` | Let the dashboard save the shared configuration: settings overrides (`PATCH`/`DELETE /api/config`), connectors, projects and tenants. Off → those pages are read-only and writes answer `403` |
 
-The dashboard edits a fixed set of settings — retrieval flags, cache, CRAG,
-query log, contextual chunking, dedup, LLM provider/model, declared-paths
-indexing. Everything else (API key, URLs, Qdrant, paths, auth, the embedding
-model) stays env-only. `server/settings_registry.py` is the list.
+The dashboard edits the settings `server/settings_registry.py` marks
+editable: the reranker (switch, model, max length), fusion weight, MMR, the
+CRAG grader and rewriter, the semantic cache, LLM provider and model, dedup
+threshold and strategy, contextual chunking and its workers, declared-paths
+indexing, the query log. Everything else stays env-only: secrets (LLM API key,
+Qdrant key, bootstrap key), URLs, Qdrant, paths, authentication, the
+reranker backend, the embedding model, the chunk size, the poll interval and
+`MNEMOS_UI_CONFIG_WRITABLE` itself.
 
 **Precedence: override > env var > default.** Overrides are stored in the
 database (`settings` key, see [Shared configuration](#shared-configuration))
 and applied on every pod, so an override keeps winning over the env var in
-`.env` until it is removed from the page. A key that is unknown or not
-editable is logged as a warning and ignored.
+`.env` until it is removed from the page. A `PATCH` naming an unknown or
+non-editable key is refused as a whole (`422`, nothing saved); such a key
+found in the stored document or an imported `settings.json` is logged as a
+warning and ignored.
 
 How a change applies depends on the setting (`apply` in `GET /api/config`):
 
@@ -446,10 +485,11 @@ How a change applies depends on the setting (`apply` in `GET /api/config`):
 |---------|--------|
 | `live` | The running components switch at once, no restart |
 | `restart` | Saved, effective at each pod's next start; listed in `pending_restart` until then |
-| `reindex` | Needs a re-embedding (the embedding model — env only, see below) |
+| `reindex` | Needs a re-embedding: the embedding model and `MNEMOS_MAX_CHUNK_CHARS`, both env only (see [Changing the embedding model](#changing-the-embedding-model)) |
 
-`MNEMOS_LLM_API_KEY` is never returned by the API, not even masked: the page
-only learns whether it is set.
+Secrets (`MNEMOS_LLM_API_KEY`, `QDRANT_API_KEY`, `MNEMOS_BOOTSTRAP_ADMIN_KEY`)
+are never returned by the API, not even masked: the page only learns whether
+each is set.
 
 > **Security.** `/api/config`, `/api/connectors`, `/api/projects` and
 > `/api/tenants` sit behind the API key when `MNEMOS_AUTH_ENABLED=true`. With
@@ -476,19 +516,22 @@ file is read on every request: reload the page, no restart.
 
 ## How to apply a config change
 
-For most flags it's just an env var + a container restart (or the dashboard,
-for [the editable ones](#dashboard-overrides) — a saved override wins over the
-env var):
+[The editable settings](#dashboard-overrides) are changed from the dashboard's
+Configuration page — a saved override wins over `.env`. Everything else is a
+line in `.env`, then a recreate of the containers that read it (shell
+variables in front of `docker compose` do not reach them):
 
 ```bash
-MNEMOS_RERANKER_ENABLED=true docker compose up -d rag-server
+# .env: MNEMOS_RESPONSE_BUDGET_CHARS=16000
+docker compose up -d rag-server
 ```
 
-For a contextual-chunking change, reindex with `--recreate`:
+After switching contextual chunking on, reindex what should be enriched
+(the files' chunks are replaced; no `--recreate`, which would drop every
+other project of the collection):
 
 ```bash
-mnemos reindex --recreate --full --collection mnemos_code --tags myproject,go \
-       --path /data/codebase/myproject
+mnemos reindex --full --collection mnemos_code --path /data/codebase/myproject
 ```
 
 ### Changing the embedding model
@@ -507,8 +550,8 @@ docker compose exec rag-server python -m core.embedding_migration sync --model $
 docker compose stop watcher ingester rag-server
 docker compose run --rm rag-server python -m core.embedding_migration sync --model $M
 docker compose run --rm rag-server python -m core.embedding_migration switch --model $M
-# 3. Restart on the new model (set EMBEDDING_MODEL in .env so it sticks).
-EMBEDDING_MODEL=$M docker compose up -d rag-server watcher   # + ingester if you run connectors
+# 3. Set EMBEDDING_MODEL=$M in .env, then restart on the new model.
+docker compose up -d rag-server watcher   # + ingester if you run connectors
 ```
 
 Step 1 is the long one. Docker on a Mac has no GPU and EmbeddingGemma 2

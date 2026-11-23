@@ -24,25 +24,26 @@ Claude Desktop, any MCP client) a real memory of your codebase, your docs,
 and your past decisions.
 
 - 🧠 **Memories from your commits** — a git hook extracts decisions, patterns,
-  and lessons via an LLM, dedupes them, and queues them for your approval.
-- 🔍 **Production-grade retrieval** — hybrid BM25 + dense + RRF fusion,
-  cross-encoder reranker, CRAG corrective loop, semantic router & cache.
+  and lessons via an LLM, dedupes them, and stores them, searchable at once
+  and rejectable from the dashboard.
+- 🔍 **Production-grade retrieval** — hybrid BM25 + dense fusion always on;
+  cross-encoder reranker, CRAG corrective loop and semantic cache behind flags.
 - 🌳 **Code-aware chunking** — tree-sitter for Go, SFC sections for Vue,
   heading splits for Markdown. Symbols stay intact across embeddings.
-- 🪡 **MCP-native** — `http://localhost:8100/mcp` exposes 9 tools to any
-  MCP-compatible agent.
+- 🪡 **MCP-native** — `http://localhost:8100/mcp/` exposes 9 tools to any
+  MCP-compatible agent; the dashboard is served at `http://localhost:8100/`.
 - 🏠 **100% self-hosted** — Qdrant + sentence-transformers + your choice of
   LLM (Ollama / Anthropic / any OpenAI-compatible endpoint).
 
-> **Measured:** +47% MRR and +37% NDCG@5 over plain dense retrieval on the
-> same golden set.
+> **Measured:** with the cross-encoder reranker on (off by default), +47% MRR
+> and +37% NDCG@5 over plain dense retrieval on the same golden set.
 
 ## Tags
 
 | Tag | Meaning |
 |-----|---------|
-| `edge` | Latest commit on `main` (rebuilt on every push) |
-| `1.2.3`, `1.2`, `1` | Semver tags from git releases |
+| `edge` | Manual build of `main` (workflow dispatch), not rebuilt on every push |
+| `1.2.3`, `1.2` | Semver tags from git releases (`1` too, from 1.0 on) |
 | `latest` | Most recent semver release |
 
 All tags are multi-arch (`linux/amd64` + `linux/arm64`).
@@ -56,10 +57,11 @@ running this image standalone:
 git clone https://github.com/jamyouss/mnemos.git
 cd mnemos
 cp .env.example .env   # then set MNEMOS_CODEBASE_HOST_PATH
+cp config/projects.example.yaml config/projects.yaml
 docker compose up -d
 ```
 
-Then point your MCP-compatible agent at `http://localhost:8100/mcp`.
+Then point your MCP-compatible agent at `http://localhost:8100/mcp/`.
 
 ### Run standalone (for debugging)
 
@@ -69,37 +71,40 @@ docker run --rm -p 8100:8100 \
   -e QDRANT_PORT=6333 \
   -e MNEMOS_AUTH_ENABLED=false \
   -v "$PWD:/data/codebase:ro" \
-  jamyouss/mnemos-server:edge
+  jamyouss/mnemos-server:latest
 ```
 
 ## Key environment variables
 
 | Variable | Default | What it does |
 |----------|---------|--------------|
-| `QDRANT_HOST` | `qdrant` | Qdrant service hostname |
+| `QDRANT_HOST` | `localhost` | Qdrant service hostname (`qdrant` in the compose stack) |
 | `QDRANT_PORT` | `6333` | Qdrant HTTP port |
-| `QDRANT_API_KEY` | _(unset)_ | Qdrant's `QDRANT__SERVICE__API_KEY`; required when `MNEMOS_AUTH_ENABLED=true` |
+| `QDRANT_API_KEY` | _(unset)_ | Sent to Qdrant; must equal Qdrant's `QDRANT__SERVICE__API_KEY`. Required when `MNEMOS_AUTH_ENABLED=true` |
 | `EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | Pre-baked in the image, instant cold start |
-| `CODEBASE_PATH` | `/data/codebase` | Where the watcher reads source code |
+| `CODEBASE_PATH` | `/data/codebase` | Container path of the mounted codebase; reindex paths must sit under it |
 | `MNEMOS_LLM_PROVIDER` | `ollama` | `ollama` / `anthropic` / `openai` |
 | `MNEMOS_LLM_MODEL` | `llama3.1:8b` | Model for memory extraction & dedup |
-| `MNEMOS_RERANKER_ENABLED` | `false` | Enable cross-encoder reranker (~280 MB downloaded on first use) |
+| `MNEMOS_RERANKER_ENABLED` | `false` | Enable cross-encoder reranker (~1.1 GB downloaded on first use) |
 | `MNEMOS_CONTEXTUAL_ENABLED` | `false` | Anthropic-style contextual chunking |
-| `MNEMOS_AUTH_ENABLED` | `false` | Require `Authorization: Bearer <api-key>` on `/api`, `/internal`, `/mcp`; keys from `MNEMOS_TENANTS_PATH` |
+| `MNEMOS_AUTH_ENABLED` | `false` | Require `Authorization: Bearer <api-key>` on `/api`, `/internal`, `/mcp`; tenants stored in Qdrant, first imported from `MNEMOS_TENANTS_PATH` or `MNEMOS_BOOTSTRAP_ADMIN_KEY` |
+| `MNEMOS_UI_CONFIG_WRITABLE` | `false` | Let the dashboard save settings, connectors, projects and tenants |
 
 Full reference: [.env.example](https://github.com/jamyouss/mnemos/blob/main/.env.example).
 
 ## Image facts
 
-- **Size:** ~1.5 GB (CPU-only PyTorch, no CUDA, with the default embedding model pre-baked)
+- **Size:** ~1.5 GB (CPU-only PyTorch, no CUDA, with the default embedding model and the dashboard pre-baked)
 - **Base:** `python:3.12-slim`
 - **Healthcheck:** `GET /health` every 30 s
 - **License:** MIT
 
-## Related image
+## Related images
 
 - [`jamyouss/mnemos-watcher`](https://hub.docker.com/r/jamyouss/mnemos-watcher) —
   filesystem watcher that pushes incremental indexing requests to this server.
+- [`jamyouss/mnemos-cli`](https://hub.docker.com/r/jamyouss/mnemos-cli) —
+  the `mnemos` CLI and the knowledge connectors (the compose `ingester`).
 
 ## Links
 

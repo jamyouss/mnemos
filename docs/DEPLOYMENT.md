@@ -42,7 +42,8 @@ Components:
   the server doesn't host them. Four hooks: `pre-push` / `post-commit` for
   memory extraction, `post-merge` / `post-checkout` for incremental indexing.
 - **Connectors** — Confluence, Jira and web crawlers that push into
-  `mnemos_knowledge`. See [`CONNECTORS.md`](CONNECTORS.md).
+  `mnemos_knowledge`, and remote git repositories pushed into `mnemos_code`
+  by default. See [`CONNECTORS.md`](CONNECTORS.md).
 - **Periodic reindex** — `scripts/nightly-reindex.sh` catches what the hooks
   cannot see (rebase, reset, edits outside git, repos cloned while the server
   was down). macOS: `scripts/install-nightly-reindex.sh` registers a launchd
@@ -123,8 +124,9 @@ With `MNEMOS_AUTH_ENABLED=true`:
   presented key.
 - Each tenant has scopes (next section) that restrict what it reads and writes.
 
-No codebase is mounted on a shared server, so content arrives through the
-push API (CI, git hooks, connectors) rather than filesystem reindexing.
+The prod overlay disables the watcher, so on a shared server content arrives
+through the push API (CI, git hooks, connectors) rather than filesystem
+watching.
 
 ### Tenants and scopes
 
@@ -139,6 +141,8 @@ read-only key.
 | Push with tags resolved by the server (no `tags` in the body) | One resolved tag in `write` is enough |
 | Push or memory with tags declared by the client (`tags` override, memories, connector pages) | Every tag must be in `write` |
 | `/api/reindex`, `/internal/reindex`, `/api/memory/extract`, MCP `mnemos_reindex` | `write: "*"` |
+| Delete an indexed file | Every stored chunk of the file shares a tag with `write` |
+| Approve or reject a memory | One of the memory's tags in `write` |
 | Query log, `/api/eval/*`, settings, tenants | `admin` |
 | `GET /api/connectors`, `GET /api/projects` | `admin` or `write: "*"` (the ingester's and scripts' key) |
 
@@ -173,7 +177,7 @@ stops working on every pod within `MNEMOS_CONFIG_POLL_SECONDS`.
 Claude Code:
 
 ```bash
-claude mcp add --transport http mnemos https://mnemos.example.com/mcp \
+claude mcp add --transport http mnemos https://mnemos.example.com/mcp/ \
   --header "Authorization: Bearer <api-key>"
 ```
 
@@ -184,7 +188,7 @@ Or in a JSON MCP config:
   "mcpServers": {
     "mnemos": {
       "type": "http",
-      "url": "https://mnemos.example.com/mcp",
+      "url": "https://mnemos.example.com/mcp/",
       "headers": { "Authorization": "Bearer <api-key>" }
     }
   }
@@ -261,7 +265,7 @@ jobs:
           MNEMOS_URL:       ${{ secrets.MNEMOS_URL }}
           MNEMOS_API_KEY:   ${{ secrets.MNEMOS_API_KEY }}
         run: |
-          git diff --name-status HEAD~1 HEAD | while read status path; do
+          git diff --no-renames --name-status HEAD~1 HEAD | while read status path; do
             if [ "$status" = "D" ]; then
               curl -X DELETE \
                 "$MNEMOS_URL/api/index/mnemos_code/$path" \
@@ -283,11 +287,14 @@ jobs:
 
 ## Persistence and backups
 
-Two stateful volumes:
-- `qdrant_data` — the vector store (every collection, every chunk).
+Two stateful volumes (Compose prefixes them with the project name, `mnemos_`
+by default):
+- `qdrant_data` — the vector store: every collection, every chunk, and the
+  shared configuration (`mnemos_config`: connectors, projects, settings
+  overrides, tenants).
 - `rag_state` — Mnemos' state directory (query log, anything you add).
 
-Back them up with `docker run --rm -v qdrant_data:/data:ro -v $(pwd):/backup \
+Back them up with `docker run --rm -v mnemos_qdrant_data:/data:ro -v $(pwd):/backup \
 busybox tar -czf /backup/qdrant-$(date +%F).tgz /data` or your container
 backup tooling of choice.
 
@@ -314,25 +321,26 @@ To scale up:
 
 | Bottleneck | Scaling lever |
 |------------|--------------|
-| Embedding throughput | Pre-warm at startup (load model on lifespan), bump uvicorn workers. The model is shared across workers via `_model_cache`. |
+| Embedding throughput | The model loads once per process at start-up (`_model_cache` is per process, not shared): add `rag-server` replicas and budget the model's memory in each. |
 | Reranker latency | GPU host, or use a smaller checkpoint. Latency drops 10-100× on GPU. |
-| Qdrant size | Move to a dedicated Qdrant instance; mnemos-rag-server stays stateless apart from the LLM. |
+| Qdrant size | Move to a dedicated Qdrant instance; `rag-server` keeps no state but its query log. |
 | Memory extraction load | Route `POST /api/memory/extract` to a faster LLM provider (Groq, Anthropic Haiku). |
-| LLM calls in CRAG | Disable grader / rewriter for low-stakes traffic; keep them on for `code_search` only via a thin wrapper. |
+| LLM calls in CRAG | The grader and rewriter only run on cross-collection search (`mnemos_search`, `/api/search`); code, skill and memory searches never call them. Leave them off if that path is busy. |
 
 ---
 
 ## Observability in prod
 
-Turn on the query log:
+Turn on the query log, in `.env` (or live from the Configuration page):
 
-```yaml
-MNEMOS_QUERY_LOG_ENABLED: "true"
-MNEMOS_QUERY_LOG_PATH: "/data/state/query-log.jsonl"
+```dotenv
+MNEMOS_QUERY_LOG_ENABLED=true
+MNEMOS_QUERY_LOG_PATH=/data/state/query-log.jsonl
 ```
 
-The file is JSONL — easy to feed to Loki, Datadog, BigQuery, or just
-`jq` on the box. Example queries:
+The file is JSONL, inside the `rag-server` container (the `rag_state` volume) —
+easy to feed to Loki, Datadog, BigQuery, or just `jq` (`docker compose exec
+rag-server cat /data/state/query-log.jsonl | jq …`). Example queries:
 
 ```bash
 # p95 latency per intent over the last hour
@@ -355,7 +363,8 @@ jq -c '. | select(.cache_hit != null)' /data/state/query-log.jsonl \
 
 - [ ] `MNEMOS_AUTH_ENABLED=true` in production.
 - [ ] Qdrant port `6333` not exposed publicly (only via the rag-server), and
-      `QDRANT_API_KEY` set on both Qdrant and the server.
+      the same key in `QDRANT__SERVICE__API_KEY` (Qdrant) and `QDRANT_API_KEY`
+      (server).
 - [ ] API keys stored in a secret manager (HashiCorp Vault, GitHub Secrets,
       AWS Secrets Manager), **never** committed to git (`config/tenants.yaml`
       is gitignored; delete it after the first start); no `CHANGE_ME` key left
@@ -372,13 +381,18 @@ jq -c '. | select(.cache_hit != null)' /data/state/query-log.jsonl \
 
 ## Upgrading
 
-1. Read [`CHANGELOG`](CHANGELOG) — no, joke, there isn't one yet. Read git log.
-2. `git pull` on the deployment server (or pull a new image tag).
-3. `docker compose up -d --build rag-server watcher` — Qdrant doesn't need
-   rebuild.
+1. Read the git log since your version — there is no CHANGELOG yet.
+2. `git pull` on the deployment server, and set `MNEMOS_SERVER_IMAGE` /
+   `MNEMOS_WATCHER_IMAGE` / `MNEMOS_CLI_IMAGE` in `.env` to the new tag.
+3. `docker compose pull && docker compose up -d`, with the same `-f` files
+   you started with (`-f docker-compose.yml -f docker-compose.prod.yml`) —
+   Qdrant keeps its data. Building from source instead: add
+   `-f docker-compose.dev.yml` and `--build`.
 4. If the upgrade introduces a new collection schema, run
    `mnemos reindex --recreate --full --collection <name>` for each affected
-   collection (Mnemos 0.x → 1.x did this for hybrid).
+   collection (the switch to hybrid vectors did this). A new
+   `EMBEDDING_MODEL` needs `python -m core.embedding_migration` instead: the
+   server refuses to start on collections sized for another model.
 5. Run your eval suite: `mnemos eval run --tag post-upgrade` and `mnemos eval
    compare pre-upgrade post-upgrade`.
 
@@ -392,6 +406,7 @@ jq -c '. | select(.cache_hit != null)' /data/state/query-log.jsonl \
 | Lost collections | Re-trigger CI sync and connectors, or re-run `mnemos reindex --recreate --full` for code/docs, then ask devs to push commits to re-populate memories. |
 | **Memories** | This is the one corpus that **can't be regenerated** from sources, only from git diffs. Keep regular backups of `qdrant_data`. |
 | Lost LLM API key | Rotate; no data impact — only future calls fail. |
+| Lost configuration (`mnemos_config`) | At the next start each missing part is imported again from `config/*.yaml`, `$MNEMOS_STATE_DIR/settings.json` and `MNEMOS_BOOTSTRAP_ADMIN_KEY` when present; anything edited only from the dashboard is gone — it lives in `qdrant_data` backups. |
 
 ---
 

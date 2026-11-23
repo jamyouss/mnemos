@@ -25,8 +25,8 @@ You almost never pull this image directly — it ships as part of the
 
 | Tag | Meaning |
 |-----|---------|
-| `edge` | Latest commit on `main` |
-| `1.2.3`, `1.2`, `1` | Semver tags from git releases |
+| `edge` | Manual build of `main` (workflow dispatch) |
+| `1.2.3`, `1.2` | Semver tags from git releases (`1` too, from 1.0 on) |
 | `latest` | Most recent semver release |
 
 All tags are multi-arch (`linux/amd64` + `linux/arm64`).
@@ -39,6 +39,7 @@ All tags are multi-arch (`linux/amd64` + `linux/arm64`).
 | `CODEBASE_PATH` | `/data/codebase` | Directory to watch |
 | `CLAUDE_CONFIG_PATH` | `/data/claude-config` | Optional Claude config to watch |
 | `WATCHER_DEBOUNCE_MS` | `2000` | Coalesce bursts of FS events |
+| `MNEMOS_API_KEY` | _(unset)_ | Bearer key when the server enforces auth; needs `write: "*"` |
 
 ## Image facts
 

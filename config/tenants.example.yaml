@@ -5,7 +5,8 @@
 # entry once as an admin tenant with every read and write scope, then ignores
 # this file. Afterwards create, scope, rotate and revoke keys from the
 # dashboard's Tenants page or /api/tenants (only SHA-256 hashes are stored).
-# Alternative to this file: MNEMOS_BOOTSTRAP_ADMIN_KEY.
+# Alternative, or complement: MNEMOS_BOOTSTRAP_ADMIN_KEY, the root tenant
+# `admin`, re-applied at every start and never editable from the dashboard.
 # Clients send the key as `Authorization: Bearer <api_key>`.
 #
 # The import refuses an empty or CHANGE_ME key, or one key shared by two

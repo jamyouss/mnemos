@@ -34,7 +34,7 @@ server needs no CORS configuration.
 
 ```bash
 npm run generate     # static build into ui/.output/public
-npm test             # unit tests on the aggregation helpers
+npm test             # vitest unit tests on the helpers in ui/utils/
 npm run typecheck    # vue-tsc over pages, components and utils
 ```
 
@@ -67,12 +67,15 @@ One screen for the questions that used to need a shell, over a 24 h / 7 d /
   chunks per collection, top-1 score shape, code chunks per project tag,
   most-returned files, memories by type.
 - **Retrieval stages** — read from `/api/config`, so on/off is what the server
-  runs rather than what the UI assumes, each with its **measured cost**. The
-  question is never "is the reranker enabled" but "is 8 seconds per query
-  worth it here", so the number sits next to the switch.
+  runs rather than what the UI assumes, each next to its cost as benchmarked
+  in [EVAL.md](EVAL.md) (not measured on this index). The question is never
+  "is the reranker enabled" but "is 8 seconds per query worth it here", so the
+  number sits next to the switch.
 
 Search figures come from the last 5,000 log entries; when they start after
-the window opens, the screen says the totals undercount.
+the window opens, the screen says the totals undercount. Search traffic,
+latency, scores, most-returned files and retrieval stages are shown to admin
+keys only; other keys see the index, projects and memories.
 
 ### Search log
 
@@ -146,8 +149,12 @@ Every server setting, grouped by section, with **where its value comes from**
 are sent.
 
 Admin keys only. Read-only unless the server runs with
-`MNEMOS_UI_CONFIG_WRITABLE=true`. Secrets, URLs, paths and the embedding model
-are never editable here, and the API key is never sent to the browser. Saved
+`MNEMOS_UI_CONFIG_WRITABLE=true`. Only the settings the server marks
+editable can change here (retrieval stages, cache, LLM provider and model,
+dedup, contextual chunking, declared-paths indexing, query log); secrets,
+URLs, paths, Qdrant, authentication and the embedding model stay env-only,
+and no secret is ever sent to the browser — the page only shows whether each
+is set. Saved
 values are overrides stored in the database, applied by every server pod, and
 win over `.env`; the reset button next to an override removes it. A save
 checks the revision the page loaded: if someone saved in between, the server
@@ -178,7 +185,7 @@ Details in [CONNECTORS.md](CONNECTORS.md#from-the-dashboard).
 Lists the `path → tags` mapping grouped by organisation, with a filter on
 path or tag; each prefix opens in a side panel to edit its tags and its
 ignore rules (`exclude_dirs`, `exclude_exts`, described in
-[CONFIGURATION.md](CONFIGURATION.md#tags--scoping-chunks-across-projects)).
+[CONFIGURATION.md](CONFIGURATION.md#per-project-ignore-rules)).
 Changes are saved together from the bar at the bottom. The server refuses an
 empty or absolute prefix, a duplicate prefix and an entry without tags
 (`422`, every problem listed). A save applies to every pod within

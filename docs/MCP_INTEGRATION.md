@@ -1,40 +1,52 @@
 # Mnemos — MCP Integration
 
-Mnemos speaks **Streamable HTTP MCP** natively at `http://<host>:8100/mcp`.
+Mnemos speaks **Streamable HTTP MCP** natively at `http://<host>:8100/mcp/`.
 Any MCP-compatible client can connect.
 
 ## Tools exposed
 
-Once an MCP client is connected, the agent sees these 9 tools:
+Once an MCP client is connected, the agent sees these 9 tools
+(`server/mcp_tools.py`):
 
 | Tool | Use it for | Returns |
 |------|------------|---------|
-| `mnemos_search` | Semantic search across every collection except `mnemos_memory` unless `collections` says otherwise (supports `tags_any` / `tags_all`) | List of `{file_path, score, content, collection}`; `mnemos_knowledge` hits carry `metadata.source_url` |
-| `mnemos_search_code` | Code-only search with `language` / `symbol_type` / `tags_any` / `tags_all` filters | List of code chunks with `symbol_name`, `package` |
-| `mnemos_search_skills` | Find the most relevant skill by description | List of `{skill_name, description, instructions_preview}` |
-| `mnemos_search_memory` | Recall past decisions and patterns (supports `tags_any` / `tags_all`) | List of `{id, content, memory_type, tags}` |
-| `mnemos_memory` | Store a new memory (goes to `pending`) | The new memory id |
-| `mnemos_memory_list` | List memories by project / status | Paged list |
-| `mnemos_memory_review` | Approve or reject a `pending` memory | Updated status |
-| `mnemos_reindex` | Trigger a reindex of a collection | Job acknowledgment |
-| `mnemos_status` | Health + collection counts | Stats |
+| `mnemos_search` | Semantic search across every collection except `mnemos_memory` unless `collections` says otherwise. Filters: `collections`, `file_types`, `path_filter`, `tags_any` / `tags_all`; `limit` (5), `mode` (`preview` / `full`) | `{results, kept, dropped}`; each result `{content, file_path, score, chunk_type, collection, metadata}`, `mnemos_knowledge` hits carrying `metadata.source_url` |
+| `mnemos_search_code` | Code-only search (`mnemos_code`) with `language` / `symbol_type` / `path_filter` / `tags_any` / `tags_all`; `limit` (3), `mode` | Same envelope; results add `language`, `symbol_name`, `package` |
+| `mnemos_search_skills` | Find the most relevant skill by description; `limit` (3) | Same envelope; results `{skill_name, description, score, instructions_preview}` |
+| `mnemos_search_memory` | Recall past decisions and patterns (`approved` only); `memory_type`, `tags_any` / `tags_all`, `limit` (5), `mode` | Same envelope; results `{id, content, project, topic, memory_type, tags, score, created_at}` |
+| `mnemos_memory` | Store a memory (`content`; optional `memory_type` — default `note` —, `tags`, `project`), deduplicated against existing ones. Written `approved`: searchable at once | `{id, status, action}` (`inserted` / `merged` / `replaced`) |
+| `mnemos_memory_list` | List memories, filtered by `project` / `status`; `limit` (20) | The raw entries, one call, no paging |
+| `mnemos_memory_review` | `approve` or `reject` a memory by `memory_id`, whatever its current status | `{memory_id, action}` |
+| `mnemos_reindex` | **Acknowledgement only**: it checks the caller may write every tag and answers, but starts no reindex. Use `mnemos reindex` / `POST /api/reindex` | `{collection, mode, message}` |
+| `mnemos_status` | Qdrant health + per-collection counts | `{qdrant_healthy, collections: {name: {document_count, vector_size}}}` |
+
+The search tools' responses are capped at `MNEMOS_RESPONSE_BUDGET_CHARS`
+(32 000 characters): trailing results past it are dropped and counted in
+`dropped`. `path_filter` is an **exact** match on the stored `file_path` (the
+full container path, e.g. `/data/codebase/myproject/main.go`): use it to
+re-fetch a file you already found, not to scope a directory — `tags_any`
+does that.
 
 ## Claude Code
 
-Add to `~/.claude/settings.json`:
+```bash
+claude mcp add --transport http --scope user mnemos http://localhost:8100/mcp/
+```
+
+Or per project, in `.mcp.json` at the repository root:
 
 ```json
 {
   "mcpServers": {
     "mnemos": {
-      "type": "url",
-      "url": "http://localhost:8100/mcp"
+      "type": "http",
+      "url": "http://localhost:8100/mcp/"
     }
   }
 }
 ```
 
-Restart Claude Code. Type `/mcp` to confirm Mnemos shows up as connected.
+Type `/mcp` in Claude Code to confirm Mnemos shows up as connected.
 
 ### Make Claude prefer Mnemos over Grep / Glob
 
@@ -61,10 +73,11 @@ Drop this in your `~/.claude/CLAUDE.md`:
 
    Then use Grep / Glob / Read as usual.
 
-   **On scores:** hybrid fusion puts a normal top-1 around **0.5–0.8**. `0.54` is
-   typical, not weak. There is no absolute threshold that separates good from
-   bad, so do not treat one. Compare results against each other and read what
-   came back.
+   **On scores:** they are rank-fusion sums, not similarities. With the default
+   3:1 dense/BM25 fusion a normal top-1 sits around **0.75–1.25**; with the
+   reranker on, scores are cross-encoder logits and can be negative. There is
+   no absolute threshold that separates good from bad, so do not treat one.
+   Compare results against each other and read what came back.
 
 ### When to skip Mnemos
 
@@ -87,10 +100,10 @@ non-obvious constraint, the root cause of a bug that cost real time.
   survives; "we use X" does not, because nobody can tell whether it still
   applies.
 
-⚠️ **A stored memory is not immediately searchable.** `mnemos_memory` writes
-with status `pending`, and `mnemos_search_memory` only returns `approved`
-entries. It waits for human review — `mnemos memory review` walks the queue.
-Do not store something and assume you can read it back in the same session.
+A stored memory is searchable immediately (status `approved`). A near
+duplicate of an existing one is merged into it (or replaces it, with
+`MNEMOS_DEDUP_STRATEGY=replace`) rather than added. A wrong memory is taken
+back out with `mnemos_memory_review` (`reject`).
 
 ### Mnemos memory vs. built-in agent memory
 
@@ -101,7 +114,7 @@ They are not interchangeable, and the split matters:
 | Scope | one working directory | global, sliced at query time by tags |
 | Cost | loaded into context every session | nothing until you search |
 | Retrieval | you read an index of titles | semantic search over full content |
-| Review | written directly | `pending` → `approved` |
+| Curation | edited by hand | deduplicated on write, wrong entries rejected |
 
 Built-in memory is **siloed per project directory**: what you learn in one repo
 is invisible from another. It also grows the context of every session, so it
@@ -115,63 +128,64 @@ does not scale past a few dozen entries.
 
 ### Rationale
 
-Mnemos is indexed with language-aware chunking (AST for Go/Vue, SFC for Vue,
-headings for Markdown, column-aware for CSV/TSV), hybrid dense + BM25
-retrieval, and memories auto-extracted from git history. A single
-`mnemos_search_code` call often replaces 5-10 Grep invocations. Use it.
+Mnemos is indexed with language-aware chunking (tree-sitter AST for Go, SFC
+blocks for Vue, headings for Markdown, row groups for CSV/TSV), hybrid
+dense + BM25 retrieval, and memories auto-extracted from git history. A
+single `mnemos_search_code` call often replaces 5-10 Grep invocations. Use it.
 ```
 
 ## Claude Desktop
 
-Add to `claude_desktop_config.json` (location varies by OS):
+`claude_desktop_config.json` launches local (stdio) servers; reach the HTTP
+endpoint through the `mcp-remote` bridge:
 
 ```json
 {
   "mcpServers": {
     "mnemos": {
-      "type": "url",
-      "url": "http://localhost:8100/mcp"
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "http://localhost:8100/mcp/"]
     }
   }
 }
 ```
 
-Restart Claude Desktop. The tools appear under the 🔌 plug icon.
+Restart Claude Desktop; the tools appear in the tools menu of the chat input.
 
 ## Continue.dev
 
-Continue supports MCP context providers natively. In `~/.continue/config.json`:
+In `~/.continue/config.yaml`:
 
-```json
-{
-  "experimental": {
-    "modelContextProtocolServers": [
-      {
-        "transport": {
-          "type": "http",
-          "url": "http://localhost:8100/mcp"
-        }
-      }
-    ]
-  }
-}
+```yaml
+mcpServers:
+  - name: mnemos
+    type: streamable-http
+    url: http://localhost:8100/mcp/
 ```
 
 ## Cursor
 
-Cursor doesn't speak MCP natively (as of writing). Workaround: run a thin
-shim like [`mcp-bridge`](https://github.com/SecretiveShell/MCP-Bridge) and
-point Cursor at the bridge's HTTP API.
+In `~/.cursor/mcp.json` (or `.cursor/mcp.json` in a project):
 
-## Codex / OpenAI Agents SDK
+```json
+{
+  "mcpServers": {
+    "mnemos": {
+      "url": "http://localhost:8100/mcp/"
+    }
+  }
+}
+```
 
-Both speak MCP via the `mcp` Python SDK. Inside an Agent:
+## Python (mcp SDK, OpenAI Agents SDK…)
+
+Any Python agent can use the `mcp` SDK's Streamable HTTP client:
 
 ```python
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
-async with streamablehttp_client("http://localhost:8100/mcp") as (read, write, _):
+async with streamablehttp_client("http://localhost:8100/mcp/") as (read, write, _):
     async with ClientSession(read, write) as session:
         await session.initialize()
         result = await session.call_tool(
@@ -181,6 +195,9 @@ async with streamablehttp_client("http://localhost:8100/mcp") as (read, write, _
         print(result.content)
 ```
 
+Pass `headers={"Authorization": "Bearer <api-key>"}` to
+`streamablehttp_client` on an authenticated server.
+
 ## Generic HTTP fallback
 
 If your agent has no MCP support at all, hit the REST API directly:
@@ -188,11 +205,14 @@ If your agent has no MCP support at all, hit the REST API directly:
 ```bash
 curl -X POST http://localhost:8100/api/search \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $MNEMOS_API_KEY" \
   -d '{"query":"JWT validation","limit":5}'
 ```
 
-The REST endpoints mirror the MCP tools 1:1 — see [`CLI.md`](CLI.md) for the
-full list.
+The search tools have REST twins taking the same arguments:
+`/api/search`, `/api/search-code`, `/api/search-skills`, `/api/search-memory`.
+They answer `{"results": [...]}`, without the MCP response cap. Drop the
+`Authorization` header on a server without auth.
 
 ## Authenticated servers
 
@@ -201,7 +221,7 @@ When `MNEMOS_AUTH_ENABLED=true`, every MCP request must carry an
 Claude Code:
 
 ```bash
-claude mcp add --transport http mnemos https://mnemos.example.com/mcp \
+claude mcp add --transport http mnemos https://mnemos.example.com/mcp/ \
   --header "Authorization: Bearer <api-key>"
 ```
 
@@ -217,10 +237,11 @@ the server entry. Keys are tenants managed from the dashboard's Tenants page
 curl http://localhost:8100/health
 
 # Does the MCP endpoint respond?
-curl -i http://localhost:8100/mcp
-# Streamable HTTP MCP returns a 405 to bare GET — that's expected.
-# A 503 means the server is up but the MCP session manager hasn't
-# initialised yet (race during startup).
+curl -i http://localhost:8100/mcp/
+# 406 "Client must accept text/event-stream": the endpoint is up — a bare
+#     GET is not an MCP request, so that answer is expected.
+# 401: auth is on, send the key (-H "Authorization: Bearer …").
+# 404 / 405 from a server image older than this release: use …/mcp/ (with the slash).
 
 # Tail the server logs
 docker compose logs -f rag-server
@@ -230,7 +251,9 @@ Common issues:
 
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
-| MCP tools never appear in Claude Code | Wrong URL / no restart | Restart the IDE after editing settings.json |
-| `MCP server not initialised (503)` | Hit during a startup race | Wait ~5s and retry |
+| MCP tools never appear | Wrong URL, or the client was not restarted | Check `…/mcp/`, then restart the client |
+| `405 Method Not Allowed` / `404` on `…/mcp` | Server image older than this release: its dashboard caught `/mcp` without the slash | Use `…/mcp/`, or update the image |
+| `401 Missing or invalid API key` | Server runs with `MNEMOS_AUTH_ENABLED=true` | Send `Authorization: Bearer <api-key>` |
+| `MCP server not initialised (503)` | A request reached the app before its start-up finished | Wait a few seconds and retry |
 | `connection refused` from container | Trying to reach a host service from inside the container | Use `host.docker.internal` on Mac/Win, or set `MNEMOS_OLLAMA_URL` to the host IP |
-| Tools listed but every call times out | Embedding / reranker cold-starting | First call loads the models (~30-60 s). Subsequent calls are fast. |
+| First search with the reranker takes long | The cross-encoder loads lazily on its first use (~1.1 GB download the first time) | Subsequent calls are fast; the embedding model itself loads at start-up |
