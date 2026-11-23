@@ -48,6 +48,32 @@ export function toPathPayload(row: ProjectRowForm): ProjectPath {
   }
 }
 
+/** The first two path segments, where one organisation's projects usually sit. */
+export function prefixGroup(prefix: string): string {
+  const parts = prefix.split('/').filter(Boolean)
+  return parts.length > 2 ? `${parts.slice(0, 2).join('/')}/` : ''
+}
+
+export interface RowGroup<T> {
+  /** '' gathers the prefixes too short to share a group. */
+  key: string
+  rows: T[]
+}
+
+/** Rows matching `query` on prefix or tag, grouped by `prefixGroup` and sorted by prefix. */
+export function groupRows<T extends Pick<ProjectRowForm, 'prefix' | 'tags'>>(rows: T[], query: string): RowGroup<T>[] {
+  const q = query.trim().toLowerCase()
+  const groups = new Map<string, T[]>()
+  for (const row of rows) {
+    if (q && !row.prefix.toLowerCase().includes(q) && !row.tags.toLowerCase().includes(q)) continue
+    const key = prefixGroup(row.prefix.trim())
+    groups.set(key, [...(groups.get(key) ?? []), row])
+  }
+  return [...groups]
+    .sort(([a], [b]) => (a === '' ? 1 : b === '' ? -1 : a.localeCompare(b)))
+    .map(([key, list]) => ({ key, rows: list.sort((x, y) => x.prefix.localeCompare(y.prefix)) }))
+}
+
 export interface RowProblems {
   /** Keyed by the row's position in the list that was validated. */
   byRow: Map<number, string[]>

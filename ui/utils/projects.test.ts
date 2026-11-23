@@ -1,5 +1,27 @@
 import { describe, expect, it } from 'vitest'
-import { newRow, problemsByRow, toPathPayload, toRowForm, type ProjectPath } from './projects'
+import { groupRows, newRow, problemsByRow, toPathPayload, toRowForm, type ProjectPath } from './projects'
+
+describe('groupRows', () => {
+  const rows = [
+    { prefix: 'Projects/laposte/dtc/', tags: 'laposte-dtc, laposte' },
+    { prefix: 'Projects/accor/docs/', tags: 'accor-docs, accor' },
+    { prefix: 'Projects/accor/apps/', tags: 'accor-apps, accor, vue3' },
+    { prefix: 'scratch/', tags: 'scratch' },
+  ]
+
+  it('groups by organisation, sorted, with short prefixes last', () => {
+    expect(groupRows(rows, '').map((g) => [g.key, g.rows.map((r) => r.prefix)])).toEqual([
+      ['Projects/accor/', ['Projects/accor/apps/', 'Projects/accor/docs/']],
+      ['Projects/laposte/', ['Projects/laposte/dtc/']],
+      ['', ['scratch/']],
+    ])
+  })
+
+  it('filters on prefix or tag, case-insensitively', () => {
+    expect(groupRows(rows, 'VUE3').flatMap((g) => g.rows.map((r) => r.prefix))).toEqual(['Projects/accor/apps/'])
+    expect(groupRows(rows, 'dtc').flatMap((g) => g.rows.map((r) => r.prefix))).toEqual(['Projects/laposte/dtc/'])
+  })
+})
 
 describe('toPathPayload', () => {
   it('round-trips a stored prefix unchanged', () => {

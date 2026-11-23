@@ -62,12 +62,17 @@ function clear(event: Event) {
   <Combobox v-model="selection" v-model:open="open" :multiple="multiple" ignore-filter>
     <ComboboxAnchor as-child class="w-full">
       <ComboboxTrigger as-child>
-        <Button :id="id" type="button" variant="outline" class="h-9 w-full justify-between px-3 font-normal">
+        <Button :id="id" type="button" variant="outline" class="h-auto min-h-9 w-full justify-between px-3 py-1.5 font-normal">
           <span v-if="!selected.length" class="truncate text-muted-foreground">{{ placeholder }}</span>
           <span v-else-if="!multiple" class="truncate font-mono text-xs">{{ selected[0] }}</span>
-          <span v-else class="flex min-w-0 items-center gap-1 overflow-hidden">
-            <Badge v-for="v in selected.slice(0, 2)" :key="v" variant="secondary" class="max-w-28 truncate font-mono text-[11px]">{{ v }}</Badge>
-            <span v-if="selected.length > 2" class="shrink-0 text-xs text-muted-foreground">+{{ selected.length - 2 }}</span>
+          <span v-else class="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+            <Badge
+              v-for="v in selected"
+              :key="v"
+              variant="secondary"
+              class="max-w-full justify-start truncate font-mono text-[11px]"
+              :title="v"
+            >{{ v }}</Badge>
           </span>
           <ChevronsUpDownIcon class="shrink-0 opacity-50" />
         </Button>

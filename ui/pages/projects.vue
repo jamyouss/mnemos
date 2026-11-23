@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { FolderTreeIcon, PlusIcon, RotateCwIcon, Trash2Icon, TriangleAlertIcon } from '@lucide/vue'
+import { FolderTreeIcon, PencilIcon, PlusIcon, RotateCwIcon, SearchIcon, Trash2Icon, TriangleAlertIcon } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import { ApiError, type ProjectsResponse } from '~/composables/useApi'
-import { newRow, problemsByRow, toPathPayload, toRowForm, type ProjectRowForm } from '~/utils/projects'
+import { groupRows, newRow, problemsByRow, toPathPayload, toRowForm, type ProjectRowForm } from '~/utils/projects'
 import { splitFilterList } from '~/utils/playground'
 import { canReadSetup, isAdmin } from '~/utils/tenants'
 
@@ -54,12 +54,38 @@ const savedState = computed(() => (data.value ? serialize(data.value.paths.map(t
 const dirty = computed(() => !!data.value && serialize(rows.value) !== savedState.value)
 const editable = computed(() => admin.value && (data.value?.writable ?? false))
 
+const query = ref('')
+const groups = computed(() => groupRows(rows.value, query.value))
+const shown = computed(() => groups.value.reduce((n, g) => n + g.rows.length, 0))
+
+// The editor works on the draft row itself: the save bar persists every change at once.
+const editingId = ref<number | null>(null)
+const editing = computed(() => rows.value.find((r) => r.id === editingId.value) ?? null)
+const editorOpen = computed({
+  get: () => editing.value !== null,
+  set: (open) => { if (!open) closeEditor() },
+})
+
+function openEditor(id: number) {
+  editingId.value = id
+}
+
+function closeEditor() {
+  const row = editing.value
+  // A new row left blank was a misclick, not a prefix.
+  if (row && !row.prefix.trim() && !row.tags.trim()) remove(row.id)
+  editingId.value = null
+}
+
 function add() {
-  rows.value.push(newRow())
+  const row = newRow()
+  rows.value.push(row)
+  openEditor(row.id)
 }
 
 function remove(id: number) {
   rows.value = rows.value.filter((r) => r.id !== id)
+  if (editingId.value === id) editingId.value = null
 }
 
 async function save() {
@@ -116,43 +142,64 @@ onBeforeRouteLeave(() => {
         </AlertDescription>
       </Alert>
 
-      <Card v-if="rows.length">
-        <CardContent class="space-y-3">
-          <div class="hidden grid-cols-[minmax(0,1.2fr)_minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)_2.25rem] gap-3 text-xs font-medium text-muted-foreground md:grid">
-            <span>Path prefix</span>
-            <span>Tags (first = primary)</span>
-            <span>Ignored directories</span>
-            <span>Ignored extensions</span>
-            <span />
+      <template v-if="rows.length">
+        <div class="flex flex-wrap items-center gap-3">
+          <div class="relative w-full max-w-sm">
+            <SearchIcon class="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input v-model="query" type="search" placeholder="Filter by path or tag…" class="pl-8" aria-label="Filter prefixes" />
           </div>
-          <div v-for="row in rows" :key="row.id" class="space-y-1.5">
-            <div
-              class="grid gap-3 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)_2.25rem] md:items-center"
+          <span class="text-sm text-muted-foreground tabular-nums">
+            {{ query ? `${shown} of ${rows.length}` : rows.length }} prefix{{ rows.length > 1 ? 'es' : '' }}
+          </span>
+        </div>
+
+        <EmptyState v-if="!groups.length" :icon="SearchIcon" title="No prefix matches" :detail="`Nothing in the mapping contains “${query}”.`" />
+
+        <Card v-for="group in groups" :key="group.key" class="gap-0 overflow-hidden py-0">
+          <div class="flex items-center justify-between border-b bg-muted/40 px-4 py-2.5">
+            <span class="font-mono text-sm font-medium">{{ group.key || 'Other prefixes' }}</span>
+            <span class="text-xs text-muted-foreground tabular-nums">{{ group.rows.length }}</span>
+          </div>
+          <ul class="divide-y">
+            <li
+              v-for="row in group.rows"
+              :key="row.id"
+              class="group/row flex items-start gap-4 px-4 py-3"
+              :class="problems.byId.has(row.id) && 'bg-destructive/5'"
             >
-              <Input
-                v-model="row.prefix"
-                class="font-mono"
-                placeholder="acme/webshop/"
-                aria-label="Path prefix"
-                :aria-invalid="problems.byId.has(row.id) || undefined"
-                :disabled="!editable"
-              />
-              <FacetCombobox v-if="editable" :id="`tags-${row.id}`" v-model="row.tags" :options="tagOptions" multiple placeholder="Pick tags…" />
-              <div v-else class="flex min-h-9 flex-wrap items-center gap-1">
-                <Badge v-for="(t, i) in splitFilterList(row.tags)" :key="t" :variant="i === 0 ? 'default' : 'secondary'" class="font-mono text-[11px]">{{ t }}</Badge>
+              <div class="min-w-0 flex-1 space-y-1.5">
+                <p class="font-mono text-sm break-all">
+                  <span class="text-muted-foreground">{{ group.key }}</span>{{ row.prefix.slice(group.key.length) || (row.prefix ? '' : 'new prefix') }}
+                </p>
+                <div class="flex flex-wrap items-center gap-1">
+                  <Badge
+                    v-for="(t, i) in splitFilterList(row.tags)"
+                    :key="t"
+                    :variant="i === 0 ? 'default' : 'secondary'"
+                    class="font-mono text-[11px]"
+                    :title="i === 0 ? 'Primary tag' : undefined"
+                  >{{ t }}</Badge>
+                  <span v-if="!row.tags.trim()" class="text-xs text-destructive">no tag</span>
+                </div>
+                <p v-if="row.excludeDirs.trim() || row.excludeExts.trim()" class="text-xs text-muted-foreground">
+                  Ignores <span class="font-mono">{{ [row.excludeDirs, row.excludeExts].filter((s) => s.trim()).join(', ') }}</span>
+                </p>
+                <ul v-if="problems.byId.has(row.id)" class="space-y-0.5 text-xs text-destructive">
+                  <li v-for="p in problems.byId.get(row.id)" :key="p">{{ p }}</li>
+                </ul>
               </div>
-              <Input v-model="row.excludeDirs" class="font-mono" placeholder="exports, fixtures" aria-label="Ignored directories" :disabled="!editable" />
-              <Input v-model="row.excludeExts" class="font-mono" placeholder=".csv, .min.js" aria-label="Ignored extensions" :disabled="!editable" />
-              <Button v-if="editable" variant="ghost" size="icon" class="size-9" :aria-label="`Remove ${row.prefix || 'row'}`" @click="remove(row.id)">
-                <Trash2Icon />
-              </Button>
-            </div>
-            <ul v-if="problems.byId.has(row.id)" class="space-y-0.5 text-xs text-destructive">
-              <li v-for="p in problems.byId.get(row.id)" :key="p">{{ p }}</li>
-            </ul>
-          </div>
-        </CardContent>
-      </Card>
+              <div v-if="editable" class="flex shrink-0 gap-1 opacity-60 transition-opacity group-hover/row:opacity-100 focus-within:opacity-100">
+                <Button variant="ghost" size="icon" class="size-8" :aria-label="`Edit ${row.prefix || 'new prefix'}`" @click="openEditor(row.id)">
+                  <PencilIcon />
+                </Button>
+                <Button variant="ghost" size="icon" class="size-8" :aria-label="`Remove ${row.prefix || 'new prefix'}`" @click="remove(row.id)">
+                  <Trash2Icon />
+                </Button>
+              </div>
+            </li>
+          </ul>
+        </Card>
+      </template>
 
       <EmptyState
         v-else
@@ -162,6 +209,37 @@ onBeforeRouteLeave(() => {
       >
         <Button v-if="editable" size="sm" @click="add"><PlusIcon /> Add prefix</Button>
       </EmptyState>
+
+      <Sheet v-model:open="editorOpen">
+        <SheetContent side="right" class="w-full sm:max-w-md">
+          <SheetHeader>
+            <SheetTitle>{{ editing?.prefix ? 'Edit prefix' : 'New prefix' }}</SheetTitle>
+            <SheetDescription>Saved with the other changes from the bar at the bottom of the page.</SheetDescription>
+          </SheetHeader>
+          <form v-if="editing" class="space-y-5 px-4" @submit.prevent="closeEditor">
+            <div class="space-y-1.5">
+              <Label for="edit-prefix">Path prefix</Label>
+              <Input id="edit-prefix" v-model="editing.prefix" class="font-mono" placeholder="acme/webshop/" autofocus />
+              <p class="text-xs text-muted-foreground">Relative to the codebase root. The longest matching prefix wins.</p>
+            </div>
+            <div class="space-y-1.5">
+              <Label for="edit-tags">Tags</Label>
+              <FacetCombobox id="edit-tags" v-model="editing.tags" :options="tagOptions" multiple placeholder="Pick tags…" />
+              <p class="text-xs text-muted-foreground">The first tag is the project's primary label; tenants are scoped by these tags.</p>
+            </div>
+            <div class="space-y-1.5">
+              <Label for="edit-dirs">Ignored directories</Label>
+              <Input id="edit-dirs" v-model="editing.excludeDirs" class="font-mono" placeholder="exports, fixtures" />
+            </div>
+            <div class="space-y-1.5">
+              <Label for="edit-exts">Ignored extensions</Label>
+              <Input id="edit-exts" v-model="editing.excludeExts" class="font-mono" placeholder=".csv, .min.js" />
+              <p class="text-xs text-muted-foreground">Added to the built-in policy for this prefix only.</p>
+            </div>
+            <Button type="submit" class="w-full">Done</Button>
+          </form>
+        </SheetContent>
+      </Sheet>
 
       <p v-if="rows.length" class="text-xs text-muted-foreground">
         Ignore rules add to the built-in policy and hold for every way files arrive (watcher, git hooks, reindex);
