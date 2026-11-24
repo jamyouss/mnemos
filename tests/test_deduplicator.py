@@ -135,3 +135,39 @@ def test_an_explicit_status_still_wins(deduplicator, mock_qdrant):
 
     assert result.status == "pending"
     assert mock_qdrant.upsert.call_args.kwargs["points"][0].payload["status"] == "pending"
+
+
+@pytest.fixture
+def live():
+    """A deduplicator over a real in-memory Qdrant holding one memory."""
+    from qdrant_client import QdrantClient
+
+    from core.indexer import Indexer
+
+    embeddings = MagicMock(dimension=4)
+    embeddings.embed_documents.side_effect = lambda texts, titles=None: [[float(len(t)), 0.1, 0.2, 0.3] for t in texts]
+    qdrant = QdrantClient(":memory:")
+    Indexer(qdrant_client=qdrant, embedding_service=embeddings).ensure_collection("mnemos_memory")
+    dedup = Deduplicator(qdrant_client=qdrant, embedding_service=embeddings, memory_extractor=MagicMock())
+    result = dedup.deduplicate_and_store(ExtractedMemory(content="Use RRF", memory_type="decision", tags=["acme"]))
+    return dedup, qdrant, result.memory_id
+
+
+def test_an_edit_rewrites_the_text_and_its_vectors(live):
+    dedup, qdrant, mem_id = live
+    before = qdrant.scroll("mnemos_memory", with_vectors=True)[0][0].vector["dense"]
+    updated = dedup.update(mem_id, content="Use weighted RRF, dense 0.7", tags=["acme", "search"])
+
+    assert updated["content"] == "Use weighted RRF, dense 0.7" and updated["tags"] == ["acme", "search"]
+    assert updated["memory_type"] == "decision"  # untouched fields stay
+    point = qdrant.scroll("mnemos_memory", with_vectors=True)[0][0]
+    assert point.payload["content"] == "Use weighted RRF, dense 0.7"
+    assert point.vector["dense"] != before  # re-embedded
+    assert dedup.update("missing-id", content="x") is None
+
+
+def test_delete_removes_the_memory(live):
+    dedup, qdrant, mem_id = live
+    assert dedup.delete(mem_id) is True
+    assert qdrant.count("mnemos_memory").count == 0
+    assert dedup.delete(mem_id) is False

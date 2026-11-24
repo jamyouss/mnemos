@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Component } from 'vue'
-import { BrainIcon, DatabaseZapIcon, FlaskConicalIcon, FolderTreeIcon, HistoryIcon, LayoutDashboardIcon, LogOutIcon, PlugIcon, SearchIcon, SlidersHorizontalIcon, UsersIcon } from '@lucide/vue'
+import { BrainIcon, DatabaseZapIcon, FileSearchIcon, FlaskConicalIcon, FolderTreeIcon, HistoryIcon, LayoutDashboardIcon, LogOutIcon, PlugIcon, SearchIcon, SlidersHorizontalIcon, UsersIcon } from '@lucide/vue'
 import { useSidebar } from '~/components/ui/sidebar'
 import { signOut } from '~/composables/useSession'
 import { canReadSetup, isAdmin, type Whoami } from '~/utils/tenants'
@@ -26,6 +26,7 @@ const groups: { label: string; items: NavItem[] }[] = [
       { to: '/', label: 'Dashboard', icon: LayoutDashboardIcon },
       { to: '/search', label: 'Search log', icon: SearchIcon, allowed: isAdmin },
       { to: '/indexing', label: 'Indexing', icon: DatabaseZapIcon, allowed: isAdmin },
+      { to: '/index', label: 'Index', icon: FileSearchIcon },
       { to: '/activity', label: 'Activity', icon: HistoryIcon, allowed: isAdmin },
       { to: '/playground', label: 'Playground', icon: FlaskConicalIcon },
     ],
@@ -46,7 +47,8 @@ const visibleGroups = computed(() =>
   groups.map((g) => ({ ...g, items: g.items.filter((item) => !item.allowed || item.allowed(me.value)) })),
 )
 
-const isActive = (to: string) => (to === '/' ? route.path === '/' : route.path.startsWith(to))
+// Whole segments: `/index` must not light up on `/indexing`.
+const isActive = (to: string) => (to === '/' ? route.path === '/' : route.path === to || route.path.startsWith(`${to}/`))
 
 // Shown only when it says something the name does not.
 const role = computed(() => (me.value?.admin ? 'Admin' : 'Member'))

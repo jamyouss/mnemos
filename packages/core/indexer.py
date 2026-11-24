@@ -36,12 +36,22 @@ from core.chunkers.vue_chunker import VueChunker
 from core.collections import DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME, TAGS_PAYLOAD_FIELD
 from core.contextual import ContextualEnricher
 from core.embeddings import EmbeddingService
-from core.path_filter import should_skip_path
+from core.path_filter import should_skip_path, skip_reason
 from core.projects import PathExcludes, PathTags, detect_excludes, detect_tags
 from core.skills import skill_payload
 from core.sparse import bm25_sparse
 
 _logger = logging.getLogger(__name__)
+
+
+def _longest_prefix(rel_path: str, mapping: dict) -> str | None:
+    """The longest configured prefix covering `rel_path`, as `detect_tags` picks it."""
+    best = None
+    for prefix in mapping:
+        normalised = prefix if prefix.endswith("/") else prefix + "/"
+        if prefix and rel_path.startswith(normalised) and (best is None or len(normalised) > len(best)):
+            best = normalised
+    return best
 
 
 def resolve_skip(
@@ -328,6 +338,39 @@ class Indexer:
                 list(self._path_tags) if self._only_declared_paths else None
             ),
         )
+
+    def explain(self, file_path: str) -> dict:
+        """What the indexer would do with `file_path`, for the dashboard's path tester.
+
+        Same rules, same order as :meth:`should_skip` and :meth:`resolve_tags`:
+        `rule` says which source refuses the file — the declared-prefix
+        allowlist, the built-in policy or a project's ignore rules.
+        """
+        rel = self._relative_path(file_path)
+        under_codebase = rel != file_path
+        prefix = _longest_prefix(rel, self._path_tags) if under_codebase else None
+        rule, reason = None, None
+        if self._only_declared_paths and under_codebase and prefix is None:
+            rule, reason = "declared-only", "not under a project prefix, and only declared prefixes are indexed"
+        elif builtin := skip_reason(file_path):
+            rule, reason = "built-in", builtin
+        else:
+            excludes = detect_excludes(rel, self._path_excludes) if under_codebase else {"exts": [], "dirs": []}
+            if project := skip_reason(file_path, extra_exts=excludes["exts"], extra_dirs=excludes["dirs"]):
+                rule, reason = "project", project
+        chunker = {
+            GoChunker: "go", VueChunker: "vue", MarkdownChunker: "markdown", TabularChunker: "tabular",
+        }.get(type(self._select_chunker(file_path)), "fallback")
+        return {
+            "relative_path": rel,
+            "skipped": rule is not None,
+            "rule": rule,
+            "reason": reason,
+            "project_prefix": prefix,
+            "tags": detect_tags(rel, overrides=self._path_tags) if under_codebase else [],
+            "chunker": chunker,
+            "language": language_for(file_path),
+        }
 
     def set_project_rules(self, path_tags: PathTags, path_excludes: PathExcludes) -> None:
         """Swap the `projects` mapping the next file resolves against."""

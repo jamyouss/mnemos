@@ -74,6 +74,8 @@ ROUTE_ACTIONS: dict[tuple[str, str], str] = {
     ("DELETE", "/api/index/{collection}/{file_path:path}"): "index.delete",
     ("POST", "/api/memory"): "memory.create",
     ("POST", "/api/memory/{mem_id}/review"): "memory.review",
+    ("PATCH", "/api/memory/{mem_id}"): "memory.update",
+    ("DELETE", "/api/memory/{mem_id}"): "memory.delete",
     ("POST", "/api/memory/extract"): "memory.extract",
 }
 

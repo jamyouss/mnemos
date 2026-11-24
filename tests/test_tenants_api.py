@@ -44,10 +44,13 @@ def _stored(backend) -> dict:
 def test_list_never_shows_the_hash(make_client):
     resp = make_client().get("/api/tenants")
     assert resp.status_code == 200
-    assert resp.json() == {"revision": 1, "writable": True, "tenants": [{
+    body = resp.json()
+    used_at = body["tenants"][0].pop("last_used_at")
+    assert body == {"revision": 1, "writable": True, "tenants": [{
         "name": "root", "admin": True, "root": False, "read": "*", "write": "*",
-        "created_at": "2026-01-01T00:00:00+00:00",
+        "created_at": "2026-01-01T00:00:00+00:00", "last_used_ip": "testclient",
     }]}
+    assert used_at  # this very request counts as a use
     assert hash_key("root-key") not in resp.text
 
 

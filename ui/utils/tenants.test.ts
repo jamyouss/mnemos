@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canReadSetup, describeScope, isAdmin, sameScope, tenantNameProblem, toScope, toScopeForm, type Whoami } from './tenants'
+import { canReadSetup, canWriteSome, describeScope, isAdmin, sameScope, staleKey, tenantNameProblem, toScope, toScopeForm, type Whoami } from './tenants'
 
 describe('scope encoding', () => {
   it('sends "*" for all projects, whatever tags were picked before', () => {
@@ -66,5 +66,31 @@ describe('access', () => {
     expect(canReadSetup(me(false, '*'))).toBe(true)
     expect(canReadSetup(me(false, ['acme']))).toBe(false)
     expect(isAdmin(me(true, []))).toBe(true)
+  })
+})
+
+describe('canWriteSome', () => {
+  const me = (admin: boolean, write: Whoami['write']): Whoami => ({ name: 'n', admin, read: '*', write, auth_enabled: true })
+
+  it('offers writes to any key with at least one write tag', () => {
+    expect(canWriteSome(me(false, ['acme']))).toBe(true)
+    expect(canWriteSome(me(false, '*'))).toBe(true)
+    expect(canWriteSome(me(true, []))).toBe(true)
+    expect(canWriteSome(me(false, []))).toBe(false)
+  })
+})
+
+describe('staleKey', () => {
+  const now = Date.parse('2026-06-01T00:00:00Z')
+  const daysAgo = (d: number) => new Date(now - d * 24 * 3600 * 1000).toISOString()
+
+  it('flags a key unused for 90 days or more', () => {
+    expect(staleKey(daysAgo(90), now)).toBe(true)
+    expect(staleKey(daysAgo(89), now)).toBe(false)
+  })
+
+  it('does not judge a key never seen: tracking may have just begun', () => {
+    expect(staleKey(null, now)).toBe(false)
+    expect(staleKey(undefined, now)).toBe(false)
   })
 })

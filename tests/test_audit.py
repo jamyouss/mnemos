@@ -166,3 +166,36 @@ def test_entries_that_could_not_be_stored_are_counted(client):
 
     body = client.get("/api/audit", headers=ROOT).json()
     assert body["write_failures"] == 1 and body["last_write_failure_at"]
+
+
+def test_memory_edits_and_deletes_are_scoped_and_audited_without_the_text(client):
+    from unittest.mock import MagicMock
+
+    from core.deduplicator import Deduplicator
+    from core.indexer import Indexer
+    from core.models import ExtractedMemory
+
+    embeddings = MagicMock(dimension=4)
+    # Orthogonal vectors: the two memories must not merge as near-duplicates.
+    embeddings.embed_documents.side_effect = lambda texts, titles=None: [
+        [1.0, 0.0, 0.0, 0.0] if "Secret" in t else [0.0, 1.0, 0.0, 0.0] for t in texts
+    ]
+    qdrant = QdrantClient(":memory:")
+    Indexer(qdrant_client=qdrant, embedding_service=embeddings).ensure_collection("mnemos_memory")
+    dedup = Deduplicator(qdrant_client=qdrant, embedding_service=embeddings, memory_extractor=MagicMock())
+    client.app.state.qdrant, client.app.state.deduplicator = qdrant, dedup
+    other = dedup.deduplicate_and_store(ExtractedMemory(content="Secret plan", tags=["other"])).memory_id
+    mine = dedup.deduplicate_and_store(
+        ExtractedMemory(content="Old wording that differs a lot", tags=["acme"]),
+    ).memory_id
+
+    assert client.patch(f"/api/memory/{other}", headers=DEV, json={"content": "x"}).status_code == 403
+    assert client.patch(f"/api/memory/{mine}", headers=DEV, json={"tags": ["other"]}).status_code == 403
+    edited = client.patch(f"/api/memory/{mine}", headers=DEV, json={"content": "New wording", "memory_type": "lesson"})
+    assert edited.status_code == 200 and edited.json()["content"] == "New wording"
+    assert client.delete(f"/api/memory/{mine}", headers=DEV).json() == {"deleted": mine}
+
+    entries = _entries(client)
+    assert [(e["action"], e["outcome"]) for e in entries[:2]] == [("memory.delete", "ok"), ("memory.update", "ok")]
+    assert entries[1]["changes"]["content"] == "edited" and entries[1]["changes"]["memory_type"][1] == "lesson"
+    assert "New wording" not in str(entries) and "Secret plan" not in str(entries)

@@ -31,6 +31,8 @@ export const ACTIONS: Record<string, string> = {
   'index.delete': 'Deleted a file from the index',
   'memory.create': 'Stored a memory',
   'memory.review': 'Reviewed a memory',
+  'memory.update': 'Edited a memory',
+  'memory.delete': 'Deleted a memory',
   'memory.extract': 'Extracted memories from the commit',
   'auth.failed': 'Rejected an API key',
 }

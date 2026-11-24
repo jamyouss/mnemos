@@ -7,6 +7,7 @@
  */
 
 import { createAuthedFetch, type AuthedFetch } from '../utils/auth'
+import { indexFileUrl } from '../utils/indexFiles'
 import { sendToSignIn } from './useSession'
 import type { ConnectorSource } from '../utils/connectors'
 import type { ProjectPath } from '../utils/projects'
@@ -46,6 +47,8 @@ export interface QueryLogResponse {
   entries: QueryLogEntry[]
 }
 
+export type MemoryType = 'decision' | 'pattern' | 'lesson' | 'convention' | 'note'
+
 export interface MemoryEntry {
   id: string
   content: string
@@ -54,6 +57,29 @@ export interface MemoryEntry {
   tags: string[]
   status: string
   created_at?: string
+  last_indexed_at?: string | null
+}
+
+export interface NewMemory {
+  content: string
+  memory_type: string
+  project?: string
+  tags: string[]
+  status?: 'approved' | 'pending'
+}
+
+/** `merged`: folded into a near-duplicate, whose id comes back. */
+export interface MemoryCreated {
+  status: 'created'
+  id: string
+  action: 'inserted' | 'merged' | 'replaced'
+}
+
+export interface MemoryChange {
+  content?: string
+  memory_type?: string
+  tags?: string[]
+  project?: string
 }
 
 export interface MemoryQuery {
@@ -268,6 +294,75 @@ function queryString(query: object): string {
   return qs ? `?${qs}` : ''
 }
 
+/** One indexed file, whatever number of chunks it has. */
+export interface IndexedFile {
+  collection: string
+  file_path: string
+  tags: string[]
+  language: string | null
+  last_indexed_at: string | null
+  file_mtime: number | null
+  source_url: string | null
+}
+
+export interface IndexBrowseQuery {
+  collection: string
+  tag?: string
+  /** Stored path prefix, whole segments only. */
+  directory?: string
+  cursor?: string
+  limit?: number
+}
+
+export interface IndexBrowsePage {
+  items: IndexedFile[]
+  next_cursor: string | null
+  total: number
+}
+
+export interface IndexChunk {
+  chunk_index: number
+  chunk_type: string
+  symbol_name: string | null
+  section: string | null
+  preamble: string | null
+  content: string
+}
+
+export interface IndexedFileDetail extends IndexedFile {
+  /** The file exists under the server's mounts and this key may reindex it. */
+  reindexable: boolean
+  deletable: boolean
+  chunks: IndexChunk[]
+}
+
+export type Chunker = 'go' | 'vue' | 'markdown' | 'tabular' | 'fallback'
+
+/** What the indexer would do with a path, and why. */
+export interface PathCheck {
+  path: string
+  relative_path: string
+  collection: string | null
+  indexed: boolean
+  chunks: number
+  skipped: boolean
+  reason: string | null
+  rule: 'built-in' | 'project' | 'declared-only' | null
+  project_prefix: string | null
+  tags: string[]
+  chunker: Chunker
+  language: string | null
+}
+
+export interface ServerAlert {
+  /** Stable per condition: the same problem keeps its id across polls. */
+  id: string
+  severity: 'error' | 'warning'
+  title: string
+  detail: string
+  href: string | null
+}
+
 export interface ProjectsResponse {
   revision: number
   writable: boolean
@@ -433,10 +528,19 @@ export function useApi() {
       request<{ items: IndexFileEvent[]; next_before: number | null }>(`/api/indexing/events${queryString(query)}`),
 
     reviewMemory: (id: string, action: 'approve' | 'reject') =>
-      request<{ id: string; status: string }>(`/api/memory/${id}/review`, {
+      request<{ id: string; status: string }>(`/api/memory/${encodeURIComponent(id)}/review`, {
         method: 'POST',
         body: JSON.stringify({ action }),
       }),
+
+    createMemory: (body: NewMemory) =>
+      request<MemoryCreated>('/api/memory', { method: 'POST', body: JSON.stringify(body) }),
+
+    updateMemory: (id: string, change: MemoryChange) =>
+      request<MemoryEntry>(`/api/memory/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(change) }),
+
+    deleteMemory: (id: string) =>
+      request<{ deleted: string }>(`/api/memory/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
     memoryStats: () => request<MemoryStats>('/api/memory/stats'),
 
@@ -446,6 +550,23 @@ export function useApi() {
       ),
 
     healthDeps: () => request<HealthDeps>('/api/health/deps'),
+
+    alerts: () => request<{ alerts: ServerAlert[] }>('/api/alerts'),
+
+    browseIndex: (query: IndexBrowseQuery) => request<IndexBrowsePage>(`/api/index/browse${queryString(query)}`),
+
+    indexedFile: (collection: string, filePath: string) =>
+      request<IndexedFileDetail>(`/api/index/file${queryString({ collection, file_path: filePath })}`),
+
+    /** `path` is a server path: a file with `full: false`, a directory with `full: true`. */
+    reindex: (body: { collection: string; path: string; full: boolean }) =>
+      request<{ status: 'reindex_started'; job_id: string }>('/api/reindex', { method: 'POST', body: JSON.stringify(body) }),
+
+    deleteIndexedFile: (collection: string, filePath: string) =>
+      request<{ status: string }>(indexFileUrl(collection, filePath), { method: 'DELETE' }),
+
+    checkPath: (path: string) =>
+      request<PathCheck>('/api/index/check-path', { method: 'POST', body: JSON.stringify({ path }) }),
 
     whoami: () => request<Whoami>('/api/whoami'),
 

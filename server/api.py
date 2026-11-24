@@ -25,7 +25,7 @@ from core.cache import CACHE_COLLECTION
 from core.collections import COLLECTIONS, TAGS_PAYLOAD_FIELD
 from core.indexer import CHUNK_FACET_FIELDS, TAGGED_COLLECTIONS, facet_fields
 from core.llm import LLMError
-from server.audit import audit
+from server.audit import audit, field_changes
 from server.config import settings
 from server.indexing import ReindexJob, channel_of, file_event
 from server.principal import (
@@ -125,6 +125,13 @@ class MemoryCreateRequest(BaseModel):
 
 class MemoryReviewRequest(BaseModel):
     action: str  # "approve" or "reject"
+
+
+class MemoryUpdateRequest(BaseModel):
+    content: Optional[str] = None
+    memory_type: Optional[str] = None
+    tags: Optional[List[str]] = None
+    project: Optional[str] = None
 
 
 class MemoryExtractRequest(BaseModel):
@@ -933,6 +940,49 @@ def review_memory(mem_id: str, body: MemoryReviewRequest, request: Request):
     _index_changed(request)
     audit(request, "memory.review", mem_id, {"status": [record.payload.get("status"), new_status]})
     return {"status": new_status, "id": mem_id}
+
+
+def _stored_memory(request: Request, mem_id: str) -> dict:
+    """The memory's payload, after checking the caller may write every tag it carries."""
+    point_id = str(uuid.uuid5(uuid.NAMESPACE_URL, mem_id))
+    records = request.app.state.qdrant.retrieve(collection_name=_MEMORY_COLLECTION, ids=[point_id], with_payload=True)
+    if not records:
+        raise HTTPException(status_code=404, detail=f"Memory entry '{mem_id}' not found.")
+    payload = records[0].payload or {}
+    principal = principal_of(request)
+    tags = payload.get(TAGS_PAYLOAD_FIELD) or []
+    if not principal.can_write_resolved(tags):
+        raise forbidden(f"Tenant {principal.name!r} cannot change memory {mem_id!r} (tags {tags})")
+    return payload
+
+
+@api_router.patch("/api/memory/{mem_id}")
+def update_memory(mem_id: str, body: MemoryUpdateRequest, request: Request):
+    stored = _stored_memory(request, mem_id)
+    principal = principal_of(request)
+    if body.tags is not None and not principal.can_write_declared(body.tags):
+        raise forbidden(f"Tenant {principal.name!r} cannot write tags {sorted(set(body.tags))}")
+    updated = request.app.state.deduplicator.update(
+        mem_id, content=body.content, memory_type=body.memory_type, tags=body.tags, project=body.project,
+    )
+    if updated is None:
+        raise HTTPException(status_code=404, detail=f"Memory entry '{mem_id}' not found.")
+    _index_changed(request)
+    changes = field_changes(stored, updated, ["memory_type", "tags", "project"])
+    if updated.get("content") != stored.get("content"):
+        changes["content"] = "edited"  # the text itself stays out of the trail
+    audit(request, "memory.update", mem_id, changes)
+    return updated
+
+
+@api_router.delete("/api/memory/{mem_id}")
+def delete_memory(mem_id: str, request: Request):
+    stored = _stored_memory(request, mem_id)
+    request.app.state.deduplicator.delete(mem_id)
+    _index_changed(request)
+    audit(request, "memory.delete", mem_id,
+          {"memory_type": stored.get("memory_type"), "tags": stored.get("tags"), "status": stored.get("status")})
+    return {"deleted": mem_id}
 
 
 @api_router.post("/api/memory/extract")

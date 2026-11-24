@@ -142,7 +142,11 @@ read-only key.
 | Push or memory with tags declared by the client (`tags` override, memories, connector pages) | Every tag must be in `write` |
 | `/api/reindex`, `/internal/reindex`, `/api/memory/extract`, MCP `mnemos_reindex` | `write: "*"` |
 | Delete an indexed file | Every stored chunk of the file shares a tag with `write` |
-| Approve or reject a memory | One of the memory's tags in `write` |
+| Approve, reject, edit or delete a memory | One of the memory's tags in `write`; new tags given to it must all be in `write` |
+| `GET /api/index/browse`, `/api/index/file` (Index page) | Same as search: a tagged collection shows only what `read` covers |
+| `POST /api/index/check-path` (path tester) | `admin` or `write: "*"` |
+| `POST /api/services/heartbeat` (the watcher's) | `write: "*"` |
+| `GET /api/alerts` | Any key; each alert shows only to keys that can act on it (sync to `admin` / `write: "*"`, watcher, audit and reindex failures to `admin`) |
 | Query log, `/api/eval/*`, settings, tenants, `/api/audit`, `/api/indexing/*` | `admin` |
 | `GET /api/connectors`, `GET /api/projects`, `POST /api/connectors/sync` (sync now), `/sync/ack` and `/sync/report` | `admin` or `write: "*"` (the ingester's and scripts' key) |
 

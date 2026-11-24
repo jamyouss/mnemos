@@ -54,6 +54,17 @@ the aliases.
 
 ## The screens
 
+### Alerts
+
+A banner above every page while something is broken: the LLM unreachable,
+connectors configured but no sync service ever seen, the sync service silent
+for over 3 minutes or a source's last sync failed, the watcher silent for
+over 3 minutes (it beats every minute; a watcher never seen raises nothing),
+audit entries that could not be stored, a reindex job failed or left failed
+files in the last 24 h. Each links to the page that explains it, can be
+dismissed for the session, and shows only to keys that can act on it
+(`GET /api/alerts`). An unreachable Qdrant shows as the server being down.
+
 ### Dashboard
 
 One screen for the questions that used to need a shell, over a 24 h / 7 d /
@@ -124,6 +135,24 @@ Admin keys only. What the index went through, from every channel:
 The page refreshes every 3 s while a reindex runs, every 15 s otherwise.
 History is kept `MNEMOS_INDEX_EVENTS_RETENTION_DAYS` (30 by default).
 
+### Index
+
+What is in the index, file by file. Pick a collection, narrow by tag or
+directory, open a file to read its chunks in order (type, symbol, section,
+contextual preamble). A tagged collection shows a key only what its `read`
+scope covers. From a file: **Reindex** it again from disk (keys with
+`write: "*"`, files under a server mount) or **Remove** it from the index
+(same rule as `DELETE /api/index/…`). **Reindex a folder** starts a bulk job,
+followed on the Indexing page.
+
+The **path tester** answers "why is this file (not) indexed?": give a path,
+relative to the codebase or absolute, and it tells the collection it would go
+to, whether it is indexed and in how many chunks, the tags it would get and
+from which project prefix, the chunker, and when refused, the rule that
+refuses it — *built-in* policy, the *project*'s ignore rules, or *declared
+only* (`MNEMOS_ONLY_DECLARED_PATHS` and no project prefix covers it). Same
+code as the indexer, so the answer cannot drift from what indexing does.
+
 ### Playground
 
 Runs a search exactly as an agent would — any of the four endpoints, with
@@ -154,11 +183,13 @@ Every search endpoint accepts the same two fields for this:
 
 ### Memories
 
-Browse, filter by type, tag, text and status, and reject in one click.
-Filtering, newest-first sorting and paging run on the server over every
-memory (`GET /api/memory?status=&type=&q=&offset=&limit=` returns the page and
-the `total`), so no entry hides past a page boundary; tab counts come from
-`/api/memory/stats`.
+Browse, filter by type, tag, text and status; create, edit (text, type, tags,
+project), delete, reject or approve again. Filtering, newest-first sorting and
+paging run on the server over every memory (`GET /api/memory?status=&type=&q=&offset=&limit=`
+returns the page and the `total`), so no entry hides past a page boundary; tab
+counts come from `/api/memory/stats`. An edited text is embedded again
+(`PATCH /api/memory/{id}`); a delete is final (`DELETE /api/memory/{id}`).
+Both need write rights on the memory's tags and are audited without the text.
 
 Memories are written **searchable**; this screen takes a wrong one back out
 rather than letting good ones in. Search returns `approved` entries only, so
@@ -237,6 +268,9 @@ Admin keys only. Lists the API keys' tenants with their role and `read` /
 rotates or revokes its key. A new or rotated key is shown **once**, then only
 its SHA-256 is kept. A revoked key stops working on every pod within
 `MNEMOS_CONFIG_POLL_SECONDS`. The last admin cannot be removed or demoted.
+Each row shows when its key was last used and from which address — a key
+nobody used for months is a revocation candidate. Uses are noted per request
+and stored every minute, so the time is accurate to about a minute.
 The root tenant (`admin`, from `MNEMOS_BOOTSTRAP_ADMIN_KEY`) is locked: its
 row shows a padlock, and its key changes only with the variable. Saving needs
 `MNEMOS_UI_CONFIG_WRITABLE=true`. Scope rules:

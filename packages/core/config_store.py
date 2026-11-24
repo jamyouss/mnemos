@@ -24,10 +24,15 @@ from core.collections import CONFIG_COLLECTION
 
 logger = logging.getLogger("mnemos.config_store")
 
-# `connectors_sync` holds the dashboard's "sync now" requests and how far the
-# sync service has picked them up, `connectors_status` what it last reported
-# per source: shared state, not configuration.
-CONFIG_KEYS = ("connectors", "connectors_status", "connectors_sync", "projects", "settings", "tenants")
+# Shared state, not configuration: `connectors_sync` holds the dashboard's
+# "sync now" requests and how far the sync service picked them up,
+# `connectors_status` what it last reported per source, `services_status`
+# the heartbeats of background services, `tenant_usage` when each key was
+# last used.
+CONFIG_KEYS = (
+    "connectors", "connectors_status", "connectors_sync", "projects", "services_status",
+    "settings", "tenant_usage", "tenants",
+)
 
 
 @dataclass(frozen=True)

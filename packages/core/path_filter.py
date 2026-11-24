@@ -162,35 +162,49 @@ def should_skip_path(
     dots on ``extra_exts`` are optional (``"csv"`` == ``".csv"``); ``extra_dirs``
     match against ``Path.parts`` membership like the built-in ``IGNORE_DIRS``.
     """
+    return skip_reason(path, extra_exts=extra_exts, extra_dirs=extra_dirs) is not None
+
+
+def skip_reason(
+    path: str | Path,
+    *,
+    extra_exts: Iterable[str] = (),
+    extra_dirs: Iterable[str] = (),
+) -> str | None:
+    """Why ``path`` must not be indexed, in a few words; None when it may be.
+
+    The decision of :func:`should_skip_path`, which is this call's truthiness:
+    the dashboard's path tester shows the reason, the ingest paths only test it.
+    """
     if not path:
-        return True
+        return "empty path"
 
     p = path if isinstance(path, Path) else Path(path)
     name = p.name
     parts = set(p.parts)
 
-    if parts & IGNORE_DIRS:
-        return True
+    if hit := parts & IGNORE_DIRS:
+        return f"inside an ignored directory ({', '.join(sorted(hit))})"
 
-    if extra_dirs and parts & {d.strip("/") for d in extra_dirs}:
-        return True
+    if extra_dirs and (hit := parts & {d.strip("/") for d in extra_dirs}):
+        return f"inside an ignored directory ({', '.join(sorted(hit))})"
 
     s = str(p)
-    if any(sub in s for sub in IGNORE_PATH_SUBSTRINGS):
-        return True
+    if sub := next((sub for sub in IGNORE_PATH_SUBSTRINGS if sub in s), None):
+        return f"path contains {sub!r}"
 
     if name in IGNORE_FILENAMES:
-        return True
+        return f"ignored file name {name!r}"
 
-    if any(name.endswith(ext) for ext in IGNORE_EXTS):
-        return True
+    if ext := next((ext for ext in IGNORE_EXTS if name.endswith(ext)), None):
+        return f"ignored extension {ext!r}"
 
-    if extra_exts and any(
-        name.endswith(e if e.startswith(".") else "." + e) for e in extra_exts
-    ):
-        return True
+    if extra_exts and (ext := next(
+        (e for e in extra_exts if name.endswith(e if e.startswith(".") else "." + e)), None,
+    )):
+        return f"ignored extension {ext!r}"
 
-    if any(pat in name for pat in IGNORE_BASENAME_SUBSTRINGS):
-        return True
+    if pat := next((pat for pat in IGNORE_BASENAME_SUBSTRINGS if pat in name), None):
+        return f"file name contains {pat!r}"
 
-    return False
+    return None

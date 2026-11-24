@@ -5,6 +5,7 @@ import { copyToClipboard } from '~/composables/useCopy'
 import type { IssuedKey, TenantChange } from '~/composables/useApi'
 import { buttonVariants } from '~/components/ui/button'
 import { API_KEY_STORAGE } from '~/utils/auth'
+import { ago } from '~/utils/connectors'
 import {
   describeScope,
   isAdmin,
@@ -14,6 +15,8 @@ import {
   toScopeForm,
   type ScopeForm,
   type Tenant,
+  STALE_KEY_DAYS,
+  staleKey,
 } from '~/utils/tenants'
 
 definePageMeta({ title: 'Tenants' })
@@ -44,6 +47,10 @@ const WRITE_EMPTY = 'No tag: read-only.'
 
 const fmtDate = (iso: string) => (iso ? new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '—')
 const isSelf = (t: Tenant) => !!me.value?.auth_enabled && t.name === me.value.name
+const now = ref(Date.now())
+watch(data, () => { now.value = Date.now() })
+const lastUsedText = (t: Tenant) =>
+  t.last_used_at ? `Last used ${ago(t.last_used_at, now.value)}${t.last_used_ip ? ` from ${t.last_used_ip}` : ''}` : 'Never used'
 
 // ---- Create & edit ---------------------------------------------------------
 interface TenantForm {
@@ -200,6 +207,9 @@ async function confirmAction() {
 
       <Card v-if="data.tenants.length">
         <CardContent class="px-0">
+          <p class="px-6 pb-3 text-xs text-muted-foreground">
+            A key unused for {{ STALE_KEY_DAYS }} days or more shows in <span class="font-medium text-warning">amber</span>: a candidate for revocation.
+          </p>
           <Table>
             <TableHeader>
               <TableRow>
@@ -208,6 +218,7 @@ async function confirmAction() {
                 <TableHead>Read</TableHead>
                 <TableHead>Write</TableHead>
                 <TableHead class="hidden md:table-cell">Created</TableHead>
+                <TableHead class="hidden sm:table-cell">Last used</TableHead>
                 <TableHead class="w-12 pr-6"><span class="sr-only">Actions</span></TableHead>
               </TableRow>
             </TableHeader>
@@ -216,6 +227,9 @@ async function confirmAction() {
                 <TableCell class="pl-6 font-mono">
                   {{ t.name }}
                   <Badge v-if="isSelf(t)" variant="outline" class="ml-1 font-sans text-[10px]">You</Badge>
+                  <p class="font-sans text-xs sm:hidden" :class="staleKey(t.last_used_at, now) ? 'text-warning' : 'text-muted-foreground'">
+                    {{ lastUsedText(t) }}
+                  </p>
                 </TableCell>
                 <TableCell>
                   <Badge :variant="t.admin ? 'default' : 'secondary'">{{ t.root ? 'Root' : t.admin ? 'Admin' : 'Member' }}</Badge>
@@ -227,6 +241,14 @@ async function confirmAction() {
                   {{ describeScope(t.write) }}
                 </TableCell>
                 <TableCell class="hidden whitespace-nowrap text-muted-foreground md:table-cell">{{ fmtDate(t.created_at) }}</TableCell>
+                <TableCell class="hidden whitespace-nowrap sm:table-cell">
+                  <template v-if="t.last_used_at">
+                    <span :class="staleKey(t.last_used_at, now) && 'font-medium text-warning'" :title="new Date(t.last_used_at).toLocaleString()">{{ ago(t.last_used_at, now) }}</span>
+                    <span v-if="staleKey(t.last_used_at, now)" class="sr-only"> (unused for {{ STALE_KEY_DAYS }} days or more)</span>
+                    <span v-if="t.last_used_ip" class="ml-1 font-mono text-xs text-muted-foreground">{{ t.last_used_ip }}</span>
+                  </template>
+                  <span v-else class="text-muted-foreground">Never used</span>
+                </TableCell>
                 <TableCell class="pr-6 text-right">
                   <Tooltip v-if="t.root">
                     <TooltipTrigger as-child>

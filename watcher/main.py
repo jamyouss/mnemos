@@ -211,12 +211,26 @@ def main() -> None:
         )
         raise
 
+    # Tells the dashboard the watcher is alive: it pushes nothing while no file
+    # changes, so silence alone cannot tell idle from dead.
+    threading.Thread(target=_heartbeat_forever, name="heartbeat", daemon=True).start()
+
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
         observer.stop()
     observer.join()
+
+
+def _heartbeat_forever(every: float = 60.0) -> None:
+    while True:
+        try:
+            httpx.post(f"{RAG_SERVER_URL}/api/services/heartbeat", json={"name": "watcher"},
+                       headers=_auth_headers(), timeout=10).raise_for_status()
+        except Exception as exc:  # noqa: BLE001 — the next beat tries again
+            logger.warning(f"heartbeat not sent: {exc}")
+        time.sleep(every)
 
 
 if __name__ == "__main__":

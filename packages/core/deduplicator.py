@@ -177,3 +177,47 @@ class Deduplicator:
             merged_with=existing_id,
             status=status,
         )
+
+    def update(
+        self,
+        mem_id: str,
+        *,
+        content: str | None = None,
+        memory_type: str | None = None,
+        tags: list[str] | None = None,
+        project: str | None = None,
+    ) -> dict | None:
+        """Edit one memory in place; its vectors follow a new content. None when absent.
+
+        A person's correction, so no near-duplicate merge: the edit lands as typed.
+        """
+        point_id = str(uuid.uuid5(uuid.NAMESPACE_URL, mem_id))
+        with self._write_lock:
+            records = self._qdrant.retrieve(
+                collection_name=_MEMORY_COLLECTION, ids=[point_id], with_payload=True, with_vectors=True,
+            )
+            if not records:
+                return None
+            payload = dict(records[0].payload or {})
+            vector = records[0].vector
+            if content is not None and content != payload.get("content"):
+                vector = self._named_vector(self._embeddings.embed_documents([content])[0], content)
+                payload["content"] = content
+            for key, value in (("memory_type", memory_type), ("tags", tags), ("project", project)):
+                if value is not None:
+                    payload[key] = value
+            payload["last_indexed_at"] = datetime.now(timezone.utc).isoformat()
+            self._qdrant.upsert(
+                collection_name=_MEMORY_COLLECTION,
+                points=[PointStruct(id=point_id, vector=vector, payload=payload)],
+            )
+            return payload
+
+    def delete(self, mem_id: str) -> bool:
+        """Remove one memory for good; False when it does not exist."""
+        point_id = str(uuid.uuid5(uuid.NAMESPACE_URL, mem_id))
+        with self._write_lock:
+            if not self._qdrant.retrieve(collection_name=_MEMORY_COLLECTION, ids=[point_id]):
+                return False
+            self._qdrant.delete(collection_name=_MEMORY_COLLECTION, points_selector=[point_id])
+            return True

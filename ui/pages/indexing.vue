@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ChevronRightIcon, DatabaseZapIcon, RefreshCwIcon } from '@lucide/vue'
+import { ChevronRightIcon, DatabaseZapIcon, FolderSyncIcon, RefreshCwIcon } from '@lucide/vue'
 import { refDebounced, useIntervalFn } from '@vueuse/core'
 import type { IndexFileEvent, IndexJob } from '~/composables/useApi'
 import { CHANNELS, channelActivity, channelLabel } from '~/utils/channels'
 import { pendingSummary, runSummary, serviceSummary } from '~/utils/connectors'
+import { shortPath } from '~/utils/indexFiles'
 import { isAdmin } from '~/utils/tenants'
 
 definePageMeta({ title: 'Indexing' })
@@ -12,6 +13,7 @@ useHead({ title: 'Indexing' })
 const api = useApi()
 const { data: me } = await useWhoami()
 const admin = computed(() => isAdmin(me.value))
+const reindexOpen = ref(false)
 
 const { data: summary, refresh: refreshSummary } = await useAsyncData('indexing-summary', () => api.indexingSummary(24), { immediate: admin.value })
 const { data: jobs, refresh: refreshJobs } = await useAsyncData('indexing-jobs', () => api.indexingJobs(20), { immediate: admin.value })
@@ -95,7 +97,6 @@ const percent = (j: IndexJob) => (j.total ? Math.round((j.processed / j.total) *
 const files = (n: number) => `${n.toLocaleString()} ${n === 1 ? 'file' : 'files'}`
 const fmtTime = (iso: string) => new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 const fmtMs = (ms: number | null) => (ms === null ? '—' : ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${ms} ms`)
-const shortPath = (p: string) => p.replace('/data/codebase/', '')
 const opVariant = (o: string) => (o === 'failed' || o === 'refused' ? 'destructive' : o === 'indexed' ? 'secondary' : 'outline')
 const connectorRuns = computed(() => Object.entries(sync.value?.runs ?? {}))
 const channelRows = computed(() => (summary.value?.channels ?? []).map((c) => ({
@@ -120,6 +121,7 @@ const serviceTone = computed(() => {
         index.<template v-if="summary"> Kept {{ summary.retention_days }} days.</template>
       </template>
       <template v-if="admin" #actions>
+        <Button variant="outline" size="sm" @click="reindexOpen = true"><FolderSyncIcon /> Reindex a folder</Button>
         <Button variant="outline" size="sm" :disabled="pending" @click="refreshAll">
           <RefreshCwIcon :class="pending && 'animate-spin'" /> Refresh
         </Button>
@@ -337,5 +339,7 @@ const serviceTone = computed(() => {
         </CardContent>
       </Card>
     </template>
+
+    <ReindexDialog v-model:open="reindexOpen" @started="refreshAll" />
   </div>
 </template>

@@ -120,10 +120,16 @@ def list_tenants(request: Request):
     require_admin(principal_of(request))
     doc = request.app.state.config_docs.get(TENANTS_KEY)
     tenants = (doc.data.get("tenants") if doc else None) or {}
+    usage = request.app.state.tenant_usage.read() if getattr(request.app.state, "tenant_usage", None) else {}
     return {
         "revision": doc.revision if doc else 0,
         "writable": settings.mnemos_ui_config_writable,
-        "tenants": [_public(name, tenants[name]) for name in sorted(tenants)],
+        "tenants": [
+            {**_public(name, tenants[name]),
+             "last_used_at": (usage.get(name) or {}).get("last_used_at"),
+             "last_used_ip": (usage.get(name) or {}).get("last_used_ip")}
+            for name in sorted(tenants)
+        ],
     }
 
 

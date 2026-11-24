@@ -23,7 +23,9 @@ from server.config_api import config_router
 from server.config_bootstrap import bootstrap_config
 from server.config_sync import ConfigSync, apply_projects
 from server.connectors_api import connectors_router
+from server.index_api import index_router
 from server.indexing import INDEX_EVENT_FIELDS, INDEX_EVENTS_COLLECTION, indexing_router
+from server.ops_api import TenantUsage, ops_router
 from server.projects_api import projects_router
 from server.settings_store import ConfigStore
 from server.tenants_api import tenants_router
@@ -263,6 +265,8 @@ def create_app() -> FastAPI:
         pruning = threading.Event()
         threading.Thread(target=_prune_forever, args=([app.state.audit, app.state.index_events], pruning),
                          name="event-log-prune", daemon=True).start()
+        app.state.tenant_usage = TenantUsage(app.state.config_docs)
+        threading.Thread(target=app.state.tenant_usage.run, name="tenant-usage", daemon=True).start()
 
         try:
             async with session_manager.run():
@@ -270,6 +274,7 @@ def create_app() -> FastAPI:
         finally:
             sync.stop()
             pruning.set()
+            app.state.tenant_usage.stop()
             app.state.qdrant.close()
 
     app = FastAPI(title="Mnemos MCP Server", lifespan=lifespan)
@@ -334,6 +339,8 @@ def create_app() -> FastAPI:
     app.include_router(tenants_router)
     app.include_router(audit_router)
     app.include_router(indexing_router)
+    app.include_router(index_router)
+    app.include_router(ops_router)
 
     # --- Dashboard ---
     # Mounted last and at the root, so it only catches what /mcp, /health and

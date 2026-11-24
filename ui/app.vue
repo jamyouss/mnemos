@@ -42,6 +42,7 @@ function toggleMode() {
           <MoonIcon class="dark:hidden" />
         </Button>
       </header>
+      <ServerAlerts />
       <!-- SidebarInset is already the page's <main>. -->
       <div class="mx-auto w-full max-w-7xl flex-1 p-4 md:p-8">
         <NuxtPage />

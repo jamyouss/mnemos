@@ -149,6 +149,10 @@ class BearerAuthMiddleware:
             await _unauthorized(send)
             return
         scope[PRINCIPAL_SCOPE_KEY] = principal
+        usage = getattr(getattr(scope.get("app"), "state", None), "tenant_usage", None)
+        if usage is not None:
+            client = scope.get("client")
+            usage.touch(principal.name, client[0] if client else None)
         await self._app(scope, receive, send)
 
 

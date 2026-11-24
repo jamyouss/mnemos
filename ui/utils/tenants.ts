@@ -16,6 +16,9 @@ export interface Tenant {
   read: Scope
   write: Scope
   created_at: string
+  /** Null: not used since the server began tracking it. */
+  last_used_at?: string | null
+  last_used_ip?: string | null
 }
 
 /** The caller as `GET /api/whoami` describes it; with auth off, an admin. */
@@ -31,8 +34,22 @@ export interface Whoami {
 // server's own 403 decides. The UI only ever narrows what it shows.
 export const isAdmin = (me: Whoami | null | undefined) => !me || me.admin
 
+/** May reindex and test paths: admin, or write on every tag. */
+export const canWriteAll = (me: Whoami | null | undefined) => !me || me.admin || me.write === '*'
+
 /** Connectors and projects can also be read by a key that writes every tag (the ingester, scripts). */
-export const canReadSetup = (me: Whoami | null | undefined) => !me || me.admin || me.write === '*'
+export const canReadSetup = canWriteAll
+
+/** May write at least one tag, so creating or editing a memory is worth offering. */
+export const canWriteSome = (me: Whoami | null | undefined) => canWriteAll(me) || (Array.isArray(me?.write) && me.write.length > 0)
+
+/** A key unused this long is worth revoking. */
+export const STALE_KEY_DAYS = 90
+
+/** True when the key was last used STALE_KEY_DAYS or more ago; never-used keys are not judged (tracking may be recent). */
+export function staleKey(lastUsedAt: string | null | undefined, now: number): boolean {
+  return !!lastUsedAt && now - Date.parse(lastUsedAt) >= STALE_KEY_DAYS * 24 * 3600 * 1000
+}
 
 /** `tags` stays the comma-separated string FacetCombobox edits. */
 export interface ScopeForm {
