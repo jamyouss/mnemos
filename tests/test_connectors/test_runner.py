@@ -7,7 +7,7 @@ import pytest
 
 import connectors.transport
 from connectors.config import ConnectorsConfig, JiraConfig, WebConfig
-from connectors.runner import SyncQueue, run_sources, serve, watch_file, watch_server
+from connectors.runner import SyncQueue, keep_alive, run_sources, serve, watch_file, watch_server
 
 from .conftest import FakeMnemos, Router
 
@@ -105,6 +105,32 @@ def test_a_failing_source_does_not_stop_the_others(sources, mnemos: FakeMnemos):
     assert mnemos.pushed_paths == ["jira/OK/OK-1.md"]
 
 
+def test_each_source_is_reported_running_then_with_its_outcome(sources, mnemos: FakeMnemos):
+    sources.add(f"{JIRA}/rest/api/2/search", _search("OK-1"))
+    config = ConnectorsConfig(
+        interval=None,
+        sources=(
+            JiraConfig(name="broken", url=JIRA, token="t", user=None, deployment="mainframe",
+                       projects=("X",), jql=None, tags=()),
+            _jira(projects=("OK",)),
+        ),
+    )
+    reports: list[tuple[str, str, list[str]]] = []
+
+    def report(name, state, results):
+        reports.append((name, state, [r.scope_tag for r in results]))
+        if name == "tracker":
+            raise RuntimeError("server down")  # a lost report never stops the sync
+
+    results = run_sources(config, mnemos.client(), report=report)
+
+    assert reports == [
+        ("broken", "running", []), ("broken", "failed", ["broken (jira)"]),
+        ("tracker", "running", []), ("tracker", "ok", ["jira:OK"]),
+    ]
+    assert [r.ok for r in results] == [False, True]
+
+
 def test_full_forces_a_push_of_unchanged_documents(sources, mnemos: FakeMnemos):
     sources.add(f"{JIRA}/rest/api/2/search", _search("DEMO-1"))
     config = ConnectorsConfig(interval=None, sources=(_jira(),))
@@ -114,6 +140,21 @@ def test_full_forces_a_push_of_unchanged_documents(sources, mnemos: FakeMnemos):
     assert run_sources(config, mnemos.client())[0].unchanged == 1
     assert mnemos.pushed == []
     assert run_sources(config, mnemos.client(), full=True)[0].pushed == 1
+
+
+def test_keep_alive_beats_now_then_on_schedule_and_survives_errors():
+    stop = threading.Event()
+    beats: list[int] = []
+
+    def beat() -> None:
+        beats.append(1)
+        if len(beats) == 1:
+            raise RuntimeError("server down")
+        if len(beats) == 3:
+            stop.set()
+
+    keep_alive(beat, stop, every=0.001)
+    assert len(beats) == 3
 
 
 # ---------------------------------------------------------------------------

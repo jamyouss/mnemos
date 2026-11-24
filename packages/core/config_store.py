@@ -25,8 +25,9 @@ from core.collections import CONFIG_COLLECTION
 logger = logging.getLogger("mnemos.config_store")
 
 # `connectors_sync` holds the dashboard's "sync now" requests and how far the
-# sync service has picked them up: shared state, not configuration.
-CONFIG_KEYS = ("connectors", "connectors_sync", "projects", "settings", "tenants")
+# sync service has picked them up, `connectors_status` what it last reported
+# per source: shared state, not configuration.
+CONFIG_KEYS = ("connectors", "connectors_status", "connectors_sync", "projects", "settings", "tenants")
 
 
 @dataclass(frozen=True)

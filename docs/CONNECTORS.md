@@ -165,6 +165,14 @@ Requests filed while `serve` was down are covered by its start-up sync. Only
 Without `interval`, `serve` syncs at start-up, on configuration change, on
 request and on `SIGHUP` only.
 
+`serve` and `run` also report to the server (`POST /api/connectors/sync/report`):
+each source as it starts and ends, with the per-scope counts and errors, and
+`serve` checks in every minute. The Connectors page reads that to show
+*Syncing*, *synced 4 min ago* or *Sync failed* with the error, and warns when
+no sync service ever reported or one has been silent for three minutes. A
+report the server refuses (a key without `admin` or `write: "*"`) is logged
+and the sync goes on.
+
 ## Confluence
 
 ```bash

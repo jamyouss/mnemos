@@ -12,7 +12,7 @@ sources it names and acknowledges it, which is all the dashboard can know.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
 from connectors.config import SOURCE_KEYS, ConfigError, parse_config
 from core.config_store import ConfigDoc, ConfigDocStore, RevisionConflict
@@ -28,9 +28,13 @@ connectors_router = APIRouter()
 
 CONNECTORS_KEY = "connectors"
 SYNC_KEY = "connectors_sync"
+STATUS_KEY = "connectors_status"
 # Requests kept for the ingester to catch up on; it reads every one newer than
 # the last it saw, so this only has to outlast a few polls.
 _KEPT_REQUESTS = 20
+# Bounds on what one report may store: errors are for a human to read, not logs.
+_MAX_RESULTS = 50
+_MAX_ERROR = 500
 
 # Key order of a stored source, so the document reads like the example file.
 _KEY_ORDER = (
@@ -55,26 +59,53 @@ class SyncAckBody(BaseModel):
     id: int
 
 
-def _sync_state(doc: ConfigDoc | None) -> dict:
-    data = doc.data if doc else {}
-    requests = data.get("requests") if isinstance(data.get("requests"), list) else []
+class SyncResultBody(BaseModel):
+    scope_tag: str
+    pushed: int = 0
+    unchanged: int = 0
+    deleted: int = 0
+    failed: int = 0
+    skipped: int = 0
+    truncated: bool = False
+    error: str | None = None
+
+
+class SyncReportBody(BaseModel):
+    # No source: a heartbeat, the service is alive.
+    source: str | None = None
+    state: Literal["running", "ok", "failed"] | None = None
+    results: list[SyncResultBody] = []
+
+
+def _sync_state(docs: ConfigDocStore) -> dict:
+    """Sync requests, how far the sync service picked them up, and what it last reported."""
+    sync = docs.get(SYNC_KEY)
+    status = docs.get(STATUS_KEY)
+    data = sync.data if sync else {}
+    reported = status.data if status else {}
     return {
-        "requests": requests,
+        "requests": data.get("requests") if isinstance(data.get("requests"), list) else [],
         "acked_id": int(data.get("acked_id", 0)),
         "acked_at": data.get("acked_at"),
+        "service_seen_at": reported.get("service_seen_at"),
+        "runs": reported.get("runs") if isinstance(reported.get("runs"), dict) else {},
     }
 
 
-def _update_sync(docs: ConfigDocStore, change: Callable[[dict], dict]) -> ConfigDoc:
-    """Read-modify-write the sync document, retried when another pod wrote first."""
+def _update(docs: ConfigDocStore, key: str, change: Callable[[dict], dict]) -> ConfigDoc:
+    """Read-modify-write `key`, retried when another pod wrote first."""
     for _ in range(5):
-        doc = docs.get(SYNC_KEY)
+        doc = docs.get(key)
         try:
-            return docs.put(SYNC_KEY, change(dict(doc.data) if doc else {}),
+            return docs.put(key, change(dict(doc.data) if doc else {}),
                             expected_revision=doc.revision if doc else 0)
         except RevisionConflict:
             continue
-    raise HTTPException(status_code=409, detail="Sync requests changed too fast: try again")
+    raise HTTPException(status_code=409, detail="Sync state changed too fast: try again")
+
+
+def _now() -> str:
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def _public_source(entry: object) -> dict | None:
@@ -119,7 +150,7 @@ def _clean(entry: object) -> object:
 def get_connectors(request: Request):
     require_admin_or_write_all(principal_of(request))
     docs = request.app.state.config_docs
-    return {**_snapshot(docs.get(CONNECTORS_KEY)), "sync": _sync_state(docs.get(SYNC_KEY))}
+    return {**_snapshot(docs.get(CONNECTORS_KEY)), "sync": _sync_state(docs)}
 
 
 @connectors_router.put("/api/connectors")
@@ -146,13 +177,13 @@ def put_connectors(body: ConnectorsPutRequest, request: Request):
     except RevisionConflict as exc:
         return revision_conflict(exc)
     request.app.state.config_sync.apply(doc)
-    return {**_snapshot(doc), "sync": _sync_state(request.app.state.config_docs.get(SYNC_KEY))}
+    return {**_snapshot(doc), "sync": _sync_state(request.app.state.config_docs)}
 
 
 @connectors_router.get("/api/connectors/sync")
 def get_sync(request: Request):
     require_admin_or_write_all(principal_of(request))
-    return _sync_state(request.app.state.config_docs.get(SYNC_KEY))
+    return _sync_state(request.app.state.config_docs)
 
 
 @connectors_router.post("/api/connectors/sync")
@@ -178,13 +209,13 @@ def request_sync(body: SyncRequestBody, request: Request):
         entry.update(
             id=last + 1,
             sources=body.sources,
-            requested_at=datetime.now(UTC).isoformat(timespec="seconds"),
+            requested_at=_now(),
             requested_by=principal.name,
         )
         return {**data, "requests": [*requests, entry][-_KEPT_REQUESTS:]}
 
-    doc = _update_sync(docs, add)
-    return {"request": dict(entry), **_sync_state(doc)}
+    _update(docs, SYNC_KEY, add)
+    return {"request": dict(entry), **_sync_state(docs)}
 
 
 @connectors_router.post("/api/connectors/sync/ack")
@@ -195,6 +226,36 @@ def ack_sync(body: SyncAckBody, request: Request):
     def ack(data: dict) -> dict:
         if body.id <= int(data.get("acked_id", 0)):
             return data
-        return {**data, "acked_id": body.id, "acked_at": datetime.now(UTC).isoformat(timespec="seconds")}
+        return {**data, "acked_id": body.id, "acked_at": _now()}
 
-    return _sync_state(_update_sync(request.app.state.config_docs, ack))
+    docs = request.app.state.config_docs
+    _update(docs, SYNC_KEY, ack)
+    return _sync_state(docs)
+
+
+@connectors_router.post("/api/connectors/sync/report")
+def report_sync(body: SyncReportBody, request: Request):
+    """The sync service is alive and, with `source`, started or finished syncing it."""
+    require_admin_or_write_all(principal_of(request))
+    now = _now()
+
+    def record(data: dict) -> dict:
+        runs = dict(data.get("runs") or {})
+        if body.source and body.state:
+            previous = runs.get(body.source) or {}
+            running = body.state == "running"
+            runs[body.source] = {
+                "state": body.state,
+                "started_at": now if running else previous.get("started_at"),
+                # While running, what the last finished run did stays visible.
+                "finished_at": previous.get("finished_at") if running else now,
+                "results": previous.get("results", []) if running else [
+                    {**r.model_dump(), "error": r.error[:_MAX_ERROR] if r.error else None}
+                    for r in body.results[:_MAX_RESULTS]
+                ],
+            }
+        return {**data, "service_seen_at": now, "runs": runs}
+
+    docs = request.app.state.config_docs
+    _update(docs, STATUS_KEY, record)
+    return _sync_state(docs)

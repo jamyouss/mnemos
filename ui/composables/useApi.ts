@@ -131,6 +131,30 @@ export interface ConnectorSyncState {
   /** Every request up to this id has been picked up by the sync service. */
   acked_id: number
   acked_at: string | null
+  /** Last time the sync service reported in (every minute while it runs); null if it never did. */
+  service_seen_at: string | null
+  /** What the sync service last reported, per source name. */
+  runs: Record<string, ConnectorRun>
+}
+
+export interface ConnectorRunResult {
+  scope_tag: string
+  pushed: number
+  unchanged: number
+  deleted: number
+  failed: number
+  skipped: number
+  truncated: boolean
+  error: string | null
+}
+
+export interface ConnectorRun {
+  state: 'running' | 'ok' | 'failed'
+  started_at: string | null
+  /** End of the last finished sync; kept while a new one runs. */
+  finished_at: string | null
+  /** One per scope, from the last finished sync. */
+  results: ConnectorRunResult[]
 }
 
 export interface ProjectsResponse {

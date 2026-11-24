@@ -1162,7 +1162,7 @@ def _sync_config(config, only: set[str] | None = None, full: bool = False) -> li
     from connectors.transport import make_client
 
     with make_client(headers=_headers(), timeout=MNEMOS_TIMEOUT) as http:
-        return run_sources(config, MnemosClient(_base_url(), http), only=only, full=full)
+        return run_sources(config, MnemosClient(_base_url(), http), only=only, full=full, report=_report_sync)
 
 
 @ingest.command("run")
@@ -1240,6 +1240,9 @@ def ingest_serve(config_path: str | None) -> None:
     previous = {sig: signal.signal(sig, handler) for sig, handler in
                 ((signal.SIGHUP, resync), (signal.SIGTERM, shutdown))}
     watcher.start()
+    threading.Thread(
+        target=connectors.runner.keep_alive, args=(lambda: _report_sync(None, None, []), stop), daemon=True
+    ).start()
     every = f"every {config.interval}s, " if config.interval else ""
     console.print(
         f"Serving {len(config.sources)} source(s) from {origin}: "
@@ -1261,6 +1264,19 @@ def _ack_sync(request_id: int) -> None:
 
     with make_client(headers=_headers(), timeout=10) as http:
         http.post(f"{_base_url()}/api/connectors/sync/ack", json={"id": request_id}).raise_for_status()
+
+
+def _report_sync(source: str | None, state: str | None, results: list) -> None:
+    """Tell the server the sync service is alive and, with `source`, how its sync went.
+
+    What the dashboard's Connectors page shows per source: syncing, synced, failed."""
+    from dataclasses import asdict
+
+    from connectors.transport import make_client
+
+    body = {"source": source, "state": state, "results": [asdict(r) for r in results]}
+    with make_client(headers=_headers(), timeout=10) as http:
+        http.post(f"{_base_url()}/api/connectors/sync/report", json=body).raise_for_status()
 
 
 if __name__ == "__main__":

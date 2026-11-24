@@ -34,8 +34,8 @@ def make_client(tmp_path, monkeypatch, backend):
 
 def test_absent_document_is_an_empty_config(make_client):
     body = make_client().get("/api/connectors").json()
-    assert body == {"revision": 0, "writable": True, "interval": None, "sources": [],
-                    "problems": [], "sync": {"requests": [], "acked_id": 0, "acked_at": None}}
+    assert body == {"revision": 0, "writable": True, "interval": None, "sources": [], "problems": [],
+                    "sync": {"requests": [], "acked_id": 0, "acked_at": None, "service_seen_at": None, "runs": {}}}
 
 
 def test_saved_document_is_what_the_ingester_parses(make_client, backend):
@@ -180,3 +180,24 @@ def test_ingester_key_may_request_and_acknowledge_syncs(make_client, backend):
     assert client.post("/api/connectors/sync", headers=as_("root"), json={}).status_code == 200
     assert client.post("/api/connectors/sync/ack", headers=as_("dev"), json={"id": 1}).status_code == 403
     assert client.post("/api/connectors/sync/ack", headers=as_("ingest"), json={"id": 1}).status_code == 200
+
+
+def test_sync_reports_track_each_source_and_the_service(make_client, backend):
+    client = make_client()
+    assert client.post("/api/connectors/sync/report", json={}).json()["service_seen_at"]
+
+    client.post("/api/connectors/sync/report", json={"source": "tracker", "state": "failed", "results": [
+        {"scope_tag": "jira:OPS", "error": "401 Unauthorized\n" + "x" * 2000},
+    ]})
+    running = client.post("/api/connectors/sync/report", json={"source": "tracker", "state": "running"}).json()
+    run = running["runs"]["tracker"]
+    # While a new sync runs, the outcome of the last one stays visible, its error trimmed.
+    assert run["state"] == "running" and run["finished_at"] is not None
+    assert run["results"][0]["error"].startswith("401 Unauthorized") and len(run["results"][0]["error"]) == 500
+
+    done = client.post("/api/connectors/sync/report", json={"source": "tracker", "state": "ok", "results": [
+        {"scope_tag": "jira:OPS", "pushed": 3, "unchanged": 9},
+    ]}).json()["runs"]["tracker"]
+    assert done["state"] == "ok" and done["started_at"] == run["started_at"]
+    assert done["results"][0]["pushed"] == 3 and done["results"][0]["error"] is None
+    assert client.get("/api/connectors").json()["sync"]["runs"]["tracker"]["state"] == "ok"

@@ -173,10 +173,14 @@ holds under each — `not synced yet` is the answer to "did the ingester ever
 run?".
 
 **Sync all** in the header and **Sync** on a saved card ask the ingester to
-sync now. The card shows *Sync requested* until the ingester picks the request
-up (within ~5 s); a warning appears when it has not after 30 s, which usually
-means `mnemos ingest serve` is not running. Both are disabled while the form
-has unsaved changes: a sync runs the saved configuration.
+sync now. Each card says what the ingester last reported: *Sync requested*
+until it picks the request up (within ~5 s), *Syncing* while it runs, then
+*synced 4 min ago* or *Sync failed*; opened, the card lists the last sync per
+scope (pushed, unchanged, deleted, failed) with the error in full. Above the
+cards, a warning says when no ingester ever reported to this server or one
+has been silent for three minutes — the usual answer to "why does nothing
+sync?". Both buttons are disabled while the form has unsaved changes: a sync
+runs the saved configuration.
 
 The server validates with the ingester's own parser and refuses a
 configuration the ingester would reject, listing every problem; one that is

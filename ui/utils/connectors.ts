@@ -194,3 +194,35 @@ export function syncStalled(state: SyncState | null | undefined, now: number, af
   const oldest = pendingRequests(state)[0]
   return !!oldest && now - Date.parse(oldest.requested_at) > afterMs
 }
+
+/**
+ * Whether a sync service is reporting to this server. It reports every minute
+ * while it runs, so three silent minutes mean it stopped or cannot reach us.
+ */
+export function serviceHealth(seenAt: string | null | undefined, now: number, silentAfterMs = 180_000): 'never' | 'alive' | 'silent' {
+  if (!seenAt) return 'never'
+  return now - Date.parse(seenAt) > silentAfterMs ? 'silent' : 'alive'
+}
+
+/** "just now", "4 min ago", "2 h ago", then the date. */
+export function ago(iso: string, now: number): string {
+  const seconds = Math.max(0, Math.round((now - Date.parse(iso)) / 1000))
+  if (seconds < 60) return 'just now'
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`
+  if (seconds < 48 * 3600) return `${Math.floor(seconds / 3600)} h ago`
+  return new Date(iso).toLocaleDateString()
+}
+
+interface Run {
+  state: 'running' | 'ok' | 'failed'
+  started_at: string | null
+  finished_at: string | null
+}
+
+/** One line for a source's last sync: "syncing since 4 min ago", "synced 2 h ago", "failed just now". */
+export function runSummary(run: Run | null | undefined, now: number): string {
+  if (!run) return ''
+  if (run.state === 'running') return run.started_at ? `syncing, started ${ago(run.started_at, now)}` : 'syncing'
+  const when = run.finished_at ? ` ${ago(run.finished_at, now)}` : ''
+  return run.state === 'ok' ? `synced${when}` : `sync failed${when}`
+}

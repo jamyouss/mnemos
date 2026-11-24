@@ -58,7 +58,9 @@ class ConfigSync:
 
     def poll_once(self) -> None:
         for key, revision in self._docs.revisions().items():
-            if revision <= self.applied_revision(key):
+            # Unregistered keys (sync requests, sync status) are shared state the
+            # API reads on demand: nothing to apply, and they change too often to log.
+            if key not in self._applied or revision <= self.applied_revision(key):
                 continue
             doc = self._docs.get(key)
             if doc is not None:

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { BookOpenIcon, ChevronDownIcon, GitBranchIcon, GlobeIcon, KeyRoundIcon, RefreshCcwDotIcon, TicketIcon, Trash2Icon } from '@lucide/vue'
-import { DEPLOYMENTS, GIT_COLLECTIONS, scopeTags, toPayload, type Deployment, type GitCollection, type SourceForm } from '~/utils/connectors'
+import type { ConnectorRun } from '~/composables/useApi'
+import { DEPLOYMENTS, GIT_COLLECTIONS, ago, runSummary, scopeTags, toPayload, type Deployment, type GitCollection, type SourceForm } from '~/utils/connectors'
 
 const source = defineModel<SourceForm>({ required: true })
 const props = defineProps<{
@@ -13,6 +14,10 @@ const props = defineProps<{
   pending: boolean
   /** Why "Sync" is unavailable; empty when it can be used. */
   syncBlocked: string
+  /** What the sync service last reported for this source. */
+  run?: ConnectorRun | null
+  /** Clock for "synced 4 min ago", advanced by the page. */
+  now: number
 }>()
 const emit = defineEmits<{ remove: []; sync: [] }>()
 
@@ -44,6 +49,9 @@ const summary = computed(() => {
   const total = scopes.value.reduce((sum, tag) => sum + (props.indexed?.[tag] ?? 0), 0)
   return total ? `${total.toLocaleString()} chunks` : 'not synced yet'
 })
+const lastRun = computed(() => runSummary(props.run, props.now))
+const running = computed(() => props.run?.state === 'running')
+const busy = computed(() => props.pending || running.value)
 </script>
 
 <template>
@@ -62,22 +70,24 @@ const summary = computed(() => {
         <div class="min-w-0 flex-1">
           <CardTitle class="truncate text-base">{{ source.name.trim() || m.label }}</CardTitle>
           <CardDescription class="truncate">
-            {{ m.label }}<template v-if="summary"> · {{ summary }}</template>
+            {{ m.label }}<template v-if="summary"> · {{ summary }}</template><template v-if="lastRun"> · {{ lastRun }}</template>
           </CardDescription>
         </div>
         <ChevronDownIcon class="size-4 shrink-0 text-muted-foreground transition-transform" :class="open && 'rotate-180'" />
       </button>
-      <Badge v-if="pending" variant="secondary" class="hidden sm:inline-flex" role="status">Sync requested</Badge>
+      <Badge v-if="running" variant="secondary" class="hidden sm:inline-flex" role="status">Syncing</Badge>
+      <Badge v-else-if="pending" variant="secondary" class="hidden sm:inline-flex" role="status">Sync requested</Badge>
+      <Badge v-else-if="run?.state === 'failed'" variant="destructive" class="hidden sm:inline-flex">Sync failed</Badge>
       <Button
         v-if="props.saved"
         variant="outline"
         size="sm"
-        :disabled="!!props.syncBlocked || props.pending"
+        :disabled="!!props.syncBlocked || busy"
         :title="props.syncBlocked || undefined"
         :aria-label="`Sync ${source.name.trim() || m.label} now`"
         @click="emit('sync')"
       >
-        <RefreshCcwDotIcon :class="props.pending && 'animate-spin'" /> Sync
+        <RefreshCcwDotIcon :class="busy && 'animate-spin'" /> Sync
       </Button>
       <Button
         v-if="props.editable"
@@ -222,6 +232,22 @@ const summary = computed(() => {
         <p class="text-xs text-muted-foreground">Added to every document, next to <code>{{ source.type }}:&lt;scope&gt;</code>.</p>
       </div>
     </CardContent>
+
+    <div v-if="run?.results.length" class="space-y-2 border-t px-6 pt-4">
+      <p class="text-xs text-muted-foreground">
+        Last sync<template v-if="run.finished_at">, {{ ago(run.finished_at, now) }}</template>:
+      </p>
+      <div v-for="r in run.results" :key="r.scope_tag" class="space-y-1">
+        <p class="text-xs">
+          <span class="font-mono">{{ r.scope_tag }}</span>
+          <span class="text-muted-foreground">
+            — {{ r.pushed }} pushed · {{ r.unchanged }} unchanged · {{ r.deleted }} deleted<template v-if="r.skipped"> · {{ r.skipped }} skipped</template>
+          </span>
+          <span v-if="r.failed" class="text-destructive"> · {{ r.failed }} failed</span>
+        </p>
+        <pre v-if="r.error" class="whitespace-pre-wrap break-words rounded-md bg-destructive/10 p-2 font-mono text-[11px] text-destructive">{{ r.error }}</pre>
+      </div>
+    </div>
 
     <CardFooter v-if="scopes.length" class="flex flex-wrap gap-2 border-t pt-4">
       <span class="text-xs text-muted-foreground">Index status:</span>

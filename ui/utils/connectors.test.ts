@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { newSource, scopeTags, sourceName, syncPending, syncStalled, toForm, toPayload, type ConnectorSource } from './connectors'
+import {
+  ago, newSource, runSummary, scopeTags, serviceHealth, sourceName, syncPending, syncStalled, toForm, toPayload,
+  type ConnectorSource,
+} from './connectors'
 
 describe('toPayload', () => {
   it('round-trips a stored source unchanged', () => {
@@ -86,5 +89,24 @@ describe('sync status', () => {
   it('names an unnamed source after its type, as the sync service does', () => {
     expect(sourceName({ type: 'web', name: '  ' })).toBe('web')
     expect(sourceName({ type: 'git', name: 'Lpel - Lib - Auth' })).toBe('Lpel - Lib - Auth')
+  })
+})
+
+describe('sync service and runs', () => {
+  const now = Date.parse('2026-11-24T10:00:00Z')
+
+  it('tells a service that never reported from one that went silent', () => {
+    expect(serviceHealth(null, now)).toBe('never')
+    expect(serviceHealth('2026-11-24T09:58:30Z', now)).toBe('alive')
+    expect(serviceHealth('2026-11-24T09:56:00Z', now)).toBe('silent')
+  })
+
+  it('says what the last sync of a source did and when', () => {
+    expect(runSummary({ state: 'running', started_at: '2026-11-24T09:56:00Z', finished_at: null }, now))
+      .toBe('syncing, started 4 min ago')
+    expect(runSummary({ state: 'ok', started_at: null, finished_at: '2026-11-24T07:30:00Z' }, now)).toBe('synced 2 h ago')
+    expect(runSummary({ state: 'failed', started_at: null, finished_at: '2026-11-24T09:59:40Z' }, now)).toBe('sync failed just now')
+    expect(runSummary(undefined, now)).toBe('')
+    expect(ago('2026-11-24T10:00:30Z', now)).toBe('just now') // a server clock slightly ahead
   })
 })

@@ -5,7 +5,8 @@ import { useIntervalFn } from '@vueuse/core'
 import { toast } from 'vue-sonner'
 import { ApiError, type ConnectorsResponse, type ConnectorSyncState } from '~/composables/useApi'
 import {
-  newSource, pendingRequests, sourceName, syncPending, syncStalled, toForm, toPayload, type SourceForm, type SourceType,
+  ago, newSource, pendingRequests, serviceHealth, sourceName, syncPending, syncStalled, toForm, toPayload,
+  type SourceForm, type SourceType,
 } from '~/utils/connectors'
 import { canReadSetup, isAdmin } from '~/utils/tenants'
 
@@ -52,15 +53,16 @@ const savedState = computed(() => (data.value ? serialize(data.value.interval ??
 const dirty = computed(() => !!data.value && serialize(interval.value, sources.value) !== savedState.value)
 const editable = computed(() => admin.value && (data.value?.writable ?? false))
 
-// Sync requests and how far the sync service picked them up. Kept apart from
-// `data`: polling them must not reset a form being edited.
+// Sync requests, what the sync service reported and when it was last heard
+// from. Kept apart from `data`: polling them must not reset a form being edited.
 const sync = ref<ConnectorSyncState | null>(null)
 watch(data, (cfg) => { if (cfg) sync.value = cfg.sync }, { immediate: true })
 const savedNames = computed(() => new Set((data.value?.sources ?? []).map(sourceName)))
 const pendingAll = computed(() => pendingRequests(sync.value).some((r) => r.sources === null))
-// Advanced by the poller, which only runs while something waits.
+const anyRunning = computed(() => Object.values(sync.value?.runs ?? {}).some((r) => r.state === 'running'))
 const now = ref(Date.now())
 const stalled = computed(() => syncStalled(sync.value, now.value))
+const health = computed(() => serviceHealth(sync.value?.service_seen_at, now.value))
 // A sync runs the saved configuration, never the form.
 const syncBlocked = computed(() => (dirty.value ? 'Save or discard your changes first: a sync runs the saved configuration.' : ''))
 
@@ -75,21 +77,27 @@ async function requestSync(names?: string[]) {
   }
 }
 
-// Poll only while a request waits for the sync service.
-const poller = useIntervalFn(async () => {
+async function poll() {
   now.value = Date.now()
-  const before = sync.value?.acked_id ?? 0
+  const before = sync.value
   try {
     sync.value = await api.connectorSync()
   } catch {
     return // the next tick tries again
   }
-  if (sync.value.acked_id > before) {
-    toast.success('The sync service started the sync', { description: 'Chunk counts grow as documents land: Refresh to see them.' })
+  if (before && sync.value.acked_id > before.acked_id) toast.info('The sync service picked up the request')
+  // Counts grow while documents land: show them moving rather than only at the end.
+  if (anyRunning.value) refreshNuxtData('connector-tags')
+  for (const [name, run] of Object.entries(sync.value.runs)) {
+    // A finish time that moved: a sync ended since the last poll, however short it was.
+    if (!before || run.state === 'running' || run.finished_at === before.runs[name]?.finished_at) continue
+    if (run.state === 'ok') toast.success(`${name} synced`)
+    else toast.error(`Sync of ${name} failed`, { description: run.results.find((r) => r.error)?.error?.split('\n')[0] })
     refreshNuxtData('connector-tags')
   }
-}, 3000, { immediate: false })
-watch(() => pendingRequests(sync.value).length > 0, (waiting) => (waiting ? poller.resume() : poller.pause()), { immediate: true })
+}
+// Every 3 s while a request waits or a sync runs, every 30 s otherwise: enough to see the service stop.
+useIntervalFn(poll, () => (pendingRequests(sync.value).length || anyRunning.value ? 3000 : 30_000))
 
 const addable: { type: SourceType; label: string; icon: Component }[] = [
   { type: 'confluence', label: 'Confluence spaces', icon: BookOpenIcon },
@@ -194,14 +202,37 @@ onBeforeRouteLeave(() => {
         </AlertDescription>
       </Alert>
 
-      <Alert v-if="stalled">
+      <Alert v-if="data.sources.length && health === 'never'">
+        <TriangleAlertIcon />
+        <AlertTitle>No sync service has reported to this server</AlertTitle>
+        <AlertDescription>
+          Sources sync only while <code>mnemos ingest serve</code> runs against this server, with
+          <code>MNEMOS_API_KEY</code> set to a key that writes every tag. With Docker Compose:
+          <code>docker compose --profile connectors up -d ingester</code>. Sync requests wait until then.
+        </AlertDescription>
+      </Alert>
+
+      <Alert v-else-if="health === 'silent'" variant="destructive">
+        <TriangleAlertIcon />
+        <AlertTitle>The sync service stopped reporting</AlertTitle>
+        <AlertDescription>
+          Last heard from {{ ago(sync!.service_seen_at!, now) }}. Nothing syncs until it is back: check that
+          <code>mnemos ingest serve</code> is running and reaches this server.
+        </AlertDescription>
+      </Alert>
+
+      <Alert v-else-if="stalled">
         <TriangleAlertIcon />
         <AlertTitle>The sync service has not picked up the request</AlertTitle>
         <AlertDescription>
-          It reads requests every few seconds while <code>mnemos ingest serve</code> runs against this server. Check that
-          it is running and that its key can read the connectors.
+          It reads requests every few seconds. Check that its key can read the connectors
+          (<code>admin</code> or <code>write: "*"</code>).
         </AlertDescription>
       </Alert>
+
+      <p v-else-if="health === 'alive' && sync?.service_seen_at" class="text-xs text-muted-foreground" role="status">
+        Sync service running, last heard from {{ ago(sync.service_seen_at, now) }}.
+      </p>
 
       <Card>
         <CardHeader>
@@ -226,6 +257,8 @@ onBeforeRouteLeave(() => {
         :saved="savedNames.has(sourceName(s))"
         :pending="syncPending(sync, sourceName(s))"
         :sync-blocked="syncBlocked"
+        :run="sync?.runs[sourceName(s)]"
+        :now="now"
         @remove="remove(s.id)"
         @sync="requestSync([sourceName(s)])"
       />

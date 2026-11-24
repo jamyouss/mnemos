@@ -18,28 +18,46 @@ from connectors.sync import SyncResult, sync_scope
 logger = logging.getLogger(__name__)
 
 
+Report = Callable[[str, str, list[SyncResult]], object]
+
+
 def run_sources(
     config: ConnectorsConfig,
     mnemos: MnemosClient,
     *,
     only: Collection[str] | None = None,
     full: bool = False,
+    report: Report | None = None,
 ) -> list[SyncResult]:
     """Sync every scope of every selected source; one result per scope.
 
     A source that cannot even start (bad URL, unreachable host while listing…)
-    yields a failed result and the run moves on to the next one.
+    yields a failed result and the run moves on to the next one. `report`
+    hears `(name, "running", [])` before each source and `(name, "ok" |
+    "failed", its results)` after; a report that raises is logged, never fatal.
     """
     results: list[SyncResult] = []
     for source in config.sources:
         if only and source.name not in only:
             continue
+        _report(report, source.name, "running", [])
         try:
-            results.extend(_run_source(source, mnemos, full))
+            done = _run_source(source, mnemos, full)
         except Exception as exc:  # noqa: BLE001 — reported per source, never fatal for the run
             logger.error("source %s (%s) failed: %s", source.name, source.type, exc)
-            results.append(SyncResult(scope_tag=f"{source.name} ({source.type})", error=str(exc)))
+            done = [SyncResult(scope_tag=f"{source.name} ({source.type})", error=str(exc))]
+        _report(report, source.name, "ok" if all(r.ok for r in done) else "failed", done)
+        results.extend(done)
     return results
+
+
+def _report(report: Report | None, name: str, state: str, results: list[SyncResult]) -> None:
+    if report is None:
+        return
+    try:
+        report(name, state, results)
+    except Exception as exc:  # noqa: BLE001 — status is best effort, the sync is what matters
+        logger.warning("cannot report the sync of %s: %s", name, exc)
 
 
 def _run_source(source: SourceConfig, mnemos: MnemosClient, full: bool) -> list[SyncResult]:
@@ -212,3 +230,16 @@ def watch_server(
                 acked = seen
             except Exception as exc:  # noqa: BLE001 — retried at the next poll
                 logger.warning("cannot acknowledge sync request %s: %s", seen, exc)
+
+
+def keep_alive(beat: Callable[[], object], stop: threading.Event, *, every: float = 60.0) -> None:
+    """Call `beat` now, then every `every` seconds until `stop` is set: the
+    dashboard tells a stopped sync service from an idle one by it. A beat that
+    raises is logged and the loop goes on."""
+    while True:
+        try:
+            beat()
+        except Exception as exc:  # noqa: BLE001 — liveness is best effort
+            logger.warning("cannot report to the server: %s", exc)
+        if stop.wait(every):
+            return

@@ -144,7 +144,7 @@ read-only key.
 | Delete an indexed file | Every stored chunk of the file shares a tag with `write` |
 | Approve or reject a memory | One of the memory's tags in `write` |
 | Query log, `/api/eval/*`, settings, tenants | `admin` |
-| `GET /api/connectors`, `GET /api/projects`, `POST /api/connectors/sync` (sync now) and `/sync/ack` | `admin` or `write: "*"` (the ingester's and scripts' key) |
+| `GET /api/connectors`, `GET /api/projects`, `POST /api/connectors/sync` (sync now), `/sync/ack` and `/sync/report` | `admin` or `write: "*"` (the ingester's and scripts' key) |
 
 A refused operation answers `403` (an `Error: …` text over MCP).
 
