@@ -11,16 +11,18 @@ sources it names and acknowledges it, which is all the dashboard can know.
 """
 from __future__ import annotations
 
+import random
+import time
 from datetime import UTC, datetime
-from typing import Any, Callable, Literal
+from typing import Annotated, Any, Callable, Literal
 
 from connectors.config import SOURCE_KEYS, ConfigError, parse_config
 from core.config_store import ConfigDoc, ConfigDocStore, RevisionConflict
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from server.audit import audit, field_changes, keyed_changes
+from server.audit import audit, field_changes, keyed_changes, redact
 from server.config import settings
 from server.config_api import require_admin_writer, revision_conflict
 from server.principal import principal_of, require_admin_or_write_all
@@ -53,15 +55,15 @@ class ConnectorsPutRequest(BaseModel):
 
 class SyncRequestBody(BaseModel):
     # None: every source.
-    sources: list[str] | None = None
+    sources: list[Annotated[str, Field(max_length=200)]] | None = Field(None, max_length=200)
 
 
 class SyncAckBody(BaseModel):
-    id: int
+    id: int = Field(ge=0)
 
 
 class SyncResultBody(BaseModel):
-    scope_tag: str
+    scope_tag: str = Field(max_length=300)
     pushed: int = 0
     unchanged: int = 0
     deleted: int = 0
@@ -73,9 +75,16 @@ class SyncResultBody(BaseModel):
 
 class SyncReportBody(BaseModel):
     # No source: a heartbeat, the service is alive.
-    source: str | None = None
+    source: str | None = Field(None, max_length=200)
     state: Literal["running", "ok", "failed"] | None = None
-    results: list[SyncResultBody] = []
+    results: list[SyncResultBody] = Field([], max_length=_MAX_RESULTS)
+
+
+def _source_names(docs: ConfigDocStore) -> set[str]:
+    """Names of the saved sources; one without a name is named after its type, as the ingester does."""
+    stored = docs.get(CONNECTORS_KEY)
+    entries = stored.data.get("sources") if stored and isinstance(stored.data.get("sources"), list) else []
+    return {str(s.get("name") or s.get("type")) for s in entries if isinstance(s, dict)}
 
 
 def _sync_state(docs: ConfigDocStore) -> dict:
@@ -95,13 +104,14 @@ def _sync_state(docs: ConfigDocStore) -> dict:
 
 def _update(docs: ConfigDocStore, key: str, change: Callable[[dict], dict]) -> ConfigDoc:
     """Read-modify-write `key`, retried when another pod wrote first."""
-    for _ in range(5):
+    for attempt in range(5):
         doc = docs.get(key)
         try:
             return docs.put(key, change(dict(doc.data) if doc else {}),
                             expected_revision=doc.revision if doc else 0)
         except RevisionConflict:
-            continue
+            # Pods and the ingester write the same document: back off a little, jittered.
+            time.sleep(random.uniform(0.01, 0.05) * (attempt + 1))
     raise HTTPException(status_code=409, detail="Sync state changed too fast: try again")
 
 
@@ -206,29 +216,27 @@ def request_sync(body: SyncRequestBody, request: Request):
     require_admin_or_write_all(principal)
     docs = request.app.state.config_docs
     if body.sources is not None:
-        stored = docs.get(CONNECTORS_KEY)
-        entries = stored.data.get("sources") if stored and isinstance(stored.data.get("sources"), list) else []
-        # A source without a name is named after its type, as the ingester does.
-        known = {str(s.get("name") or s.get("type")) for s in entries if isinstance(s, dict)}
-        unknown = sorted(set(body.sources) - known)
+        unknown = sorted(set(body.sources) - _source_names(docs))
         if not body.sources or unknown:
             raise HTTPException(status_code=422, detail=f"No saved source named {', '.join(unknown) or '(none given)'}")
+    sources = sorted(set(body.sources)) if body.sources is not None else None
     entry: dict[str, Any] = {}
 
     def add(data: dict) -> dict:
         requests = data.get("requests") if isinstance(data.get("requests"), list) else []
-        last = max([int(data.get("acked_id", 0))] + [int(r.get("id", 0)) for r in requests])
+        acked = int(data.get("acked_id", 0))
+        # The same request still waiting: answer with it rather than queue a twin.
+        waiting = next((r for r in requests if int(r.get("id", 0)) > acked and r.get("sources") == sources), None)
         entry.clear()
-        entry.update(
-            id=last + 1,
-            sources=body.sources,
-            requested_at=_now(),
-            requested_by=principal.name,
-        )
+        if waiting is not None:
+            entry.update(waiting)
+            return data
+        last = max([acked] + [int(r.get("id", 0)) for r in requests])
+        entry.update(id=last + 1, sources=sources, requested_at=_now(), requested_by=principal.name)
         return {**data, "requests": [*requests, entry][-_KEPT_REQUESTS:]}
 
     _update(docs, SYNC_KEY, add)
-    audit(request, "connectors.sync", ", ".join(body.sources) if body.sources else "every source")
+    audit(request, "connectors.sync", ", ".join(sources) if sources else "every source")
     return {"request": dict(entry), **_sync_state(docs)}
 
 
@@ -238,9 +246,13 @@ def ack_sync(body: SyncAckBody, request: Request):
     require_admin_or_write_all(principal_of(request))
 
     def ack(data: dict) -> dict:
-        if body.id <= int(data.get("acked_id", 0)):
+        requests = data.get("requests") if isinstance(data.get("requests"), list) else []
+        # Never past the newest request: an ack cannot mark future requests as picked up.
+        newest = max([0] + [int(r.get("id", 0)) for r in requests])
+        acked = min(body.id, newest)
+        if acked <= int(data.get("acked_id", 0)):
             return data
-        return {**data, "acked_id": body.id, "acked_at": _now()}
+        return {**data, "acked_id": acked, "acked_at": _now()}
 
     docs = request.app.state.config_docs
     _update(docs, SYNC_KEY, ack)
@@ -251,10 +263,15 @@ def ack_sync(body: SyncAckBody, request: Request):
 def report_sync(body: SyncReportBody, request: Request):
     """The sync service is alive and, with `source`, started or finished syncing it."""
     require_admin_or_write_all(principal_of(request))
+    docs = request.app.state.config_docs
+    known = _source_names(docs)
+    if body.source and body.source not in known:
+        raise HTTPException(status_code=422, detail=f"No saved source named {body.source!r}")
     now = _now()
 
     def record(data: dict) -> dict:
-        runs = dict(data.get("runs") or {})
+        # Sources removed from the configuration drop out of the status too.
+        runs = {name: run for name, run in (data.get("runs") or {}).items() if name in known}
         if body.source and body.state:
             previous = runs.get(body.source) or {}
             running = body.state == "running"
@@ -264,12 +281,11 @@ def report_sync(body: SyncReportBody, request: Request):
                 # While running, what the last finished run did stays visible.
                 "finished_at": previous.get("finished_at") if running else now,
                 "results": previous.get("results", []) if running else [
-                    {**r.model_dump(), "error": r.error[:_MAX_ERROR] if r.error else None}
-                    for r in body.results[:_MAX_RESULTS]
+                    {**r.model_dump(), "error": redact(r.error[:_MAX_ERROR]) if r.error else None}
+                    for r in body.results
                 ],
             }
         return {**data, "service_seen_at": now, "runs": runs}
 
-    docs = request.app.state.config_docs
     _update(docs, STATUS_KEY, record)
     return _sync_state(docs)

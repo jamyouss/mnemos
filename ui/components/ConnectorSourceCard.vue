@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { BookOpenIcon, ChevronDownIcon, GitBranchIcon, GlobeIcon, KeyRoundIcon, RefreshCcwDotIcon, TicketIcon, Trash2Icon } from '@lucide/vue'
-import type { ConnectorRun } from '~/composables/useApi'
-import { DEPLOYMENTS, GIT_COLLECTIONS, ago, runSummary, scopeTags, toPayload, type Deployment, type GitCollection, type SourceForm } from '~/utils/connectors'
+import type { ConnectorRun, ConnectorSyncRequest } from '~/composables/useApi'
+import { DEPLOYMENTS, GIT_COLLECTIONS, ago, runSummary, scopeTags, toPayload, waitingLabel, type Deployment, type GitCollection, type SourceForm } from '~/utils/connectors'
 
 const source = defineModel<SourceForm>({ required: true })
 const props = defineProps<{
@@ -10,10 +10,12 @@ const props = defineProps<{
   indexed?: Record<string, number> | null
   /** In the saved configuration: only those can be synced, and they start collapsed. */
   saved: boolean
-  /** A sync request covering this source waits for the sync service. */
-  pending: boolean
-  /** Why "Sync" is unavailable; empty when it can be used. */
-  syncBlocked: string
+  /** The oldest sync request covering this source that waits for the sync service. */
+  waiting?: ConnectorSyncRequest | null
+  /** The sync service is silent or never reported: a waiting request may wait for good. */
+  serviceDown: boolean
+  /** Unsaved changes: a sync runs the saved configuration. The page says why. */
+  syncBlocked: boolean
   /** What the sync service last reported for this source. */
   run?: ConnectorRun | null
   /** Clock for "synced 4 min ago", advanced by the page. */
@@ -51,7 +53,20 @@ const summary = computed(() => {
 })
 const lastRun = computed(() => runSummary(props.run, props.now))
 const running = computed(() => props.run?.state === 'running')
-const busy = computed(() => props.pending || running.value)
+const status = computed(() => {
+  if (running.value) return { text: 'Syncing', badge: 'secondary' as const, class: '', textClass: 'text-foreground' }
+  if (props.waiting) {
+    const warn = props.serviceDown
+    return {
+      text: waitingLabel(props.waiting, props.now),
+      badge: warn ? 'outline' as const : 'secondary' as const,
+      class: warn ? 'border-warning text-warning' : '',
+      textClass: warn ? 'text-warning' : 'text-foreground',
+    }
+  }
+  if (props.run?.state === 'failed') return { text: 'Sync failed', badge: 'destructive' as const, class: '', textClass: 'text-destructive' }
+  return null
+})
 </script>
 
 <template>
@@ -69,25 +84,34 @@ const busy = computed(() => props.pending || running.value)
         </div>
         <div class="min-w-0 flex-1">
           <CardTitle class="truncate text-base">{{ source.name.trim() || m.label }}</CardTitle>
-          <CardDescription class="truncate">
+          <CardDescription class="line-clamp-2">
             {{ m.label }}<template v-if="summary"> · {{ summary }}</template><template v-if="lastRun"> · {{ lastRun }}</template>
           </CardDescription>
+          <span v-if="status" class="mt-1 flex items-center gap-1.5 text-xs sm:hidden" :class="status.textClass">
+            <span class="size-1.5 shrink-0 rounded-full bg-current" aria-hidden="true" />{{ status.text }}
+          </span>
         </div>
         <ChevronDownIcon class="size-4 shrink-0 text-muted-foreground transition-transform" :class="open && 'rotate-180'" />
       </button>
-      <Badge v-if="running" variant="secondary" class="hidden sm:inline-flex" role="status">Syncing</Badge>
-      <Badge v-else-if="pending" variant="secondary" class="hidden sm:inline-flex" role="status">Sync requested</Badge>
-      <Badge v-else-if="run?.state === 'failed'" variant="destructive" class="hidden sm:inline-flex">Sync failed</Badge>
+      <Badge
+        v-if="status"
+        :variant="status.badge"
+        class="hidden max-w-64 sm:inline-flex"
+        :class="status.class"
+        :title="status.text"
+        role="status"
+      >
+        <span class="truncate" :title="status.text">{{ status.text }}</span>
+      </Badge>
       <Button
         v-if="props.saved"
         variant="outline"
         size="sm"
-        :disabled="!!props.syncBlocked || busy"
-        :title="props.syncBlocked || undefined"
+        :disabled="props.syncBlocked || !!props.waiting || running"
         :aria-label="`Sync ${source.name.trim() || m.label} now`"
         @click="emit('sync')"
       >
-        <RefreshCcwDotIcon :class="busy && 'animate-spin'" /> Sync
+        <RefreshCcwDotIcon :class="running && 'animate-spin'" /><span class="hidden sm:inline">Sync</span>
       </Button>
       <Button
         v-if="props.editable"
@@ -239,7 +263,7 @@ const busy = computed(() => props.pending || running.value)
       </p>
       <div v-for="r in run.results" :key="r.scope_tag" class="space-y-1">
         <p class="text-xs">
-          <span class="font-mono">{{ r.scope_tag }}</span>
+          <span class="font-mono break-all">{{ r.scope_tag }}</span>
           <span class="text-muted-foreground">
             — {{ r.pushed }} pushed · {{ r.unchanged }} unchanged · {{ r.deleted }} deleted<template v-if="r.skipped"> · {{ r.skipped }} skipped</template>
           </span>
@@ -251,7 +275,7 @@ const busy = computed(() => props.pending || running.value)
 
     <CardFooter v-if="scopes.length" class="flex flex-wrap gap-2 border-t pt-4">
       <span class="text-xs text-muted-foreground">Index status:</span>
-      <Badge v-for="tag in scopes" :key="tag" variant="outline" class="font-mono text-[11px]">
+      <Badge v-for="tag in scopes" :key="tag" variant="outline" class="max-w-full justify-start rounded-md font-mono text-[11px] break-all whitespace-normal">
         {{ tag }}
         <span class="ml-1" :class="indexed?.[tag] ? 'text-foreground' : 'text-muted-foreground'">
           {{ indexed === undefined ? 'counting…' : indexed === null ? 'unknown' : indexed[tag] ? `${indexed[tag]} chunks` : 'not synced yet' }}

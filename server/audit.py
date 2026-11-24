@@ -13,9 +13,16 @@ diff, secret settings are masked.
 """
 from __future__ import annotations
 
+import functools
 import json
 import logging
+import re
+import threading
+import time
+from datetime import UTC, datetime
 from typing import Any
+
+import anyio
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.exception_handlers import http_exception_handler
@@ -27,13 +34,29 @@ logger = logging.getLogger("mnemos.audit")
 audit_router = APIRouter()
 
 AUDIT_COLLECTION = "mnemos_audit"
-AUDIT_FIELDS = ("actor", "action", "domain", "outcome", "via")
+AUDIT_FIELDS = ("actor", "action", "domain", "outcome", "via", "target")
 
 # Clients name themselves with this header; anything else is "api".
 CLIENT_HEADER = "x-mnemos-client"
 CLIENTS = ("dashboard", "cli", "watcher", "hook", "connector", "script")
 
 MASK = "••••"
+
+# Credentials that may ride in a URL: `https://user:token@host`, `?token=…`.
+_URL_USERINFO = re.compile(r"(?<=://)[^/\s@]+@")
+_URL_SECRET_PARAM = re.compile(
+    r"([?&](?:access_token|api[_-]?key|key|password|secret|sig|signature|token)=)[^&#\s]+", re.IGNORECASE,
+)
+
+# Repeats of one refusal (same caller, action and target) within this window
+# are recorded once: a loop of forbidden calls must not bury the trail.
+DENIAL_WINDOW = 60.0
+_denials: dict[tuple, float] = {}
+_denials_lock = threading.Lock()
+
+# Entries this process could not store; the Activity page surfaces them.
+_failures = {"count": 0, "last_at": None}
+_failures_lock = threading.Lock()
 
 # Audited routes, so a 403 can be recorded under the action it refused.
 # Keys are (method, route path as declared).
@@ -66,13 +89,40 @@ def client_of(request: Request | None) -> str:
 
 
 def client_ip(request: Request | None) -> str | None:
-    """The caller's address; the first X-Forwarded-For hop behind a proxy (not proof, a hint)."""
-    if request is None:
+    """The peer address. Behind a proxy, run uvicorn with --proxy-headers and
+    FORWARDED_ALLOW_IPS so it resolves X-Forwarded-For from trusted hops only."""
+    if request is None or request.client is None:
         return None
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else None
+    return request.client.host
+
+
+def redact(value: Any) -> Any:
+    """`value` with URL credentials masked, recursively through dicts and lists."""
+    if isinstance(value, str):
+        return _URL_SECRET_PARAM.sub(rf"\g<1>{MASK}", _URL_USERINFO.sub(f"{MASK}@", value))
+    if isinstance(value, dict):
+        return {k: redact(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [redact(v) for v in value]
+    return value
+
+
+def first_denial(key: tuple, now: float | None = None) -> bool:
+    """True when `key` was not refused within DENIAL_WINDOW: record it; else skip the repeat."""
+    now = time.monotonic() if now is None else now
+    with _denials_lock:
+        if now - _denials.get(key, -DENIAL_WINDOW - 1) <= DENIAL_WINDOW:
+            return False
+        _denials[key] = now
+        if len(_denials) > 10_000:  # bounded: forget the oldest half
+            for old in sorted(_denials, key=_denials.get)[:5_000]:
+                del _denials[old]
+        return True
+
+
+def write_failures() -> dict[str, Any]:
+    with _failures_lock:
+        return {"write_failures": _failures["count"], "last_write_failure_at": _failures["last_at"]}
 
 
 def record(
@@ -86,25 +136,29 @@ def record(
     via: str = "api",
     ip: str | None = None,
     detail: str | None = None,
+    wait: bool = True,
 ) -> None:
     entry = {
         "actor": actor,
         "action": action,
         "domain": action.split(".", 1)[0],
-        "target": target,
+        "target": redact(target),
         "outcome": outcome,
         "via": via,
         "ip": ip,
-        "changes": changes or {},
-        "detail": detail,
+        "changes": redact(changes or {}),
+        "detail": redact(detail),
     }
     logger.info(json.dumps(entry, ensure_ascii=False, default=str))
     if log is None:
         return
     try:
-        log.record(entry)
+        log.record(entry, wait=wait)
     except Exception:
-        logger.exception("audit entry not stored: %s %s by %s", action, target, actor)
+        with _failures_lock:
+            _failures["count"] += 1
+            _failures["last_at"] = datetime.now(UTC).isoformat(timespec="seconds")
+        logger.exception("audit entry not stored: %r %r by %r", action, target, actor)
 
 
 def audit(
@@ -115,6 +169,7 @@ def audit(
     *,
     outcome: str = "ok",
     detail: str | None = None,
+    wait: bool = True,
 ) -> None:
     """Record `action` by the caller of `request`."""
     record(
@@ -127,6 +182,7 @@ def audit(
         via=client_of(request),
         ip=client_ip(request),
         detail=detail,
+        wait=wait,
     )
 
 
@@ -138,8 +194,19 @@ async def audit_refusals(request: Request, exc: HTTPException):
         if action:
             params = request.path_params
             target = "/".join(str(v) for v in params.values()) if params else ""
-            audit(request, action, target, outcome="denied", detail=str(exc.detail))
+            if first_denial((principal_of(request).name, action, target)):
+                # Off the event loop: the write is a blocking Qdrant call.
+                await anyio.to_thread.run_sync(functools.partial(
+                    audit, request, action, target, outcome="denied", detail=str(exc.detail), wait=False,
+                ))
     return await http_exception_handler(request, exc)
+
+
+def record_auth_failure(log: EventLog | None, *, path: str, reason: str, ip: str | None) -> None:
+    """A request refused with 401: no key, or one no tenant holds. Never records the key."""
+    if first_denial(("auth", ip, reason)):
+        record(log, actor="anonymous", action="auth.failed", target=path, outcome="denied",
+               via="api", ip=ip, detail=reason, wait=False)
 
 
 # ---------------------------------------------------------------------------
@@ -184,6 +251,7 @@ def list_audit(
     domain: str | None = None,
     action: str | None = None,
     outcome: str | None = None,
+    target: str | None = None,
     since: float | None = None,
     before: float | None = Query(None, description="Cursor: the next_before of the previous page"),
     limit: int = Query(50, ge=1, le=200),
@@ -191,7 +259,7 @@ def list_audit(
     require_admin(principal_of(request))
     log: EventLog = request.app.state.audit
     items, next_before = log.query(
-        {"actor": actor, "domain": domain, "action": action, "outcome": outcome},
+        {"actor": actor, "domain": domain, "action": action, "outcome": outcome, "target": target},
         since=since, before=before, limit=limit,
     )
     return {
@@ -200,4 +268,5 @@ def list_audit(
         "actors": log.values("actor"),
         "actions": log.values("action"),
         "retention_days": log.retention_days,
+        **write_failures(),
     }

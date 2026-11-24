@@ -1158,13 +1158,16 @@ def _load_connectors(config_path: str | None):
         raise click.ClickException(str(exc)) from exc
 
 
-def _sync_config(config, only: set[str] | None = None, full: bool = False) -> list:
+def _sync_config(config, only: set[str] | None = None, full: bool = False, *, report: bool = False) -> list:
+    """Run the sources. `report`: tell the server how each went, for its Connectors
+    page — only when the sources are the server's own, never a --config file's."""
     from connectors.mnemos import MNEMOS_TIMEOUT, MnemosClient
     from connectors.runner import run_sources
     from connectors.transport import make_client
 
     with make_client(headers=_headers("connector"), timeout=MNEMOS_TIMEOUT) as http:
-        return run_sources(config, MnemosClient(_base_url(), http), only=only, full=full, report=_report_sync)
+        return run_sources(config, MnemosClient(_base_url(), http), only=only, full=full,
+                           report=_report_sync if report else None)
 
 
 @ingest.command("run")
@@ -1179,7 +1182,7 @@ def ingest_run(config_path: str | None, only: tuple[str, ...], full: bool) -> No
         names = ", ".join(s.name for s in config.sources)
         raise click.BadParameter(f"no source named {', '.join(unknown)} (known: {names})", param_hint="--only")
 
-    results = _sync_config(config, set(only) or None, full)
+    results = _sync_config(config, set(only) or None, full, report=config_path is None)
     _print_sync_results("Ingest", results)
     if not all(r.ok for r in results):
         sys.exit(1)
@@ -1214,10 +1217,13 @@ def ingest_serve(config_path: str | None) -> None:
         except ConfigError as exc:
             console.print(f"[red]{exc}[/red]\n[yellow]keeping the previous configuration[/yellow]")
         scope = f" ({', '.join(sorted(only))})" if only else ""
-        _print_sync_results(f"Sync {datetime.now():%Y-%m-%d %H:%M:%S}{scope}", _sync_config(config, only))
+        _print_sync_results(f"Sync {datetime.now():%Y-%m-%d %H:%M:%S}{scope}",
+                            _sync_config(config, only, report=config_path is None))
 
     def resync(_signum, _frame) -> None:
-        queue.request()
+        # A signal handler runs on the main thread, possibly while it holds the
+        # queue's lock in `take()`: request from another thread, never block here.
+        threading.Thread(target=queue.request, daemon=True).start()
 
     def shutdown(_signum, _frame) -> None:
         # Syncs are idempotent: dropping one half-way only defers work to the next run.
@@ -1242,9 +1248,11 @@ def ingest_serve(config_path: str | None) -> None:
     previous = {sig: signal.signal(sig, handler) for sig, handler in
                 ((signal.SIGHUP, resync), (signal.SIGTERM, shutdown))}
     watcher.start()
-    threading.Thread(
-        target=connectors.runner.keep_alive, args=(lambda: _report_sync(None, None, []), stop), daemon=True
-    ).start()
+    if not config_path:
+        # The dashboard reads this heartbeat to tell a stopped service from an idle one.
+        threading.Thread(
+            target=connectors.runner.keep_alive, args=(lambda: _report_sync(None, None, []), stop), daemon=True
+        ).start()
     every = f"every {config.interval}s, " if config.interval else ""
     console.print(
         f"Serving {len(config.sources)} source(s) from {origin}: "

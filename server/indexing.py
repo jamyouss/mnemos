@@ -22,7 +22,7 @@ from fastapi import APIRouter, Query, Request
 
 from core.event_log import EventLog
 from core.indexer import path_dirs
-from server.audit import client_of
+from server.audit import client_of, redact
 from server.principal import principal_of, require_admin
 
 logger = logging.getLogger("mnemos.indexing")
@@ -70,7 +70,7 @@ def file_event(
             "actor": actor,
             "chunks": chunks,
             "duration_ms": duration_ms,
-            "error": error[:500] if error else None,
+            "error": redact(error[:500]) if error else None,
             "job_id": job_id,
         }, wait=False)
     except Exception:
@@ -126,8 +126,10 @@ class ReindexJob:
         self._flush()
 
     def finish(self, error: str | None = None) -> None:
-        state = "failed" if error else "done"
-        self._flush(force=True, extra={"state": state, "finished_at": _now_iso(), "error": error})
+        # `partial`: the walk ended but some files failed; their errors are on the job.
+        state = "failed" if error else "partial" if self.counts["failed"] else "done"
+        self._flush(force=True, extra={"state": state, "finished_at": _now_iso(),
+                                       "error": redact(error[:500]) if error else None})
 
     def _flush(self, *, force: bool = False, extra: dict[str, Any] | None = None) -> None:
         now = time.monotonic()
@@ -152,18 +154,22 @@ def _job_view(job: dict[str, Any], now: float) -> dict[str, Any]:
 
 @indexing_router.get("/api/indexing/summary")
 def indexing_summary(request: Request, hours: int = Query(24, ge=1, le=24 * 30)):
-    """Files per outcome over the last `hours`, and when each channel last sent one."""
+    """Files per outcome over the last `hours`, files walked by bulk reindexes,
+    and when each channel last sent anything (a never-seen channel included)."""
     require_admin(principal_of(request))
     log: EventLog = request.app.state.index_events
     since = time.time() - hours * 3600
-    counts = {op: log.count({"kind": "file", "op": op}, since=since) for op in ("indexed", "deleted", "skipped", "failed")}
+    counts = {op: log.count({"kind": "file", "op": op}, since=since)
+              for op in ("indexed", "deleted", "skipped", "failed", "refused")}
+    jobs, _ = log.query({"kind": "job"}, since=since, limit=200)
     channels = []
     for channel in CHANNELS:
-        last, _ = log.query({"kind": "file", "channel": channel}, limit=1)
-        if last:
-            channels.append({"channel": channel, "last_at": last[0]["at"], "last_ts": last[0]["ts"],
-                             "last_file": last[0].get("file_path")})
-    return {"hours": hours, "counts": counts, "channels": channels, "retention_days": log.retention_days}
+        last, _ = log.query({"channel": channel}, limit=1)
+        entry = last[0] if last else {}
+        channels.append({"channel": channel, "last_at": entry.get("at"), "last_ts": entry.get("ts"),
+                         "last_file": entry.get("file_path") or entry.get("path")})
+    return {"hours": hours, "counts": counts, "job_files": sum(int(j.get("processed", 0)) for j in jobs),
+            "channels": channels, "retention_days": log.retention_days}
 
 
 @indexing_router.get("/api/indexing/jobs")

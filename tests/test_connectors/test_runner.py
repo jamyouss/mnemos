@@ -290,6 +290,14 @@ def test_watch_server_queues_new_sync_requests_and_acknowledges_them():
     assert acks == [1, 2, 3]
 
 
+def test_watch_server_follows_request_ids_that_went_back():
+    # The server lost its sync state (or was restored): ids restart at 1, and a
+    # service still expecting > 40 would ignore every new request.
+    queue, acks = _watch([_snapshot(3, [{"id": 1, "sources": ["wiki"]}])], revision=3, seen=40)
+    assert queue.take() == {"wiki"}
+    assert acks == [1]
+
+
 def test_watch_server_retries_a_failed_acknowledgement():
     queue, stop = SyncQueue(), threading.Event()
     calls: list[int] = []

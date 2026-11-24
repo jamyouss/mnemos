@@ -3,6 +3,7 @@ from __future__ import annotations
 import errno
 import logging
 import os
+import sys
 import threading
 import time
 
@@ -16,7 +17,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("rag-watcher")
 
 
-def _install_inotify_prune() -> None:
+def _install_inotify_prune() -> bool:
     """Monkey-patch ``Inotify._add_dir_watch`` so the recursive walk skips
     :data:`IGNORE_DIRS` and :data:`IGNORE_PATH_SUBSTRINGS`.
 
@@ -30,8 +31,13 @@ def _install_inotify_prune() -> None:
     try:
         from watchdog.observers.inotify_c import Inotify  # type: ignore[import-not-found]
     except Exception as e:
-        logger.info(f"Inotify backend unavailable ({e}); skipping prune patch")
-        return
+        if sys.platform.startswith("linux"):
+            # On Linux this means watchdog changed its internals: without the
+            # prune, node_modules & co. exhaust the inotify watch limit.
+            logger.error(f"Inotify prune patch not applied ({e}): check the pinned watchdog version")
+        else:
+            logger.info(f"Inotify backend unavailable ({e}); skipping prune patch")
+        return False
 
     ignore_bytes = {d.encode() for d in IGNORE_DIRS}
     ignore_sub_bytes = tuple(s.encode() for s in IGNORE_PATH_SUBSTRINGS)
@@ -53,6 +59,8 @@ def _install_inotify_prune() -> None:
                 self._add_watch(full_path, mask)
 
     Inotify._add_dir_watch = _add_dir_watch  # type: ignore[method-assign]
+    return True
+
 
 RAG_SERVER_URL = os.getenv("MNEMOS_SERVER_URL", "http://rag-server:8100")
 DEBOUNCE_MS = int(os.getenv("WATCHER_DEBOUNCE_MS", "2000"))

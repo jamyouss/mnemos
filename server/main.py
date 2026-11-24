@@ -90,9 +90,6 @@ def create_app() -> FastAPI:
                                           settings.mnemos_index_events_retention_days)
         for log in (app.state.audit, app.state.index_events):
             log.ensure_collection()
-        pruning = threading.Event()
-        threading.Thread(target=_prune_forever, args=([app.state.audit, app.state.index_events], pruning),
-                         name="event-log-prune", daemon=True).start()
 
         app.state.embeddings = EmbeddingService(model_name=settings.embedding_model)
 
@@ -261,6 +258,11 @@ def create_app() -> FastAPI:
         sync.register("connectors", None, connectors_doc.revision if connectors_doc else 0)
         app.state.config_sync = sync
         sync.start()
+
+        # Started last: a startup that fails above leaves no thread behind.
+        pruning = threading.Event()
+        threading.Thread(target=_prune_forever, args=([app.state.audit, app.state.index_events], pruning),
+                         name="event-log-prune", daemon=True).start()
 
         try:
             async with session_manager.run():

@@ -26,6 +26,18 @@ def test_query_pages_newest_first_with_a_cursor(log):
     assert first[0]["at"].endswith("+00:00") and first[0]["id"]
 
 
+def test_records_made_within_one_clock_tick_all_page_through(log, monkeypatch):
+    # `before` is exclusive: two records sharing a `ts` across a page boundary
+    # would make the second one unreachable.
+    monkeypatch.setattr("core.event_log.time.time", lambda: 1_800_000_000.0)
+    for i in range(4):
+        log.record({"actor": "root", "action": f"a{i}"})
+
+    first, cursor = log.query(limit=2)
+    rest, _ = log.query(before=cursor, limit=10)
+    assert sorted(e["action"] for e in first + rest) == ["a0", "a1", "a2", "a3"]
+
+
 def test_filters_match_exact_values_and_lists(log):
     log.record({"actor": "root", "action": "tenant.create"})
     log.record({"actor": "dev", "action": "tenant.create"})

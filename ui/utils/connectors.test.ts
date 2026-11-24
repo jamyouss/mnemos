@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  ago, newSource, runSummary, scopeTags, serviceHealth, sourceName, syncPending, syncStalled, toForm, toPayload,
+  ago, newSource, oldestPending, pendingSummary, runSummary, scopeTags, serviceHealth, serviceSummary, sourceName,
+  syncStalled, toForm, toPayload, waitingLabel,
   type ConnectorSource,
 } from './connectors'
 
@@ -72,13 +73,6 @@ describe('sync status', () => {
     ],
   }
 
-  it('is pending only for sources an unacknowledged request names', () => {
-    expect(syncPending(state, 'wiki')).toBe(true)
-    // Request 2, for every source, was already picked up.
-    expect(syncPending(state, 'tracker')).toBe(false)
-    expect(syncPending({ ...state, acked_id: 1 }, 'tracker')).toBe(true)
-  })
-
   it('calls a request stalled once it has waited past the threshold', () => {
     const sent = Date.parse('2026-11-23T10:00:10+00:00')
     expect(syncStalled(state, sent + 29_000)).toBe(false)
@@ -90,6 +84,24 @@ describe('sync status', () => {
     expect(sourceName({ type: 'web', name: '  ' })).toBe('web')
     expect(sourceName({ type: 'git', name: 'Lpel - Lib - Auth' })).toBe('Lpel - Lib - Auth')
   })
+
+  it('finds the oldest request a source or "Sync all" waits on, and words it', () => {
+    const waiting = {
+      acked_id: 1,
+      requests: [
+        { id: 2, sources: ['wiki'], requested_at: '2026-11-23T10:00:00+00:00', requested_by: 'admin' },
+        { id: 3, sources: null, requested_at: '2026-11-23T10:05:00+00:00', requested_by: 'ops' },
+      ],
+    }
+    expect(oldestPending(waiting, 'wiki')?.id).toBe(2)
+    expect(oldestPending(waiting, 'tracker')?.id).toBe(3)
+    expect(oldestPending(waiting)?.id).toBe(3)
+    expect(oldestPending({ ...waiting, acked_id: 3 }, 'wiki')).toBeUndefined()
+    const now = Date.parse('2026-11-23T10:13:00+00:00')
+    expect(waitingLabel(waiting.requests[0]!, now)).toBe('Waiting — requested 13 min ago by admin')
+    expect(pendingSummary(waiting, now)).toBe('2 requests waiting, oldest sent 13 min ago')
+    expect(pendingSummary({ ...waiting, acked_id: 3 }, now)).toBe('')
+  })
 })
 
 describe('sync service and runs', () => {
@@ -99,6 +111,11 @@ describe('sync service and runs', () => {
     expect(serviceHealth(null, now)).toBe('never')
     expect(serviceHealth('2026-11-24T09:58:30Z', now)).toBe('alive')
     expect(serviceHealth('2026-11-24T09:56:00Z', now)).toBe('silent')
+  })
+
+  it('words the sync service health in one line', () => {
+    expect(serviceSummary(null, now)).toEqual({ health: 'never', text: 'No sync service has reported to this server' })
+    expect(serviceSummary('2026-11-24T09:47:00Z', now)).toEqual({ health: 'silent', text: 'Sync service silent, last heard from 13 min ago' })
   })
 
   it('says what the last sync of a source did and when', () => {

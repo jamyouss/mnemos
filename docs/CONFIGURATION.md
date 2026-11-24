@@ -378,7 +378,7 @@ that never source a shell profile, where an exported variable would be lost.
 | `MNEMOS_UI_PATH` | `/app/ui` | Built dashboard. Absent → the server serves the API alone |
 | `MNEMOS_UI_THEME_PATH` | `/app/config/theme.css` | Instance stylesheet served at `/theme.css`, see [Instance theme](#instance-theme) |
 | `MNEMOS_QUERY_LOG_PATH` | `/data/state/query-log.jsonl` | Log location (inside the container) |
-| `MNEMOS_AUDIT_RETENTION_DAYS` | `365` | How long the audit trail (Activity page) keeps an entry. Live from the Configuration page. See [DEPLOYMENT.md](DEPLOYMENT.md#audit-trail) |
+| `MNEMOS_AUDIT_RETENTION_DAYS` | `365` | How long the audit trail (Activity page) keeps an entry. Live from the Configuration page, 30 at least there. See [DEPLOYMENT.md](DEPLOYMENT.md#audit-trail) |
 | `MNEMOS_INDEX_EVENTS_RETENTION_DAYS` | `30` | How long the Indexing page keeps file events and reindex jobs. Live |
 
 Each line is a flat JSON object:

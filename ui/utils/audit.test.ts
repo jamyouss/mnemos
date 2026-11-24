@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { actionLabel, changeLines, changeSummary } from './audit'
+import { ACTIONS, actionLabel, changeLines, changeSummary, entryTitle } from './audit'
 
 describe('audit wording', () => {
   it('reads field changes as old → new', () => {
@@ -21,7 +21,18 @@ describe('audit wording', () => {
   })
 
   it('names known actions and keeps unknown ones as recorded', () => {
-    expect(actionLabel('tenant.rotate')).toBe('Rotated key of')
+    expect(actionLabel('tenant.rotate')).toBe('Rotated the key of tenant')
+    expect(actionLabel('connectors.sync')).toBe('Requested a sync')
     expect(actionLabel('future.thing')).toBe('future.thing')
+  })
+
+  it('words every action as a whole phrase, not one cut before its object', () => {
+    for (const label of Object.values(ACTIONS)) expect(label).not.toMatch(/\b(of|from|to)$/)
+  })
+
+  it('prefixes refusals, except actions that are rejections themselves', () => {
+    expect(entryTitle({ action: 'tenant.delete', outcome: 'denied' })).toBe('Refused: Revoked the tenant')
+    expect(entryTitle({ action: 'tenant.delete', outcome: 'ok' })).toBe('Revoked the tenant')
+    expect(entryTitle({ action: 'auth.failed', outcome: 'denied' })).toBe('Rejected an API key')
   })
 })

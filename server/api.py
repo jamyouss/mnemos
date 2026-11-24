@@ -5,6 +5,7 @@ import json
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Literal, Optional
@@ -180,12 +181,15 @@ def validate_path(file_path: str) -> Path:
 @api_router.post("/internal/reindex")
 def internal_reindex(body: ReindexInternalRequest, request: Request):
     principal = principal_of(request)
-    require_write_all(principal)
-    safe_path = validate_path(body.file_path)
     event = functools.partial(
         file_event, getattr(request.app.state, "index_events", None), collection=body.collection,
         file_path=body.file_path, channel=channel_of(request, default="watcher"), actor=principal.name,
     )
+    with _refusals_recorded(event):
+        require_write_all(principal)
+    safe_path = validate_path(body.file_path)
+    if body.collection not in _VALID_COLLECTIONS:
+        raise HTTPException(status_code=404, detail=f"Unknown collection: {body.collection}")
 
     if body.event == "deleted":
         request.app.state.indexer.delete_file(
@@ -276,18 +280,35 @@ def _require_delete(principal: Principal, qdrant, collection: str, file_path: st
             raise forbidden(f"Tenant {principal.name!r} cannot delete {file_path!r} (tags {tags})")
 
 
+@contextmanager
+def _refusals_recorded(event):
+    """A 403 raised inside becomes a `refused` index event, then propagates."""
+    try:
+        yield
+    except HTTPException as exc:
+        if exc.status_code == 403:
+            event(op="refused", error=str(exc.detail))
+        raise
+
+
+# Deletions people make are audited; the ones machines make while syncing
+# (connectors pruning pages, the watcher, hooks) stay in the indexing history.
+_AUDITED_DELETE_CHANNELS = ("dashboard", "cli", "api", "mcp")
+
+
 @api_router.post("/api/index")
 def push_index(body: IndexPushRequest, request: Request):
     if body.collection not in _VALID_COLLECTIONS:
         raise HTTPException(status_code=400, detail=f"Unknown collection: {body.collection}")
     principal = principal_of(request)
     indexer = request.app.state.indexer
-    _require_push(principal, indexer, body)
-    indexer.ensure_collection(body.collection)
     event = functools.partial(
         file_event, getattr(request.app.state, "index_events", None), collection=body.collection,
         file_path=body.file_path, channel=channel_of(request), actor=principal.name,
     )
+    with _refusals_recorded(event):
+        _require_push(principal, indexer, body)
+    indexer.ensure_collection(body.collection)
     started = time.monotonic()
     try:
         count = indexer.index_file(
@@ -309,16 +330,26 @@ def push_index(body: IndexPushRequest, request: Request):
 
 @api_router.delete("/api/index/{collection}/{file_path:path}")
 def delete_index(collection: str, file_path: str, request: Request):
+    # Indexed collections only: the audit trail and the indexing history are
+    # Qdrant collections too, and must not be editable through this route.
+    if collection not in _VALID_COLLECTIONS:
+        raise HTTPException(status_code=404, detail=f"Unknown collection: {collection}")
     principal = principal_of(request)
-    _require_delete(principal, request.app.state.qdrant, collection, file_path)
+    channel = channel_of(request)
+    event = functools.partial(
+        file_event, getattr(request.app.state, "index_events", None), collection=collection,
+        file_path=file_path, channel=channel, actor=principal.name,
+    )
+    with _refusals_recorded(event):
+        _require_delete(principal, request.app.state.qdrant, collection, file_path)
     request.app.state.indexer.delete_file(
         file_path=file_path,
         collection=collection,
     )
     _index_changed(request)
-    file_event(getattr(request.app.state, "index_events", None), op="deleted", collection=collection,
-               file_path=file_path, channel=channel_of(request), actor=principal.name)
-    audit(request, "index.delete", f"{collection}/{file_path}")
+    event(op="deleted")
+    if channel in _AUDITED_DELETE_CHANNELS:
+        audit(request, "index.delete", f"{collection}/{file_path}")
     return {"status": "deleted", "collection": collection, "file_path": file_path}
 
 
@@ -659,6 +690,14 @@ def reindex(body: ReindexRequest, request: Request, background_tasks: Background
     require_write_all(principal)
     indexer = request.app.state.indexer
     base_path = validate_path(body.path) if body.path else None
+    if body.collection not in _VALID_COLLECTIONS:
+        raise HTTPException(status_code=400, detail=f"Unknown collection: {body.collection}")
+    # Recorded before acting: `recreate` drops the collection, and a failure
+    # half-way must still leave a trace of who asked for it.
+    audit(request, "index.reindex", f"{body.collection}:{base_path or ''}", {
+        "collection": body.collection, "path": str(base_path) if base_path else None,
+        "full": body.full, "recreate": body.recreate, "tags": body.tags,
+    })
 
     if body.recreate:
         indexer.recreate_collection_hybrid(body.collection)
@@ -667,10 +706,6 @@ def reindex(body: ReindexRequest, request: Request, background_tasks: Background
 
     cache = getattr(request.app.state, "cache", None)
     invalidate_cache(cache)
-    audit(request, "index.reindex", f"{body.collection}:{base_path or ''}", {
-        "collection": body.collection, "path": str(base_path) if base_path else None,
-        "full": body.full, "recreate": body.recreate, "tags": body.tags,
-    })
 
     if base_path:
         job = ReindexJob(getattr(request.app.state, "index_events", None), collection=body.collection,

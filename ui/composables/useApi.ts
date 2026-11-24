@@ -181,6 +181,8 @@ export interface AuditQuery {
   actor?: string
   domain?: string
   outcome?: string
+  /** Exact match on the entry's target. */
+  target?: string
   /** Cursor: `next_before` of the previous page. */
   before?: number
   limit?: number
@@ -192,9 +194,13 @@ export interface AuditPage {
   actors: string[]
   actions: string[]
   retention_days: number
+  /** Entries this server pod could not store since it started; they remain in its log. */
+  write_failures: number
+  last_write_failure_at: string | null
 }
 
-export type IndexOp = 'indexed' | 'deleted' | 'skipped' | 'failed'
+/** `refused`: the push or delete lacked the rights; `error` says why. */
+export type IndexOp = 'indexed' | 'deleted' | 'skipped' | 'failed' | 'refused'
 
 export interface IndexFileEvent {
   id: string
@@ -223,7 +229,8 @@ export interface IndexEventQuery {
 export interface IndexJob {
   id: string
   ts: number
-  state: 'running' | 'done' | 'failed'
+  /** `partial`: finished, but some files failed. */
+  state: 'running' | 'done' | 'partial' | 'failed'
   /** Running, but its progress has not moved for two minutes: its pod is likely gone. */
   stalled: boolean
   collection: string
@@ -245,7 +252,10 @@ export interface IndexJob {
 export interface IndexingSummary {
   hours: number
   counts: Record<IndexOp, number>
-  channels: { channel: string; last_at: string; last_ts: number; last_file: string | null }[]
+  /** Every channel, in a fixed order; `last_at` is null for one not seen within the retention. */
+  channels: { channel: string; last_at: string | null; last_ts: number | null; last_file: string | null }[]
+  /** Files processed by bulk reindex jobs started within the window; `counts` covers per-file pushes only. */
+  job_files: number
   retention_days: number
 }
 

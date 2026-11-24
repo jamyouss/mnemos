@@ -142,10 +142,27 @@ class BearerAuthMiddleware:
 
         principal = self._tenants.lookup(token) if token else None
         if principal is None:
+            if token:
+                # A key was presented and no tenant holds it: worth a trace. A
+                # request with no key at all is the dashboard before sign-in.
+                await _record_rejected_key(scope)
             await _unauthorized(send)
             return
         scope[PRINCIPAL_SCOPE_KEY] = principal
         await self._app(scope, receive, send)
+
+
+async def _record_rejected_key(scope) -> None:
+    import anyio
+
+    from server.audit import record_auth_failure
+
+    app = scope.get("app")
+    log = getattr(getattr(app, "state", None), "audit", None)
+    client = scope.get("client")
+    await anyio.to_thread.run_sync(lambda: record_auth_failure(
+        log, path=scope["path"], reason="unknown key", ip=client[0] if client else None,
+    ))
 
 
 async def _unauthorized(send) -> None:

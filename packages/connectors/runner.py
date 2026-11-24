@@ -218,12 +218,17 @@ def watch_server(
             logger.info("connectors revision %s -> %s: resyncing", revision, snapshot["revision"])
             revision = snapshot["revision"]
             queue.request()
+        latest = latest_request(snapshot)
+        if latest < seen:
+            # The server's numbering restarted (state lost or restored): follow it.
+            logger.warning("sync request ids went back from %s to %s", seen, latest)
+            seen = acked = 0
         for entry in (snapshot.get("sync") or {}).get("requests") or []:
             if int(entry.get("id", 0)) > seen:
                 logger.info("sync request %s from %s: %s", entry["id"], entry.get("requested_by"),
                             ", ".join(entry["sources"]) if entry.get("sources") else "every source")
                 queue.request(entry.get("sources"))
-        seen = max(seen, latest_request(snapshot))
+        seen = max(seen, latest)
         if acked < seen:
             try:
                 ack(seen)

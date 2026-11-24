@@ -155,23 +155,27 @@ immediately on `SIGHUP`:
 | stop | `SIGTERM` — the service exits at once; an interrupted sync resumes at the next run |
 
 A dashboard request is stored on the server (`connectors_sync`, the last 20
-kept) and read by `serve` at its next poll, with the connectors. `serve`
-queues the sources it names, then acknowledges it (`POST
-/api/connectors/sync/ack`), which is what the page shows: *Sync requested*
-until then. Requests that arrive during a sync merge into the next one.
-Requests filed while `serve` was down are covered by its start-up sync. Only
-`serve` reading the server sees them: with `--config`, use `SIGHUP`.
+kept) and read by `serve` at its next poll, with the connectors. Asking again
+while the same request still waits returns it instead of queuing a twin.
+`serve` queues the sources it names, then acknowledges it (`POST
+/api/connectors/sync/ack`), which is what the page shows: *Waiting* until
+then. Requests that arrive during a sync merge into the next one. Requests
+filed while `serve` was down are covered by its start-up sync. Only `serve`
+reading the server sees them: with `--config`, use `SIGHUP`.
 
 Without `interval`, `serve` syncs at start-up, on configuration change, on
 request and on `SIGHUP` only.
 
-`serve` and `run` also report to the server (`POST /api/connectors/sync/report`):
-each source as it starts and ends, with the per-scope counts and errors, and
-`serve` checks in every minute. The Connectors page reads that to show
-*Syncing*, *synced 4 min ago* or *Sync failed* with the error, and warns when
-no sync service ever reported or one has been silent for three minutes. A
-report the server refuses (a key without `admin` or `write: "*"`) is logged
-and the sync goes on.
+When their sources come from the server, `serve` and `run` also report to it
+(`POST /api/connectors/sync/report`): each source as it starts and ends, with
+the per-scope counts and errors (credentials in URLs masked), and `serve`
+checks in every minute. The Connectors page reads that to show *Syncing*,
+*synced 4 min ago* or *Sync failed* with the error, and warns when no sync
+service ever reported or one has been silent for three minutes. The server
+only takes reports for saved sources and forgets removed ones. With
+`--config` nothing is reported: those sources are not the server's. A report
+the server refuses (a key without `admin` or `write: "*"`) is logged and the
+sync goes on.
 
 ## Confluence
 

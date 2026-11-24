@@ -1,4 +1,15 @@
-from watcher.main import PathRouter, should_ignore
+import sys
+
+import pytest
+
+from watcher.main import PathRouter, _install_inotify_prune, should_ignore
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="inotify exists on Linux only")
+def test_the_inotify_prune_patch_applies_to_the_installed_watchdog():
+    # watchdog 7 renamed the class this patches: the watcher then watched
+    # node_modules too and crash-looped on the inotify watch limit.
+    assert _install_inotify_prune() is True
 
 
 def test_path_router_myproject():

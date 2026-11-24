@@ -159,10 +159,29 @@ def test_sync_request_for_an_unknown_source_is_refused(make_client, backend):
 
 def test_sync_keeps_only_the_latest_requests(make_client, backend):
     client = make_client()
-    for _ in range(25):
+    for i in range(1, 26):
         client.post("/api/connectors/sync", json={})
+        client.post("/api/connectors/sync/ack", json={"id": i})  # picked up: the next one is new
     ids = [r["id"] for r in client.get("/api/connectors/sync").json()["requests"]]
     assert ids == list(range(6, 26))
+
+
+def test_a_request_still_waiting_is_not_queued_twice(make_client, backend):
+    doc_store(backend).put("connectors", {"sources": [JIRA]})
+    client = make_client()
+
+    first = client.post("/api/connectors/sync", json={"sources": ["tracker", "tracker"]}).json()["request"]
+    again = client.post("/api/connectors/sync", json={"sources": ["tracker"]}).json()["request"]
+    every = client.post("/api/connectors/sync", json={}).json()["request"]
+
+    assert first["sources"] == ["tracker"] and again["id"] == first["id"]
+    assert every["id"] == first["id"] + 1
+
+
+def test_an_ack_cannot_run_ahead_of_the_requests(make_client, backend):
+    client = make_client()
+    client.post("/api/connectors/sync", json={})
+    assert client.post("/api/connectors/sync/ack", json={"id": 99}).json()["acked_id"] == 1
 
 
 def test_ingester_key_may_request_and_acknowledge_syncs(make_client, backend):
@@ -183,8 +202,11 @@ def test_ingester_key_may_request_and_acknowledge_syncs(make_client, backend):
 
 
 def test_sync_reports_track_each_source_and_the_service(make_client, backend):
+    doc_store(backend).put("connectors", {"sources": [JIRA]})
     client = make_client()
     assert client.post("/api/connectors/sync/report", json={}).json()["service_seen_at"]
+    # Only saved sources have a status: a made-up name cannot grow the document.
+    assert client.post("/api/connectors/sync/report", json={"source": "ghost", "state": "ok"}).status_code == 422
 
     client.post("/api/connectors/sync/report", json={"source": "tracker", "state": "failed", "results": [
         {"scope_tag": "jira:OPS", "error": "401 Unauthorized\n" + "x" * 2000},

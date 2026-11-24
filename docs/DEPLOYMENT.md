@@ -361,31 +361,42 @@ jq -c '. | select(.cache_hit != null)' /data/state/query-log.jsonl \
 ### Audit trail
 
 Every change to tenants, projects, settings, connectors, the index (bulk
-reindex, file deletion) and memories is recorded with who made it, through
-which client (`dashboard`, `cli`, `mcp`, `api`…), from which address and what
-changed; so is every such change refused with `403`. Entries live in the
-`mnemos_audit` collection, shared by every replica, and are read on the
-dashboard's Activity page or `GET /api/audit` (admin keys only). Nothing in
-the API edits or deletes them; an hourly prune drops what is older than
-`MNEMOS_AUDIT_RETENTION_DAYS` (365 by default).
+reindex, file deletion by a person) and memories is recorded with who made
+it, through which client (`dashboard`, `cli`, `mcp`, `api`…), from which
+address and what changed; so is every such change refused with `403`, and
+every API key no tenant holds (`auth.failed`; a request without any key is
+the dashboard before sign-in and is not recorded). The same refusal repeated
+within a minute is recorded once, so a loop cannot bury the trail. Entries
+live in the `mnemos_audit` collection, shared by every replica, and are read
+on the dashboard's Activity page or `GET /api/audit` (admin keys only).
+Nothing in the API edits or deletes them — `DELETE /api/index/…` only reaches
+the indexed collections — and an hourly prune drops what is older than
+`MNEMOS_AUDIT_RETENTION_DAYS` (365 by default, 30 at least from the
+dashboard).
 
 Each entry is also logged as one JSON line by the `mnemos.audit` logger, on
 the server's stdout: ship it to your log pipeline to keep a copy Mnemos cannot
 prune. Recording never blocks a change: an entry the database refuses is
-logged as an error and the request goes on.
+logged as an error, counted, and the Activity page shows how many this server
+lost since it started.
 
 Never in an entry: API keys or their hashes, secret settings (masked as
-`••••`), memory contents. The address is the first `X-Forwarded-For` hop
-behind a proxy, so treat it as a hint, not proof.
+`••••`), credentials in URLs (`https://user:token@…`, `?token=…`, masked),
+memory contents. The address is the TCP peer: behind a proxy, set
+`FORWARDED_ALLOW_IPS=<proxy address>` in `.env` — uvicorn then takes
+`X-Forwarded-For` from that proxy only. A header the client sets itself is
+never trusted.
 
 ### Indexing history
 
-Every file pushed, deleted, skipped or refused by the watcher, git hooks,
-connectors, the CLI or MCP is recorded in `mnemos_index_events`, with the
-client that sent it (the `X-Mnemos-Client` header our clients send). A bulk
-reindex is one job record, its progress updated every few seconds, plus one
-event per failed file. The dashboard's Indexing page reads them; they are
-pruned after `MNEMOS_INDEX_EVENTS_RETENTION_DAYS` (30 by default).
+Every file pushed, deleted, skipped, failed or refused (no rights) by the
+watcher, git hooks, connectors, the CLI or MCP is recorded in
+`mnemos_index_events`, with the client it declares (the `X-Mnemos-Client`
+header our clients send). A bulk reindex is one job record, its progress
+updated every few seconds, plus one event per failed file; it ends *done*,
+*partial* (some files failed) or *failed*. The dashboard's Indexing page
+reads them; they are pruned after `MNEMOS_INDEX_EVENTS_RETENTION_DAYS` (30 by
+default).
 
 ---
 

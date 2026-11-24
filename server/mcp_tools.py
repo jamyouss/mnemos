@@ -450,6 +450,13 @@ _AUDITED_TOOLS = {
 }
 
 
+_AUDITED_FIELDS = {
+    "mnemos_memory": ("memory_type", "tags", "project"),
+    "mnemos_memory_review": ("action",),
+    "mnemos_reindex": ("collection", "path"),
+}
+
+
 def _run_tool(
     name: str,
     args: dict[str, Any],
@@ -470,17 +477,22 @@ def _run_tool(
     )
     if action is None:
         return run()
-    target = args.get("memory_id") or f"{args.get('collection', '')}:{args.get('path') or ''}"
+    target = {
+        "mnemos_memory": ", ".join(args.get("tags") or []) or args.get("project") or "",
+        "mnemos_memory_review": args.get("memory_id", ""),
+        "mnemos_reindex": f"{args.get('collection', '')}:{args.get('path') or ''}",
+    }[name]
+    # Only the fields that describe the change: never content, nothing an agent made up.
+    changes = {k: args[k] for k in _AUDITED_FIELDS[name] if k in args}
     try:
         result = run()
     except HTTPException as exc:
         if exc.status_code == 403:
-            audit_record(audit_log, actor=principal.name, action=action, target=target,
+            audit_record(audit_log, actor=principal.name, action=action, target=target, changes=changes,
                          outcome="denied", via="mcp", detail=str(exc.detail))
         raise
     if name == "mnemos_memory":
         target = result["id"]
-    changes = {k: v for k, v in args.items() if k != "content"}
     audit_record(audit_log, actor=principal.name, action=action, target=target, changes=changes, via="mcp")
     return result
 

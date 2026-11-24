@@ -14,6 +14,7 @@ filter is idempotent.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 import uuid
 from collections.abc import Iterable
@@ -45,6 +46,11 @@ class EventLog:
         self._keywords = tuple(keyword_fields)
         # Read at every prune: the dashboard changes it live.
         self.retention_days = retention_days
+        # `ts` doubles as the paging cursor (`before` is exclusive), so two
+        # records of this process never share one; across pods a microsecond
+        # tie is left to chance.
+        self._last_ts = 0.0
+        self._ts_lock = threading.Lock()
 
     def ensure_collection(self) -> None:
         if not self._qdrant.collection_exists(self.collection):
@@ -64,13 +70,16 @@ class EventLog:
                 self._qdrant.create_payload_index(
                     collection_name=self.collection, field_name=field, field_schema=schema,
                 )
-            except Exception:
-                pass  # already there
+            except Exception as exc:
+                if "already exists" not in str(exc).lower():
+                    logger.warning("payload index %s on %s not created: %s", field, self.collection, exc)
 
     def record(self, entry: dict[str, Any], *, wait: bool = True) -> str:
         """Store `entry` stamped with `ts` and `at`; return its id."""
         point_id = str(uuid.uuid4())
-        now = time.time()
+        with self._ts_lock:
+            now = max(time.time(), self._last_ts + 1e-6)
+            self._last_ts = now
         payload = {
             **entry,
             "id": point_id,

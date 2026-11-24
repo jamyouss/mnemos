@@ -13,27 +13,36 @@ export const DOMAINS: { value: string; label: string }[] = [
   { value: 'connectors', label: 'Connectors' },
   { value: 'index', label: 'Index' },
   { value: 'memory', label: 'Memories' },
+  { value: 'auth', label: 'Sign-in' },
 ]
 
-const ACTIONS: Record<string, string> = {
-  'tenant.create': 'Created tenant',
-  'tenant.update': 'Changed tenant',
-  'tenant.rotate': 'Rotated key of',
-  'tenant.delete': 'Revoked tenant',
-  'projects.update': 'Saved projects',
-  'config.update': 'Changed setting',
-  'config.reset': 'Reset setting',
-  'connectors.update': 'Saved connectors',
-  'connectors.sync': 'Requested sync of',
-  'index.reindex': 'Reindexed',
-  'index.delete': 'Deleted from index',
-  'memory.create': 'Stored memory',
-  'memory.review': 'Reviewed memory',
-  'memory.extract': 'Extracted memories from',
+// Whole phrases: the table shows the target on the line below.
+export const ACTIONS: Record<string, string> = {
+  'tenant.create': 'Created the tenant',
+  'tenant.update': 'Changed the rights of tenant',
+  'tenant.rotate': 'Rotated the key of tenant',
+  'tenant.delete': 'Revoked the tenant',
+  'projects.update': 'Saved the project mapping',
+  'config.update': 'Changed the settings',
+  'config.reset': 'Reset the setting to its default',
+  'connectors.update': 'Saved the connectors',
+  'connectors.sync': 'Requested a sync',
+  'index.reindex': 'Started a reindex',
+  'index.delete': 'Deleted a file from the index',
+  'memory.create': 'Stored a memory',
+  'memory.review': 'Reviewed a memory',
+  'memory.extract': 'Extracted memories from the commit',
+  'auth.failed': 'Rejected an API key',
 }
 
 export function actionLabel(action: string): string {
   return ACTIONS[action] ?? action
+}
+
+/** The entry's headline. A refusal says so, unless the action already is one. */
+export function entryTitle(entry: { action: string; outcome: 'ok' | 'denied' }): string {
+  const label = actionLabel(entry.action)
+  return entry.outcome === 'denied' && !entry.action.startsWith('auth.') ? `Refused: ${label}` : label
 }
 
 function show(value: unknown): string {

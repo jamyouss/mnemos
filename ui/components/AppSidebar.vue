@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import type { Component } from 'vue'
 import { BrainIcon, DatabaseZapIcon, FlaskConicalIcon, FolderTreeIcon, HistoryIcon, LayoutDashboardIcon, LogOutIcon, PlugIcon, SearchIcon, SlidersHorizontalIcon, UsersIcon } from '@lucide/vue'
+import { useSidebar } from '~/components/ui/sidebar'
 import { signOut } from '~/composables/useSession'
 import { canReadSetup, isAdmin, type Whoami } from '~/utils/tenants'
 
 const route = useRoute()
 const { data: me } = useWhoami()
+const { setOpenMobile } = useSidebar()
+// The mobile sheet stays open across navigations otherwise.
+watch(() => route.path, () => setOpenMobile(false))
 
 interface NavItem {
   to: string
@@ -22,6 +26,7 @@ const groups: { label: string; items: NavItem[] }[] = [
       { to: '/', label: 'Dashboard', icon: LayoutDashboardIcon },
       { to: '/search', label: 'Search log', icon: SearchIcon, allowed: isAdmin },
       { to: '/indexing', label: 'Indexing', icon: DatabaseZapIcon, allowed: isAdmin },
+      { to: '/activity', label: 'Activity', icon: HistoryIcon, allowed: isAdmin },
       { to: '/playground', label: 'Playground', icon: FlaskConicalIcon },
     ],
   },
@@ -33,7 +38,6 @@ const groups: { label: string; items: NavItem[] }[] = [
       { to: '/projects', label: 'Projects', icon: FolderTreeIcon, allowed: canReadSetup },
       { to: '/tenants', label: 'Tenants', icon: UsersIcon, allowed: isAdmin },
       { to: '/config', label: 'Configuration', icon: SlidersHorizontalIcon, allowed: isAdmin },
-      { to: '/activity', label: 'Activity', icon: HistoryIcon, allowed: isAdmin },
     ],
   },
 ]
@@ -75,7 +79,7 @@ const role = computed(() => (me.value?.admin ? 'Admin' : 'Member'))
               <SidebarMenuButton as-child :is-active="isActive(item.to)" :tooltip="item.label">
                 <NuxtLink :to="item.to">
                   <component :is="item.icon" />
-                  <span>{{ item.label }}</span>
+                  <span :class="isActive(item.to) && 'font-semibold'">{{ item.label }}</span>
                 </NuxtLink>
               </SidebarMenuButton>
             </SidebarMenuItem>

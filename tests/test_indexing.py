@@ -37,7 +37,8 @@ def test_a_bulk_reindex_is_followed_from_start_to_end(tmp_path):
     run_reindex(indexer, "mnemos_code", tmp_path, True, job=job)
 
     stored = log.get(job.id)
-    assert stored["state"] == "done" and stored["finished_at"]
+    # A walk that ended with failed files is not "done": the page flags it.
+    assert stored["state"] == "partial" and stored["finished_at"]
     assert {k: stored[k] for k in ("total", "processed", "chunks", "failed", "empty")} == \
         {"total": 3, "processed": 3, "chunks": 2, "failed": 1, "empty": 1}
     assert stored["errors"][0]["file_path"].endswith("broken.py")
@@ -97,10 +98,38 @@ def test_summary_counts_outcomes_and_dates_each_channel(client):
     with pytest.raises(RuntimeError):
         client.post("/api/index", json={"file_path": "c.go", "collection": "mnemos_code", "content": "x"})
 
+    job = ReindexJob(client.app.state.index_events, collection="mnemos_code", path="/data/codebase",
+                     full=True, actor="root", channel="cli")
+    job.start(40)
+    for i in range(40):
+        job.file_done(f"f{i}.py", 1)
+    job.finish()
+
     summary = client.get("/api/indexing/summary").json()
-    assert summary["counts"] == {"indexed": 2, "deleted": 0, "skipped": 0, "failed": 1}
-    assert [c["channel"] for c in summary["channels"]] == ["connector", "api"]
+    assert summary["counts"] == {"indexed": 2, "deleted": 0, "skipped": 0, "failed": 1, "refused": 0}
+    assert summary["job_files"] == 40
+    # Every channel is listed, active or not: a silent watcher must show as silent.
+    by_channel = {c["channel"]: c for c in summary["channels"]}
+    assert list(by_channel) == ["watcher", "hook", "connector", "cli", "dashboard", "mcp", "api", "script"]
+    assert by_channel["watcher"]["last_at"] is None
+    assert by_channel["cli"]["last_file"] == "/data/codebase" and by_channel["connector"]["last_at"]
     assert summary["retention_days"] == 30
+
+
+def test_a_refused_push_or_delete_is_an_event(client, monkeypatch):
+    from server.principal import forbidden
+
+    def refuse(*_args, **_kwargs):
+        raise forbidden("Tenant 'dev' cannot write tags ['acme']")
+
+    monkeypatch.setattr("server.api._require_push", refuse)
+    monkeypatch.setattr("server.api._require_delete", refuse)
+    assert client.post("/api/index", json={"file_path": "a.go", "collection": "mnemos_code", "content": "x"}).status_code == 403
+    assert client.delete("/api/index/mnemos_code/b.go").status_code == 403
+
+    events = client.get("/api/indexing/events", params={"op": "refused"}).json()["items"]
+    assert [e["file_path"] for e in events] == ["b.go", "a.go"]
+    assert "cannot write" in events[0]["error"]
 
 
 def test_a_running_job_that_stopped_moving_is_flagged(client):

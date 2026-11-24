@@ -5,7 +5,7 @@ import { useIntervalFn } from '@vueuse/core'
 import { toast } from 'vue-sonner'
 import { ApiError, type ConnectorsResponse, type ConnectorSyncState } from '~/composables/useApi'
 import {
-  ago, newSource, pendingRequests, serviceHealth, sourceName, syncPending, syncStalled, toForm, toPayload,
+  ago, newSource, oldestPending, pendingRequests, serviceHealth, sourceName, syncStalled, toForm, toPayload, waitingLabel,
   type SourceForm, type SourceType,
 } from '~/utils/connectors'
 import { canReadSetup, isAdmin } from '~/utils/tenants'
@@ -58,13 +58,11 @@ const editable = computed(() => admin.value && (data.value?.writable ?? false))
 const sync = ref<ConnectorSyncState | null>(null)
 watch(data, (cfg) => { if (cfg) sync.value = cfg.sync }, { immediate: true })
 const savedNames = computed(() => new Set((data.value?.sources ?? []).map(sourceName)))
-const pendingAll = computed(() => pendingRequests(sync.value).some((r) => r.sources === null))
+const allWaiting = computed(() => oldestPending(sync.value))
 const anyRunning = computed(() => Object.values(sync.value?.runs ?? {}).some((r) => r.state === 'running'))
 const now = ref(Date.now())
 const stalled = computed(() => syncStalled(sync.value, now.value))
 const health = computed(() => serviceHealth(sync.value?.service_seen_at, now.value))
-// A sync runs the saved configuration, never the form.
-const syncBlocked = computed(() => (dirty.value ? 'Save or discard your changes first: a sync runs the saved configuration.' : ''))
 
 async function requestSync(names?: string[]) {
   try {
@@ -98,6 +96,18 @@ async function poll() {
 }
 // Every 3 s while a request waits or a sync runs, every 30 s otherwise: enough to see the service stop.
 useIntervalFn(poll, () => (pendingRequests(sync.value).length || anyRunning.value ? 3000 : 30_000))
+
+// Reloading `data` resets the form: with unsaved edits, refresh only the sync status and the counts.
+const refreshing = ref(false)
+async function refreshPage() {
+  refreshing.value = true
+  try {
+    now.value = Date.now()
+    await Promise.all([dirty.value ? poll() : refresh(), refreshNuxtData('connector-tags')])
+  } finally {
+    refreshing.value = false
+  }
+}
 
 const addable: { type: SourceType; label: string; icon: Component }[] = [
   { type: 'confluence', label: 'Confluence spaces', icon: BookOpenIcon },
@@ -164,13 +174,14 @@ onBeforeRouteLeave(() => {
           v-if="data?.sources.length"
           variant="outline"
           size="sm"
-          :disabled="!!syncBlocked || pendingAll"
-          :title="syncBlocked || undefined"
+          :disabled="dirty || !!allWaiting"
           @click="requestSync()"
         >
-          <RefreshCcwDotIcon :class="pendingAll && 'animate-spin'" /> Sync all
+          <RefreshCcwDotIcon :class="anyRunning && 'animate-spin'" /> Sync all
         </Button>
-        <Button variant="outline" size="sm" @click="refresh()"><RefreshCwIcon /> Refresh</Button>
+        <Button variant="outline" size="sm" :disabled="refreshing" @click="refreshPage">
+          <RefreshCwIcon :class="refreshing && 'animate-spin'" /> Refresh
+        </Button>
       </template>
     </PageHeader>
 
@@ -234,6 +245,10 @@ onBeforeRouteLeave(() => {
         Sync service running, last heard from {{ ago(sync.service_seen_at, now) }}.
       </p>
 
+      <p v-if="allWaiting" class="text-xs" :class="health === 'alive' ? 'text-muted-foreground' : 'text-warning'" role="status">
+        Sync of every source: {{ waitingLabel(allWaiting, now) }}.
+      </p>
+
       <Card>
         <CardHeader>
           <CardTitle>Schedule</CardTitle>
@@ -255,8 +270,9 @@ onBeforeRouteLeave(() => {
         :editable="editable"
         :indexed="indexed"
         :saved="savedNames.has(sourceName(s))"
-        :pending="syncPending(sync, sourceName(s))"
-        :sync-blocked="syncBlocked"
+        :waiting="oldestPending(sync, sourceName(s))"
+        :service-down="health !== 'alive'"
+        :sync-blocked="dirty"
         :run="sync?.runs[sourceName(s)]"
         :now="now"
         @remove="remove(s.id)"
@@ -285,7 +301,10 @@ onBeforeRouteLeave(() => {
     >
       <div v-if="dirty" class="fixed inset-x-0 bottom-6 z-20 flex justify-center px-4">
         <div class="flex items-center gap-3 rounded-xl border bg-popover px-4 py-2.5 shadow-lg">
-          <span class="text-sm" role="status" aria-live="polite">Unsaved changes</span>
+          <div class="min-w-0">
+            <p class="text-sm" role="status" aria-live="polite">Unsaved changes</p>
+            <p v-if="data?.sources.length" class="text-xs text-muted-foreground">Sync is off until you save or discard: it runs the saved configuration.</p>
+          </div>
           <Button variant="ghost" size="sm" @click="load(data)">Discard</Button>
           <Button size="sm" :disabled="saving" @click="save">{{ saving ? 'Saving…' : 'Save' }}</Button>
         </div>

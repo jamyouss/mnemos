@@ -174,19 +174,22 @@ export function sourceName(source: Pick<ConnectorSource, 'type' | 'name'>): stri
   return source.name?.trim() || source.type
 }
 
-interface SyncState {
-  requests: { id: number; sources: string[] | null; requested_at: string }[]
+interface SyncRequest {
+  id: number
+  sources: string[] | null
+  requested_at: string
+  requested_by?: string
+}
+
+interface SyncState<R extends SyncRequest = SyncRequest> {
+  /** Oldest first. */
+  requests: R[]
   acked_id: number
 }
 
 /** Requests the sync service has not picked up yet. */
-export function pendingRequests(state: SyncState | null | undefined) {
+export function pendingRequests<R extends SyncRequest>(state: SyncState<R> | null | undefined): R[] {
   return state ? state.requests.filter((r) => r.id > state.acked_id) : []
-}
-
-/** Whether a pending request covers `name` (every-source requests cover them all). */
-export function syncPending(state: SyncState | null | undefined, name: string): boolean {
-  return pendingRequests(state).some((r) => r.sources === null || r.sources.includes(name))
 }
 
 /** Whether the oldest pending request has waited longer than `afterMs`: the sync service is likely not running. */
@@ -196,12 +199,43 @@ export function syncStalled(state: SyncState | null | undefined, now: number, af
 }
 
 /**
+ * The oldest pending request covering `name`; without a name, the oldest one
+ * for every source (what "Sync all" waits on).
+ */
+export function oldestPending<R extends SyncRequest>(state: SyncState<R> | null | undefined, name?: string): R | undefined {
+  return pendingRequests(state).find((r) => r.sources === null || (name !== undefined && r.sources.includes(name)))
+}
+
+/** "Waiting — requested 13 min ago by admin". */
+export function waitingLabel(request: SyncRequest, now: number): string {
+  const by = request.requested_by ? ` by ${request.requested_by}` : ''
+  return `Waiting — requested ${ago(request.requested_at, now)}${by}`
+}
+
+/** "2 requests waiting, oldest sent 13 min ago"; empty when none waits. */
+export function pendingSummary(state: SyncState | null | undefined, now: number): string {
+  const pending = pendingRequests(state)
+  if (!pending.length) return ''
+  const count = pending.length === 1 ? '1 request waiting' : `${pending.length} requests waiting`
+  return `${count}, oldest sent ${ago(pending[0]!.requested_at, now)}`
+}
+
+/**
  * Whether a sync service is reporting to this server. It reports every minute
  * while it runs, so three silent minutes mean it stopped or cannot reach us.
  */
 export function serviceHealth(seenAt: string | null | undefined, now: number, silentAfterMs = 180_000): 'never' | 'alive' | 'silent' {
   if (!seenAt) return 'never'
   return now - Date.parse(seenAt) > silentAfterMs ? 'silent' : 'alive'
+}
+
+/** One line on the sync service, with the health it reports. */
+export function serviceSummary(seenAt: string | null | undefined, now: number) {
+  const health = serviceHealth(seenAt, now)
+  const text = health === 'never'
+    ? 'No sync service has reported to this server'
+    : `Sync service ${health === 'alive' ? 'running' : 'silent'}, last heard from ${ago(seenAt!, now)}`
+  return { health, text }
 }
 
 /** "just now", "4 min ago", "2 h ago", then the date. */
