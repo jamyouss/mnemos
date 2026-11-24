@@ -59,9 +59,10 @@ DEBOUNCE_MS = int(os.getenv("WATCHER_DEBOUNCE_MS", "2000"))
 
 
 def _auth_headers() -> dict[str, str]:
-    """Bearer header for servers running with MNEMOS_AUTH_ENABLED=true."""
+    """Bearer header for servers running with MNEMOS_AUTH_ENABLED=true, and who we are
+    (the dashboard's Indexing page groups activity by client)."""
     key = os.getenv("MNEMOS_API_KEY", "").strip()
-    return {"Authorization": f"Bearer {key}"} if key else {}
+    return {"X-Mnemos-Client": "watcher", **({"Authorization": f"Bearer {key}"} if key else {})}
 
 
 def should_ignore(path: str) -> bool:

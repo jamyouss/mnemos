@@ -153,6 +153,12 @@ FIELDS: tuple[FieldSpec, ...] = (
               "Query log location inside the container.", "path"),
     FieldSpec("mnemos_eval_runs_path", "observability", "Eval runs path",
               "Where the dashboard reads eval runs.", "path"),
+    _live("mnemos_audit_retention_days", "observability", "Audit retention (days)",
+          "How long the Activity page keeps who changed what; older entries are deleted hourly.",
+          "int", ("audit", "retention_days"), min=1, max=3650),
+    _live("mnemos_index_events_retention_days", "observability", "Indexing history (days)",
+          "How long the Indexing page keeps per-file events and reindex jobs.",
+          "int", ("index_events", "retention_days"), min=1, max=365),
     # --- infrastructure ----------------------------------------------------
     FieldSpec("qdrant_host", "infrastructure", "Qdrant host", "Qdrant hostname.", "str"),
     FieldSpec("qdrant_port", "infrastructure", "Qdrant port", "Qdrant HTTP port.", "int"),

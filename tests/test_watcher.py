@@ -49,4 +49,4 @@ def test_flush_sends_the_api_key(monkeypatch):
     with patch("watcher.main.httpx.post") as mock_post:
         handler._flush()
 
-    assert mock_post.call_args.kwargs["headers"] == {"Authorization": "Bearer secret-a"}
+    assert mock_post.call_args.kwargs["headers"] == {"Authorization": "Bearer secret-a", "X-Mnemos-Client": "watcher"}

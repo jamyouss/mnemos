@@ -101,6 +101,24 @@ Playground searches are left out of this screen and the dashboard unless
 *Include Playground searches* is on: test traffic would move the very figures
 being read.
 
+### Indexing
+
+Admin keys only. What the index went through, from every channel:
+
+- the files indexed, deleted, skipped and failed over the last 24 hours;
+- when each channel — watcher, git hooks, connectors, CLI, dashboard, MCP,
+  API, scripts — last sent a file, the first thing to check when results look
+  stale;
+- what each connector source last did (details on the Connectors page);
+- bulk reindex jobs (CLI, API, MCP) with their progress, chunks and failed
+  files; a running job whose progress has not moved for two minutes is marked
+  *Stalled*, its server likely restarted;
+- every file event, newest first, filtered by collection, channel, outcome
+  or directory, with the error of a failed one.
+
+The page refreshes every 3 s while a reindex runs, every 15 s otherwise.
+History is kept `MNEMOS_INDEX_EVENTS_RETENTION_DAYS` (30 by default).
+
 ### Playground
 
 Runs a search exactly as an agent would — any of the four endpoints, with
@@ -217,8 +235,20 @@ row shows a padlock, and its key changes only with the variable. Saving needs
 `MNEMOS_UI_CONFIG_WRITABLE=true`. Scope rules:
 [DEPLOYMENT.md](DEPLOYMENT.md#tenants-and-scopes).
 
-The sidebar hides what the key cannot open: Search log, Configuration and
-Tenants need an admin key; Connectors and Projects need admin or `write: "*"`.
+### Activity
+
+Admin keys only. Who changed what: tenants (created, changed, key rotated,
+revoked), projects, settings, connectors and sync requests, bulk reindexes,
+file deletions and memories — each with the tenant, the client (`dashboard`,
+`cli`, `mcp`, `api`…) and what changed, old → new. A change refused for lack
+of rights is listed too, marked *Refused*, with the reason. Filter by area,
+tenant or outcome; a row opens its full detail. Kept
+`MNEMOS_AUDIT_RETENTION_DAYS` (365 by default); see
+[DEPLOYMENT.md](DEPLOYMENT.md#audit-trail).
+
+The sidebar hides what the key cannot open: Search log, Indexing,
+Configuration, Tenants and Activity need an admin key; Connectors and
+Projects need admin or `write: "*"`.
 
 ### Appearance
 

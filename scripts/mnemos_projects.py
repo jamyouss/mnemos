@@ -24,9 +24,9 @@ def mnemos_url() -> str:
 
 
 def auth_headers() -> dict[str, str]:
-    """Bearer header for servers running with MNEMOS_AUTH_ENABLED=true."""
+    """Bearer header for servers running with MNEMOS_AUTH_ENABLED=true; scripts name themselves."""
     key = os.environ.get("MNEMOS_API_KEY", "").strip()
-    return {"Authorization": f"Bearer {key}"} if key else {}
+    return {"X-Mnemos-Client": "script", **({"Authorization": f"Bearer {key}"} if key else {})}
 
 
 def fetch_projects(base_url: str, timeout: float = 10) -> dict:

@@ -20,6 +20,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from server.audit import audit, field_changes, keyed_changes
 from server.config import settings
 from server.config_api import require_admin_writer, revision_conflict
 from server.principal import principal_of, require_admin_or_write_all
@@ -170,6 +171,7 @@ def put_connectors(body: ConnectorsPutRequest, request: Request):
             content={"detail": "Invalid connectors, nothing was saved", "problems": exc.problems},
         )
 
+    stored = request.app.state.config_docs.get(CONNECTORS_KEY)
     try:
         doc = request.app.state.config_docs.put(
             CONNECTORS_KEY, raw, expected_revision=body.revision,
@@ -177,7 +179,18 @@ def put_connectors(body: ConnectorsPutRequest, request: Request):
     except RevisionConflict as exc:
         return revision_conflict(exc)
     request.app.state.config_sync.apply(doc)
+    old = stored.data if stored else {}
+    changes = keyed_changes(_by_name(old.get("sources")), _by_name(raw["sources"]))
+    changes.update(field_changes({"interval": old.get("interval")}, {"interval": raw.get("interval")}))
+    audit(request, "connectors.update", "connectors", changes)
     return {**_snapshot(doc), "sync": _sync_state(request.app.state.config_docs)}
+
+
+def _by_name(entries: object) -> dict[str, dict]:
+    """Stored sources by the name the ingester gives them; token variables included, never tokens."""
+    if not isinstance(entries, list):
+        return {}
+    return {str(e.get("name") or e.get("type")): e for e in entries if isinstance(e, dict)}
 
 
 @connectors_router.get("/api/connectors/sync")
@@ -215,6 +228,7 @@ def request_sync(body: SyncRequestBody, request: Request):
         return {**data, "requests": [*requests, entry][-_KEPT_REQUESTS:]}
 
     _update(docs, SYNC_KEY, add)
+    audit(request, "connectors.sync", ", ".join(body.sources) if body.sources else "every source")
     return {"request": dict(entry), **_sync_state(docs)}
 
 

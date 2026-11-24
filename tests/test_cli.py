@@ -596,7 +596,7 @@ def test_requests_carry_the_api_key_when_set(monkeypatch):
     with patch("httpx.post", return_value=_mock_response({"results": []})) as mock_post:
         result = runner.invoke(cli, ["search", "query"])
     assert result.exit_code == 0
-    assert mock_post.call_args.kwargs["headers"] == {"Authorization": "Bearer secret-a"}
+    assert mock_post.call_args.kwargs["headers"] == {"Authorization": "Bearer secret-a", "X-Mnemos-Client": "cli"}
 
 
 def test_requests_carry_no_auth_header_without_a_key(monkeypatch):
@@ -605,4 +605,4 @@ def test_requests_carry_no_auth_header_without_a_key(monkeypatch):
     with patch("httpx.get", return_value=_mock_response({"status": "healthy", "collections": {}})) as mock_get:
         result = runner.invoke(cli, ["status"])
     assert result.exit_code == 0
-    assert mock_get.call_args.kwargs["headers"] == {}
+    assert mock_get.call_args.kwargs["headers"] == {"X-Mnemos-Client": "cli"}

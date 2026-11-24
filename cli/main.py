@@ -17,10 +17,12 @@ def _base_url() -> str:
     return os.environ.get("MNEMOS_URL", DEFAULT_RAG_URL).rstrip("/")
 
 
-def _headers() -> dict[str, str]:
-    """Bearer header for servers running with MNEMOS_AUTH_ENABLED=true."""
+def _headers(client: str = "cli") -> dict[str, str]:
+    """Bearer header for servers running with MNEMOS_AUTH_ENABLED=true, and which
+    client this is (`cli`, or `connector` for the sync service): the dashboard's
+    Indexing page and audit trail group activity by it."""
     key = os.environ.get("MNEMOS_API_KEY", "").strip()
-    return {"Authorization": f"Bearer {key}"} if key else {}
+    return {"X-Mnemos-Client": client, **({"Authorization": f"Bearer {key}"} if key else {})}
 
 
 def _handle_http_error(exc: Exception) -> None:
@@ -963,7 +965,7 @@ def _run_sync(
     from connectors.transport import make_client
 
     user_tags = _parse_tags(tags) if tags else []
-    with make_client(headers=_headers(), timeout=MNEMOS_TIMEOUT) as http:
+    with make_client(headers=_headers("connector"), timeout=MNEMOS_TIMEOUT) as http:
         mnemos = MnemosClient(_base_url(), http, collection=collection)
         results = [
             sync_scope(mnemos, source=source, scope=scope, items=items, user_tags=user_tags, full=full)
@@ -1123,7 +1125,7 @@ def _server_connectors() -> dict:
 
     url = f"{_base_url()}/api/connectors"
     try:
-        with make_client(headers=_headers(), timeout=10) as http:
+        with make_client(headers=_headers("connector"), timeout=10) as http:
             body = get_json(http, url)
     except (httpx.HTTPError, ValueError) as exc:
         # First line only: httpx appends a "For more information" link to every status error.
@@ -1161,7 +1163,7 @@ def _sync_config(config, only: set[str] | None = None, full: bool = False) -> li
     from connectors.runner import run_sources
     from connectors.transport import make_client
 
-    with make_client(headers=_headers(), timeout=MNEMOS_TIMEOUT) as http:
+    with make_client(headers=_headers("connector"), timeout=MNEMOS_TIMEOUT) as http:
         return run_sources(config, MnemosClient(_base_url(), http), only=only, full=full, report=_report_sync)
 
 
@@ -1262,7 +1264,7 @@ def _ack_sync(request_id: int) -> None:
         return
     from connectors.transport import make_client
 
-    with make_client(headers=_headers(), timeout=10) as http:
+    with make_client(headers=_headers("connector"), timeout=10) as http:
         http.post(f"{_base_url()}/api/connectors/sync/ack", json={"id": request_id}).raise_for_status()
 
 
@@ -1275,7 +1277,7 @@ def _report_sync(source: str | None, state: str | None, results: list) -> None:
     from connectors.transport import make_client
 
     body = {"source": source, "state": state, "results": [asdict(r) for r in results]}
-    with make_client(headers=_headers(), timeout=10) as http:
+    with make_client(headers=_headers("connector"), timeout=10) as http:
         http.post(f"{_base_url()}/api/connectors/sync/report", json=body).raise_for_status()
 
 

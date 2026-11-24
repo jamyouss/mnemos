@@ -143,7 +143,7 @@ read-only key.
 | `/api/reindex`, `/internal/reindex`, `/api/memory/extract`, MCP `mnemos_reindex` | `write: "*"` |
 | Delete an indexed file | Every stored chunk of the file shares a tag with `write` |
 | Approve or reject a memory | One of the memory's tags in `write` |
-| Query log, `/api/eval/*`, settings, tenants | `admin` |
+| Query log, `/api/eval/*`, settings, tenants, `/api/audit`, `/api/indexing/*` | `admin` |
 | `GET /api/connectors`, `GET /api/projects`, `POST /api/connectors/sync` (sync now), `/sync/ack` and `/sync/report` | `admin` or `write: "*"` (the ingester's and scripts' key) |
 
 A refused operation answers `403` (an `Error: …` text over MCP).
@@ -289,9 +289,10 @@ jobs:
 
 Two stateful volumes (Compose prefixes them with the project name, `mnemos_`
 by default):
-- `qdrant_data` — the vector store: every collection, every chunk, and the
+- `qdrant_data` — the vector store: every collection, every chunk, the
   shared configuration (`mnemos_config`: connectors, projects, settings
-  overrides, tenants).
+  overrides, tenants), the audit trail (`mnemos_audit`) and the indexing
+  history (`mnemos_index_events`).
 - `rag_state` — Mnemos' state directory (query log, anything you add).
 
 Back them up with `docker run --rm -v mnemos_qdrant_data:/data:ro -v $(pwd):/backup \
@@ -357,6 +358,35 @@ jq -c '. | select(.cache_hit != null)' /data/state/query-log.jsonl \
                   total: length})'
 ```
 
+### Audit trail
+
+Every change to tenants, projects, settings, connectors, the index (bulk
+reindex, file deletion) and memories is recorded with who made it, through
+which client (`dashboard`, `cli`, `mcp`, `api`…), from which address and what
+changed; so is every such change refused with `403`. Entries live in the
+`mnemos_audit` collection, shared by every replica, and are read on the
+dashboard's Activity page or `GET /api/audit` (admin keys only). Nothing in
+the API edits or deletes them; an hourly prune drops what is older than
+`MNEMOS_AUDIT_RETENTION_DAYS` (365 by default).
+
+Each entry is also logged as one JSON line by the `mnemos.audit` logger, on
+the server's stdout: ship it to your log pipeline to keep a copy Mnemos cannot
+prune. Recording never blocks a change: an entry the database refuses is
+logged as an error and the request goes on.
+
+Never in an entry: API keys or their hashes, secret settings (masked as
+`••••`), memory contents. The address is the first `X-Forwarded-For` hop
+behind a proxy, so treat it as a hint, not proof.
+
+### Indexing history
+
+Every file pushed, deleted, skipped or refused by the watcher, git hooks,
+connectors, the CLI or MCP is recorded in `mnemos_index_events`, with the
+client that sent it (the `X-Mnemos-Client` header our clients send). A bulk
+reindex is one job record, its progress updated every few seconds, plus one
+event per failed file. The dashboard's Indexing page reads them; they are
+pruned after `MNEMOS_INDEX_EVENTS_RETENTION_DAYS` (30 by default).
+
 ---
 
 ## Security checklist
@@ -376,6 +406,8 @@ jq -c '. | select(.cache_hit != null)' /data/state/query-log.jsonl \
 - [ ] `MNEMOS_LLM_API_KEY` rotated periodically.
 - [ ] Read-only mounts for `CODEBASE_PATH` and `CLAUDE_CONFIG_PATH` (already
       `:ro` in the default compose file).
+- [ ] The `mnemos.audit` log lines shipped off the server, so the trail
+      survives its retention and the database.
 
 ---
 

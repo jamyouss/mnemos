@@ -18,6 +18,7 @@ from pydantic import BaseModel
 
 from server.auth import ALL_TAGS, TENANT_NAME, generate_key, hash_key, parse_scope
 from server.config import settings
+from server.audit import audit, field_changes
 from server.config_api import require_admin_writer, revision_conflict
 from server.principal import principal_of, require_admin
 
@@ -149,6 +150,7 @@ def create_tenant(body: TenantCreateRequest, request: Request):
         doc = _save(request, tenants, current)
     except RevisionConflict as exc:
         return revision_conflict(exc)
+    audit(request, "tenant.create", body.name, {"admin": body.admin, "read": read, "write": write})
     return {"tenant": _public(body.name, tenants[body.name]), "api_key": api_key,
             "revision": doc.revision}
 
@@ -165,10 +167,13 @@ def update_tenant(name: str, body: TenantPatchRequest, request: Request):
             changes[field] = _scope(field, getattr(body, field))
     try:
         tenants, current = _load(request, body.revision)
-        _mutable(tenants, name).update(changes)
+        entry = _mutable(tenants, name)
+        before = dict(entry)
+        entry.update(changes)
         doc = _save(request, tenants, current)
     except RevisionConflict as exc:
         return revision_conflict(exc)
+    audit(request, "tenant.update", name, field_changes(before, entry, ["admin", "read", "write"]))
     return {"tenant": _public(name, tenants[name]), "revision": doc.revision}
 
 
@@ -182,6 +187,7 @@ def rotate_tenant_key(name: str, request: Request, body: RevisionRequest | None 
         doc = _save(request, tenants, current)
     except RevisionConflict as exc:
         return revision_conflict(exc)
+    audit(request, "tenant.rotate", name)
     return {"tenant": _public(name, tenants[name]), "api_key": api_key, "revision": doc.revision}
 
 
@@ -190,9 +196,10 @@ def delete_tenant(name: str, request: Request, revision: int | None = None):
     require_admin_writer(request)
     try:
         tenants, current = _load(request, revision)
-        _mutable(tenants, name)
+        entry = _mutable(tenants, name)
         del tenants[name]
         doc = _save(request, tenants, current)
     except RevisionConflict as exc:
         return revision_conflict(exc)
+    audit(request, "tenant.delete", name, {k: [entry.get(k), None] for k in ("admin", "read", "write")})
     return {"deleted": name, "revision": doc.revision}

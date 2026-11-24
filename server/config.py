@@ -78,6 +78,9 @@ class Settings(BaseSettings):
     # Eval runs are local artefacts, never baked into the image — bind-mounted
     # read-only so the dashboard can read them.
     mnemos_eval_runs_path: str = "/app/evals/runs"
+    # Audit trail (Activity page) and indexing activity (Indexing page), in Qdrant.
+    mnemos_audit_retention_days: int = 365
+    mnemos_index_events_retention_days: int = 30
     # Built dashboard. Absent in a headless deployment, and the server must
     # start anyway.
     mnemos_ui_path: str = "/app/ui"

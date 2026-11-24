@@ -32,11 +32,11 @@ MNEMOS_HOOK_TRIGGER="${MNEMOS_HOOK_TRIGGER:-pre-push}"
 # the key never shows up in `ps` output.
 mnemos_curl() {
     if [ -n "${MNEMOS_API_KEY:-}" ]; then
-        curl -K /dev/fd/3 "$@" 3<<EOF
+        curl -H "X-Mnemos-Client: hook" -K /dev/fd/3 "$@" 3<<EOF
 header = "Authorization: Bearer $MNEMOS_API_KEY"
 EOF
     else
-        curl "$@"
+        curl -H "X-Mnemos-Client: hook" "$@"
     fi
 }
 

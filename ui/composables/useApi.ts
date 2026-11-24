@@ -157,6 +157,107 @@ export interface ConnectorRun {
   results: ConnectorRunResult[]
 }
 
+/** One change, or refused change, in the audit trail. */
+export interface AuditEntry {
+  id: string
+  ts: number
+  at: string
+  actor: string
+  /** `<domain>.<verb>`: tenant.create, config.update, index.reindex… */
+  action: string
+  domain: string
+  target: string
+  outcome: 'ok' | 'denied'
+  /** dashboard, cli, mcp, api… */
+  via: string
+  ip: string | null
+  /** What changed: `{field: [old, new]}`, or added / removed / changed for named entries. */
+  changes: Record<string, unknown>
+  /** Why it was refused. */
+  detail: string | null
+}
+
+export interface AuditQuery {
+  actor?: string
+  domain?: string
+  outcome?: string
+  /** Cursor: `next_before` of the previous page. */
+  before?: number
+  limit?: number
+}
+
+export interface AuditPage {
+  items: AuditEntry[]
+  next_before: number | null
+  actors: string[]
+  actions: string[]
+  retention_days: number
+}
+
+export type IndexOp = 'indexed' | 'deleted' | 'skipped' | 'failed'
+
+export interface IndexFileEvent {
+  id: string
+  ts: number
+  at: string
+  op: IndexOp
+  collection: string
+  file_path: string
+  channel: string
+  actor: string
+  chunks: number
+  duration_ms: number | null
+  error: string | null
+  job_id: string | null
+}
+
+export interface IndexEventQuery {
+  collection?: string
+  channel?: string
+  op?: string
+  directory?: string
+  before?: number
+  limit?: number
+}
+
+export interface IndexJob {
+  id: string
+  ts: number
+  state: 'running' | 'done' | 'failed'
+  /** Running, but its progress has not moved for two minutes: its pod is likely gone. */
+  stalled: boolean
+  collection: string
+  path: string
+  full: boolean
+  actor: string
+  channel: string
+  started_at: string
+  finished_at: string | null
+  total: number
+  processed: number
+  chunks: number
+  failed: number
+  empty: number
+  errors: { file_path: string; error: string }[]
+  error?: string | null
+}
+
+export interface IndexingSummary {
+  hours: number
+  counts: Record<IndexOp, number>
+  channels: { channel: string; last_at: string; last_ts: number; last_file: string | null }[]
+  retention_days: number
+}
+
+function queryString(query: object): string {
+  const params = new URLSearchParams()
+  for (const [key, value] of Object.entries(query)) {
+    if (value !== undefined && value !== '' && value !== null) params.set(key, String(value))
+  }
+  const qs = params.toString()
+  return qs ? `?${qs}` : ''
+}
+
 export interface ProjectsResponse {
   revision: number
   writable: boolean
@@ -237,7 +338,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     onUnauthorized: sendToSignIn,
   })
   const res = await authedFetch(path, {
-    headers: { 'content-type': 'application/json' },
+    // Names the dashboard in the server's audit trail and Indexing page.
+    headers: { 'content-type': 'application/json', 'x-mnemos-client': 'dashboard' },
     ...init,
   })
   if (!res.ok) {
@@ -310,6 +412,15 @@ export function useApi() {
       const qs = params.toString()
       return request<MemoryPage>(`/api/memory${qs ? `?${qs}` : ''}`)
     },
+
+    audit: (query: AuditQuery = {}) => request<AuditPage>(`/api/audit${queryString(query)}`),
+
+    indexingSummary: (hours = 24) => request<IndexingSummary>(`/api/indexing/summary?hours=${hours}`),
+
+    indexingJobs: (limit = 20) => request<{ items: IndexJob[] }>(`/api/indexing/jobs?limit=${limit}`),
+
+    indexingEvents: (query: IndexEventQuery = {}) =>
+      request<{ items: IndexFileEvent[]; next_before: number | null }>(`/api/indexing/events${queryString(query)}`),
 
     reviewMemory: (id: string, action: 'approve' | 'reject') =>
       request<{ id: string; status: string }>(`/api/memory/${id}/review`, {

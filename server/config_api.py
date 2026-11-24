@@ -12,8 +12,10 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from server.audit import MASK, audit
 from server.config import settings
 from server.principal import principal_of, require_admin
+from server.settings_registry import FIELDS_BY_KEY
 from server.settings_store import ConfigValidationError
 
 config_router = APIRouter()
@@ -52,6 +54,7 @@ def get_config(request: Request):
 def patch_config(body: ConfigPatchRequest, request: Request):
     require_admin_writer(request)
     store = request.app.state.config_store
+    before = {key: getattr(settings, key, None) for key in body.values}
     try:
         applied = store.update(body.values, request.app.state, revision=body.revision)
     except ConfigValidationError as exc:
@@ -61,17 +64,27 @@ def patch_config(body: ConfigPatchRequest, request: Request):
         )
     except RevisionConflict as exc:
         return revision_conflict(exc)
+    audit(request, "config.update", ", ".join(body.values),
+          {key: _shown(key, [before[key], value]) for key, value in body.values.items()})
     return {**store.snapshot(), "applied": applied}
+
+
+def _shown(key: str, pair: list) -> list:
+    """A secret setting's values never reach the audit trail."""
+    spec = FIELDS_BY_KEY.get(key)
+    return [MASK if v not in (None, "") else v for v in pair] if spec and spec.type == "secret" else pair
 
 
 @config_router.delete("/api/config/{key}")
 def delete_config_override(key: str, request: Request, revision: int | None = None):
     require_admin_writer(request)
     store = request.app.state.config_store
+    before = getattr(settings, key, None)
     try:
         store.reset(key, request.app.state, revision=revision)
     except KeyError:
         raise HTTPException(status_code=404, detail=f"No override for {key!r}") from None
     except RevisionConflict as exc:
         return revision_conflict(exc)
+    audit(request, "config.reset", key, {key: _shown(key, [before, "default"])})
     return store.snapshot()

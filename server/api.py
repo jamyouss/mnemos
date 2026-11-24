@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import json
 import threading
 import time
@@ -23,7 +24,9 @@ from core.cache import CACHE_COLLECTION
 from core.collections import COLLECTIONS, TAGS_PAYLOAD_FIELD
 from core.indexer import CHUNK_FACET_FIELDS, TAGGED_COLLECTIONS, facet_fields
 from core.llm import LLMError
+from server.audit import audit
 from server.config import settings
+from server.indexing import ReindexJob, channel_of, file_event
 from server.principal import (
     Principal,
     forbidden,
@@ -176,8 +179,13 @@ def validate_path(file_path: str) -> Path:
 
 @api_router.post("/internal/reindex")
 def internal_reindex(body: ReindexInternalRequest, request: Request):
-    require_write_all(principal_of(request))
+    principal = principal_of(request)
+    require_write_all(principal)
     safe_path = validate_path(body.file_path)
+    event = functools.partial(
+        file_event, getattr(request.app.state, "index_events", None), collection=body.collection,
+        file_path=body.file_path, channel=channel_of(request, default="watcher"), actor=principal.name,
+    )
 
     if body.event == "deleted":
         request.app.state.indexer.delete_file(
@@ -185,6 +193,7 @@ def internal_reindex(body: ReindexInternalRequest, request: Request):
             collection=body.collection,
         )
         _index_changed(request)
+        event(op="deleted")
         return {"status": "deleted", "file_path": body.file_path}
 
     if not safe_path.exists():
@@ -192,18 +201,29 @@ def internal_reindex(body: ReindexInternalRequest, request: Request):
 
     try:
         content = safe_path.read_text(encoding="utf-8")
-    except (UnicodeDecodeError, OSError):
+    except (UnicodeDecodeError, OSError) as exc:
+        event(op="skipped", error=f"binary or unreadable: {exc}")
         return {"status": "skipped", "file_path": body.file_path, "reason": "binary or unreadable"}
 
     request.app.state.indexer.ensure_collection(body.collection)
-    count = request.app.state.indexer.index_file(
-        content=content,
-        file_path=body.file_path,
-        collection=body.collection,
-        file_mtime=safe_path.stat().st_mtime,
-    )
+    started = time.monotonic()
+    try:
+        count = request.app.state.indexer.index_file(
+            content=content,
+            file_path=body.file_path,
+            collection=body.collection,
+            file_mtime=safe_path.stat().st_mtime,
+        )
+    except Exception as exc:
+        event(op="failed", error=f"{type(exc).__name__}: {exc}")
+        raise
     _index_changed(request)
+    event(op="indexed" if count else "skipped", chunks=count, duration_ms=_ms_since(started))
     return {"status": "indexed", "file_path": body.file_path, "chunks": count}
+
+
+def _ms_since(started: float) -> int:
+    return int((time.monotonic() - started) * 1000)
 
 
 # ---------------------------------------------------------------------------
@@ -260,29 +280,45 @@ def _require_delete(principal: Principal, qdrant, collection: str, file_path: st
 def push_index(body: IndexPushRequest, request: Request):
     if body.collection not in _VALID_COLLECTIONS:
         raise HTTPException(status_code=400, detail=f"Unknown collection: {body.collection}")
+    principal = principal_of(request)
     indexer = request.app.state.indexer
-    _require_push(principal_of(request), indexer, body)
+    _require_push(principal, indexer, body)
     indexer.ensure_collection(body.collection)
-    count = indexer.index_file(
-        content=body.content,
-        file_path=body.file_path,
-        collection=body.collection,
-        tags=body.tags,
-        source_url=body.source_url,
-        file_mtime=body.file_mtime,
+    event = functools.partial(
+        file_event, getattr(request.app.state, "index_events", None), collection=body.collection,
+        file_path=body.file_path, channel=channel_of(request), actor=principal.name,
     )
+    started = time.monotonic()
+    try:
+        count = indexer.index_file(
+            content=body.content,
+            file_path=body.file_path,
+            collection=body.collection,
+            tags=body.tags,
+            source_url=body.source_url,
+            file_mtime=body.file_mtime,
+        )
+    except Exception as exc:
+        event(op="failed", error=f"{type(exc).__name__}: {exc}")
+        raise
     _index_changed(request)
+    # 0 chunks: filtered out by the server's ignore rules, or nothing to index.
+    event(op="indexed" if count else "skipped", chunks=count, duration_ms=_ms_since(started))
     return {"status": "indexed", "file_path": body.file_path, "chunks": count}
 
 
 @api_router.delete("/api/index/{collection}/{file_path:path}")
 def delete_index(collection: str, file_path: str, request: Request):
-    _require_delete(principal_of(request), request.app.state.qdrant, collection, file_path)
+    principal = principal_of(request)
+    _require_delete(principal, request.app.state.qdrant, collection, file_path)
     request.app.state.indexer.delete_file(
         file_path=file_path,
         collection=collection,
     )
     _index_changed(request)
+    file_event(getattr(request.app.state, "index_events", None), op="deleted", collection=collection,
+               file_path=file_path, channel=channel_of(request), actor=principal.name)
+    audit(request, "index.delete", f"{collection}/{file_path}")
     return {"status": "deleted", "collection": collection, "file_path": file_path}
 
 
@@ -529,8 +565,8 @@ def eval_sample(body: EvalSampleRequest, request: Request):
 # ---------------------------------------------------------------------------
 
 
-def _index_one_file(indexer, collection: str, fp, tags: list[str] | None = None) -> int:
-    """Index a single file. Returns the number of chunks indexed (0 on error)."""
+def _index_one_file(indexer, collection: str, fp, tags: list[str] | None = None) -> tuple[int, str | None]:
+    """Index a single file: (chunks indexed, None), or (0, the error) when it failed."""
     try:
         content = fp.read_text(encoding="utf-8")
         return indexer.index_file(
@@ -539,9 +575,9 @@ def _index_one_file(indexer, collection: str, fp, tags: list[str] | None = None)
             collection=collection,
             file_mtime=fp.stat().st_mtime,
             tags=tags,
-        )
-    except Exception:
-        return -1  # sentinel for "skipped on error"
+        ), None
+    except Exception as exc:
+        return 0, f"{type(exc).__name__}: {exc}"
 
 
 def run_reindex(
@@ -554,8 +590,13 @@ def run_reindex(
     exclude_exts: list[str] | None = None,
     exclude_dirs: list[str] | None = None,
     cache=None,
+    job: ReindexJob | None = None,
 ) -> None:
-    """Background task: walk files and index them, optionally in parallel."""
+    """Background task: walk files and index them, optionally in parallel.
+
+    `job`, when given, follows the run: its total once the files are listed,
+    every file's outcome, and how it ended.
+    """
     import logging
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -563,52 +604,61 @@ def run_reindex(
 
     exclude_exts = exclude_exts or []
     exclude_dirs = exclude_dirs or []
+    try:
+        # Ask the indexer rather than calling _should_skip directly: it is the one
+        # place that unions the built-in policy, the per-prefix rules from
+        # config/projects.yaml and these per-run extras. Re-deriving that here is
+        # exactly the drift core.path_filter exists to prevent.
+        files = [fp for fp in (base_path.rglob("*") if full else [base_path])
+                 if fp.is_file()
+                 and not indexer.should_skip(str(fp), exclude_exts, exclude_dirs)]
+        if job:
+            job.start(len(files))
 
-    # Ask the indexer rather than calling _should_skip directly: it is the one
-    # place that unions the built-in policy, the per-prefix rules from
-    # config/projects.yaml and these per-run extras. Re-deriving that here is
-    # exactly the drift core.path_filter exists to prevent.
-    files = [fp for fp in (base_path.rglob("*") if full else [base_path])
-             if fp.is_file()
-             and not indexer.should_skip(str(fp), exclude_exts, exclude_dirs)]
+        indexed = 0
+        skipped = 0
+        workers = max(1, int(workers))
 
-    if not files:
-        logger.info(f"Reindex: collection={collection} no files to index")
-        return
-
-    indexed = 0
-    skipped = 0
-    workers = max(1, int(workers))
-
-    if workers == 1:
-        for fp in files:
-            n = _index_one_file(indexer, collection, fp, tags=tags)
-            if n < 0:
+        def done(fp, outcome: tuple[int, str | None]) -> None:
+            nonlocal indexed, skipped
+            chunks, error = outcome
+            if error is not None:
                 skipped += 1
-            else:
-                indexed += n
-    else:
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = [pool.submit(_index_one_file, indexer, collection, fp, tags) for fp in files]
-            for fut in as_completed(futures):
-                n = fut.result()
-                if n < 0:
-                    skipped += 1
-                else:
-                    indexed += n
+            indexed += chunks
+            if job:
+                job.file_done(str(fp), chunks, error)
+
+        if workers == 1:
+            for fp in files:
+                done(fp, _index_one_file(indexer, collection, fp, tags=tags))
+        else:
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = {pool.submit(_index_one_file, indexer, collection, fp, tags): fp for fp in files}
+                for fut in as_completed(futures):
+                    done(futures[fut], fut.result())
+    except Exception as exc:
+        logger.exception("Reindex failed: collection=%s", collection)
+        if job:
+            job.finish(f"{type(exc).__name__}: {exc}")
+        raise
+    finally:
+        # Again at the end: answers cached while the walk ran predate part of it.
+        invalidate_cache(cache)
 
     logger.info(
         f"Reindex complete: collection={collection} files={len(files)} "
         f"indexed_chunks={indexed} skipped_files={skipped} workers={workers}"
     )
-    # Again at the end: answers cached while the walk ran predate part of it.
-    invalidate_cache(cache)
+    if job:
+        job.finish()
 
 
 @api_router.post("/api/reindex")
 def reindex(body: ReindexRequest, request: Request, background_tasks: BackgroundTasks):
-    require_write_all(principal_of(request))
+    principal = principal_of(request)
+    require_write_all(principal)
     indexer = request.app.state.indexer
+    base_path = validate_path(body.path) if body.path else None
 
     if body.recreate:
         indexer.recreate_collection_hybrid(body.collection)
@@ -617,9 +667,14 @@ def reindex(body: ReindexRequest, request: Request, background_tasks: Background
 
     cache = getattr(request.app.state, "cache", None)
     invalidate_cache(cache)
+    audit(request, "index.reindex", f"{body.collection}:{base_path or ''}", {
+        "collection": body.collection, "path": str(base_path) if base_path else None,
+        "full": body.full, "recreate": body.recreate, "tags": body.tags,
+    })
 
-    if body.path:
-        base_path = validate_path(body.path)
+    if base_path:
+        job = ReindexJob(getattr(request.app.state, "index_events", None), collection=body.collection,
+                         path=str(base_path), full=body.full, actor=principal.name, channel=channel_of(request))
         background_tasks.add_task(
             run_reindex,
             indexer,
@@ -631,6 +686,7 @@ def reindex(body: ReindexRequest, request: Request, background_tasks: Background
             body.exclude_exts,
             body.exclude_dirs,
             cache,
+            job,
         )
         return {
             "status": "reindex_started",
@@ -641,6 +697,7 @@ def reindex(body: ReindexRequest, request: Request, background_tasks: Background
             "tags": body.tags,
             "exclude_exts": body.exclude_exts,
             "exclude_dirs": body.exclude_dirs,
+            "job_id": job.id,
         }
 
     return {"status": "no_path", "collection": body.collection}
@@ -792,6 +849,8 @@ def create_memory(body: MemoryCreateRequest, request: Request):
 
     result = deduplicator.deduplicate_and_store(memory, status=body.status)
     _index_changed(request)
+    audit(request, "memory.create", result.memory_id,
+          {"memory_type": body.memory_type, "tags": body.tags, "status": body.status, "dedup": result.action})
     return {"status": "created", "id": result.memory_id, "action": result.action}
 
 
@@ -837,6 +896,7 @@ def review_memory(mem_id: str, body: MemoryReviewRequest, request: Request):
         ],
     )
     _index_changed(request)
+    audit(request, "memory.review", mem_id, {"status": [record.payload.get("status"), new_status]})
     return {"status": new_status, "id": mem_id}
 
 
@@ -873,6 +933,8 @@ def extract_memories(body: MemoryExtractRequest, request: Request):
 
     if results:
         _index_changed(request)
+    audit(request, "memory.extract", body.commit_message.splitlines()[0][:120] if body.commit_message else "",
+          {"memories": [{"id": r["id"], "action": r["action"]} for r in results]})
     return {"extracted": len(results), "memories": results}
 
 

@@ -12,15 +12,18 @@ from qdrant_client import QdrantClient
 from starlette.responses import Response
 from starlette.routing import Route
 
+from fastapi import HTTPException
 from fastapi.staticfiles import StaticFiles
 
 from server.api import api_router
+from server.audit import AUDIT_COLLECTION, AUDIT_FIELDS, audit_refusals, audit_router
 from server.auth import BearerAuthMiddleware, TenantTable
 from server.config import settings
 from server.config_api import config_router
 from server.config_bootstrap import bootstrap_config
 from server.config_sync import ConfigSync, apply_projects
 from server.connectors_api import connectors_router
+from server.indexing import INDEX_EVENT_FIELDS, INDEX_EVENTS_COLLECTION, indexing_router
 from server.projects_api import projects_router
 from server.settings_store import ConfigStore
 from server.tenants_api import tenants_router
@@ -28,7 +31,20 @@ from server.tenants_api import tenants_router
 logger = logging.getLogger("mnemos.server")
 from core.config_store import ConfigDocStore
 from core.embeddings import EmbeddingService
+from core.event_log import EventLog
 from core.indexer import Indexer
+
+
+def _prune_forever(logs: list[EventLog], stop: threading.Event, every: float = 3600.0) -> None:
+    """Drop what each log keeps past its retention, hourly. Every pod may run it."""
+    while True:
+        for log in logs:
+            try:
+                log.prune()
+            except Exception:
+                logger.warning("prune of %s failed", log.collection, exc_info=True)
+        if stop.wait(every):
+            return
 
 
 def _backfill_path_fields(indexer: Indexer, collections: list[str]) -> None:
@@ -65,6 +81,18 @@ def create_app() -> FastAPI:
         projects_doc = app.state.config_docs.get("projects")
         tenants_doc = app.state.config_docs.get("tenants")
         connectors_doc = app.state.config_docs.get("connectors")
+
+        # Who changed what (Activity page) and what the index went through
+        # (Indexing page): shared by every pod, pruned hourly.
+        app.state.audit = EventLog(app.state.qdrant, AUDIT_COLLECTION, AUDIT_FIELDS,
+                                   settings.mnemos_audit_retention_days)
+        app.state.index_events = EventLog(app.state.qdrant, INDEX_EVENTS_COLLECTION, INDEX_EVENT_FIELDS,
+                                          settings.mnemos_index_events_retention_days)
+        for log in (app.state.audit, app.state.index_events):
+            log.ensure_collection()
+        pruning = threading.Event()
+        threading.Thread(target=_prune_forever, args=([app.state.audit, app.state.index_events], pruning),
+                         name="event-log-prune", daemon=True).start()
 
         app.state.embeddings = EmbeddingService(model_name=settings.embedding_model)
 
@@ -205,6 +233,8 @@ def create_app() -> FastAPI:
             embedding_service=app.state.embeddings,
             deduplicator=app.state.deduplicator,
             cache=app.state.cache,
+            audit_log=app.state.audit,
+            index_log=app.state.index_events,
         )
 
         # Streamable HTTP session manager
@@ -237,6 +267,7 @@ def create_app() -> FastAPI:
                 yield
         finally:
             sync.stop()
+            pruning.set()
             app.state.qdrant.close()
 
     app = FastAPI(title="Mnemos MCP Server", lifespan=lifespan)
@@ -252,6 +283,9 @@ def create_app() -> FastAPI:
             )
         # Empty until the lifespan loads the tenants: nothing gets through before.
         app.add_middleware(BearerAuthMiddleware, tenants=tenant_table)
+
+    # A 403 on a route that changes something lands in the audit trail.
+    app.add_exception_handler(HTTPException, audit_refusals)
 
     # --- MCP Streamable HTTP transport ---
     async def mcp_http_handler(scope, receive, send):
@@ -296,6 +330,8 @@ def create_app() -> FastAPI:
     app.include_router(connectors_router)
     app.include_router(projects_router)
     app.include_router(tenants_router)
+    app.include_router(audit_router)
+    app.include_router(indexing_router)
 
     # --- Dashboard ---
     # Mounted last and at the root, so it only catches what /mcp, /health and

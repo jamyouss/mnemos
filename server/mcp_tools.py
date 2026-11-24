@@ -15,7 +15,11 @@ from qdrant_client import QdrantClient
 from core.collections import COLLECTIONS
 from core.embeddings import EmbeddingService
 from core.indexer import Indexer
+from fastapi import HTTPException
+
 from server.api import default_reindex_root, invalidate_cache, run_reindex, validate_path
+from server.audit import record as audit_record
+from server.indexing import ReindexJob
 from server.principal import Principal, forbidden, principal_from_scope, require_write_all
 from server.search import SearchService
 
@@ -367,6 +371,8 @@ def create_mcp_server(
     embedding_service: EmbeddingService | None = None,
     deduplicator=None,
     cache=None,
+    audit_log=None,
+    index_log=None,
 ) -> Server:
     """Create and configure an MCP server with all 9 Mnemos tools."""
     server = Server("mnemos-mcp")
@@ -383,7 +389,8 @@ def create_mcp_server(
         try:
             principal = _caller(server)
             result = await _dispatch_tool(
-                name, args, principal, search_service, indexer, qdrant_client, deduplicator, cache
+                name, args, principal, search_service, indexer, qdrant_client, deduplicator, cache,
+                audit_log=audit_log, index_log=index_log,
             )
             # Compact JSON: LLMs don't need pretty-printing. Roughly halves the
             # token cost of every MCP response.
@@ -421,14 +428,26 @@ async def _dispatch_tool(
     qdrant_client: QdrantClient | None,
     deduplicator=None,
     cache=None,
+    *,
+    audit_log=None,
+    index_log=None,
 ) -> Any:
     # Every tool blocks (torch, sync Qdrant, LLM): run it off the event loop so
     # one slow call does not stall the other MCP sessions and REST requests.
     return await anyio.to_thread.run_sync(
         functools.partial(
-            _run_tool, name, args, principal, search_service, indexer, qdrant_client, deduplicator, cache
+            _run_tool, name, args, principal, search_service, indexer, qdrant_client, deduplicator, cache,
+            audit_log=audit_log, index_log=index_log,
         )
     )
+
+
+# Tools that change something, recorded in the audit trail like their REST twins.
+_AUDITED_TOOLS = {
+    "mnemos_memory": "memory.create",
+    "mnemos_memory_review": "memory.review",
+    "mnemos_reindex": "index.reindex",
+}
 
 
 def _run_tool(
@@ -440,6 +459,43 @@ def _run_tool(
     qdrant_client: QdrantClient | None,
     deduplicator=None,
     cache=None,
+    *,
+    audit_log=None,
+    index_log=None,
+) -> Any:
+    action = _AUDITED_TOOLS.get(name)
+    run = functools.partial(
+        _tool, name, args, principal, search_service, indexer, qdrant_client, deduplicator, cache,
+        index_log=index_log,
+    )
+    if action is None:
+        return run()
+    target = args.get("memory_id") or f"{args.get('collection', '')}:{args.get('path') or ''}"
+    try:
+        result = run()
+    except HTTPException as exc:
+        if exc.status_code == 403:
+            audit_record(audit_log, actor=principal.name, action=action, target=target,
+                         outcome="denied", via="mcp", detail=str(exc.detail))
+        raise
+    if name == "mnemos_memory":
+        target = result["id"]
+    changes = {k: v for k, v in args.items() if k != "content"}
+    audit_record(audit_log, actor=principal.name, action=action, target=target, changes=changes, via="mcp")
+    return result
+
+
+def _tool(
+    name: str,
+    args: dict[str, Any],
+    principal: Principal,
+    search_service: SearchService,
+    indexer: Indexer,
+    qdrant_client: QdrantClient | None,
+    deduplicator=None,
+    cache=None,
+    *,
+    index_log=None,
 ) -> Any:
     if name == "mnemos_search":
         results = search_service.search(
@@ -540,14 +596,16 @@ def _run_tool(
             raise ValueError(f"Not found on the server: {root}")
         indexer.ensure_collection(collection)
         invalidate_cache(cache)
+        job = ReindexJob(index_log, collection=collection, path=str(base_path), full=base_path.is_dir(),
+                         actor=principal.name, channel="mcp")
         threading.Thread(
             target=run_reindex,
             args=(indexer, collection, base_path, base_path.is_dir()),
-            kwargs={"cache": cache},
+            kwargs={"cache": cache, "job": job},
             name=f"reindex-{collection}",
             daemon=True,
         ).start()
-        return {"status": "reindex_started", "collection": collection, "path": str(base_path)}
+        return {"status": "reindex_started", "collection": collection, "path": str(base_path), "job_id": job.id}
 
     if name == "mnemos_status":
         if qdrant_client is None:

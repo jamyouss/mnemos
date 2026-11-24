@@ -22,6 +22,8 @@ EDITABLE = {
     "mnemos_cache_threshold": "live",
     "mnemos_cache_ttl_seconds": "live",
     "mnemos_query_log_enabled": "live",
+    "mnemos_audit_retention_days": "live",
+    "mnemos_index_events_retention_days": "live",
     "mnemos_contextual_enabled": "live",
     "mnemos_contextual_workers": "restart",
     "mnemos_dedup_threshold": "live",

@@ -14,6 +14,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from server.audit import audit, keyed_changes
 from server.config import settings
 from server.config_api import require_admin_writer, revision_conflict
 from server.principal import principal_of, require_admin_or_write_all
@@ -126,6 +127,7 @@ def put_projects(body: ProjectsPutRequest, request: Request):
             status_code=422,
             content={"detail": "Invalid projects, nothing was saved", "problems": problems},
         )
+    stored = request.app.state.config_docs.get(PROJECTS_KEY)
     try:
         doc = request.app.state.config_docs.put(
             PROJECTS_KEY, _data(rows), expected_revision=body.revision,
@@ -133,4 +135,7 @@ def put_projects(body: ProjectsPutRequest, request: Request):
     except RevisionConflict as exc:
         return revision_conflict(exc)
     request.app.state.config_sync.apply(doc)
+    by_prefix = lambda rs: {r["prefix"]: {k: v for k, v in r.items() if k != "prefix"} for r in rs}  # noqa: E731
+    audit(request, "projects.update", "projects",
+          keyed_changes(by_prefix(_rows(stored.data) if stored else []), by_prefix(rows)))
     return _snapshot(doc)
