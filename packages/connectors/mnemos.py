@@ -1,4 +1,4 @@
-"""Thin HTTP client for the three Mnemos endpoints a connector needs."""
+"""Thin HTTP client for the Mnemos endpoints a connector needs."""
 
 from __future__ import annotations
 
@@ -79,6 +79,21 @@ class MnemosClient:
             self._client, "POST", f"{self._base}/api/index", json=payload, retry=self._retry
         )
         response.raise_for_status()
+
+    def push_many(self, docs: list[dict]) -> list[dict] | None:
+        """Index several documents in one request, embedded together; one result each.
+
+        ``docs`` items take the keys of :meth:`push`. None when the server
+        predates ``/api/index/batch``: the caller then pushes one by one.
+        """
+        response = request(
+            self._client, "POST", f"{self._base}/api/index/batch",
+            json={"collection": self._collection, "items": docs}, retry=self._retry,
+        )
+        if response.status_code in (404, 405):
+            return None
+        response.raise_for_status()
+        return response.json()["results"]
 
     def delete(self, file_path: str) -> None:
         """Remove every chunk of ``file_path`` from the collection."""

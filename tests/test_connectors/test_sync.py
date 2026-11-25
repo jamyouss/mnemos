@@ -207,3 +207,44 @@ def test_a_skipped_item_is_counted_and_its_stale_copy_removed(mnemos):
     assert (result.skipped, result.deleted, result.pushed) == (1, 1, 0)
     assert result.ok
     assert mnemos.deleted == ["confluence/ENG/1.md"]
+
+
+def _posts(mnemos: FakeMnemos) -> list[str]:
+    return [r.url.path for r in mnemos.requests if r.method == "POST"]
+
+
+def test_documents_are_pushed_in_batches(mnemos):
+    from connectors.sync import BATCH_FILES
+
+    result = _sync(mnemos, [_item(str(i), 1.0) for i in range(BATCH_FILES + 5)])
+
+    assert result.pushed == BATCH_FILES + 5 and result.ok
+    assert _posts(mnemos) == ["/api/index/batch", "/api/index/batch"]
+    assert mnemos.pushed[0]["file_mtime"] == 1.0 and mnemos.pushed[0]["tags"] == TAGS
+
+
+def test_an_older_server_gets_one_request_per_document(mnemos):
+    mnemos.batch_route = False
+    mnemos.fail_push_for.add("confluence/ENG/2.md")
+
+    result = _sync(mnemos, [_item(str(i), 1.0) for i in range(4)])
+
+    assert (result.pushed, result.failed) == (3, 1)
+    # One probe of the batch route, then single pushes only.
+    assert _posts(mnemos) == ["/api/index/batch"] + ["/api/index"] * 4
+
+
+def test_a_failed_batch_counts_every_document_and_the_run_goes_on(mnemos, monkeypatch):
+    calls = []
+
+    def broken(self, docs):
+        calls.append(len(docs))
+        raise httpx.ConnectError("down")
+
+    monkeypatch.setattr(MnemosClient, "push_many", broken)
+    mnemos.seed("confluence/ENG/gone.md", 100.0, TAGS)
+
+    result = _sync(mnemos, [_item("1", 1.0), _item("2", 1.0)])
+
+    assert (result.pushed, result.failed, result.deleted) == (0, 2, 1)
+    assert calls == [2]

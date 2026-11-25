@@ -234,6 +234,20 @@ def test_push_with_declared_tags_inside_the_write_scope_passes(app):
     assert _push(_client(app, ACME), tags=["acme"]).status_code == 200
 
 
+def test_a_batch_push_refuses_files_one_by_one_and_indexes_the_rest(app):
+    app.state.indexer.index_files.return_value = [2]
+    items = [
+        {"file_path": "acme/a.go", "content": "package a", "tags": ["acme"]},
+        {"file_path": "other/b.go", "content": "package b", "tags": ["other"]},
+    ]
+    response = _client(app, ACME).post("/api/index/batch", json={"collection": "mnemos_code", "items": items})
+
+    assert response.status_code == 200
+    assert [(r["status"], r["chunks"]) for r in response.json()["results"]] == [("indexed", 2), ("refused", 0)]
+    docs, _ = app.state.indexer.index_files.call_args.args
+    assert [d.file_path for d in docs] == ["acme/a.go"]
+
+
 def test_push_with_resolved_tags_meeting_the_write_scope_passes(app):
     # One shared tag is enough when the server chose the tags.
     app.state.indexer.resolve_tags.return_value = ["acme", "go"]

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import List, Literal, Optional
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from qdrant_client.models import (
     FieldCondition,
     Filter,
@@ -23,7 +23,7 @@ from qdrant_client.models import (
 
 from core.cache import CACHE_COLLECTION
 from core.collections import COLLECTIONS, TAGS_PAYLOAD_FIELD
-from core.indexer import CHUNK_FACET_FIELDS, TAGGED_COLLECTIONS, facet_fields
+from core.indexer import CHUNK_FACET_FIELDS, TAGGED_COLLECTIONS, IndexDoc, facet_fields
 from core.llm import LLMError
 from server.audit import audit, field_changes
 from server.config import settings
@@ -64,6 +64,24 @@ class IndexPushRequest(BaseModel):
     tags: Optional[List[str]] = None  # Override the auto-detected tag list for this file.
     source_url: Optional[str] = None  # Where the original lives (wiki page, ticket, web page).
     file_mtime: Optional[float] = None  # Source last-modified (epoch seconds); defaults to now.
+
+
+# Enough for the embedder to work in large batches, small enough that one
+# request stays well under the clients' timeout on a CPU-only server.
+MAX_BATCH_FILES = 100
+
+
+class IndexBatchItem(BaseModel):
+    file_path: str
+    content: str
+    tags: Optional[List[str]] = None
+    source_url: Optional[str] = None
+    file_mtime: Optional[float] = None
+
+
+class IndexBatchRequest(BaseModel):
+    collection: str
+    items: List[IndexBatchItem] = Field(min_length=1, max_length=MAX_BATCH_FILES)
 
 
 class _Diagnosable(BaseModel):
@@ -333,6 +351,49 @@ def push_index(body: IndexPushRequest, request: Request):
     # 0 chunks: filtered out by the server's ignore rules, or nothing to index.
     event(op="indexed" if count else "skipped", chunks=count, duration_ms=_ms_since(started))
     return {"status": "indexed", "file_path": body.file_path, "chunks": count}
+
+
+@api_router.post("/api/index/batch")
+def push_index_batch(body: IndexBatchRequest, request: Request):
+    """`POST /api/index` for several files at once, embedded in one pass.
+
+    Each file is checked, recorded and answered on its own: a refused file
+    does not stop the others. An embedding failure fails the whole batch.
+    """
+    if body.collection not in _VALID_COLLECTIONS:
+        raise HTTPException(status_code=400, detail=f"Unknown collection: {body.collection}")
+    principal = principal_of(request)
+    indexer = request.app.state.indexer
+    results: list[dict] = [{}] * len(body.items)
+    accepted: list[tuple[int, IndexBatchItem, functools.partial]] = []
+    for position, item in enumerate(body.items):
+        event = functools.partial(
+            file_event, getattr(request.app.state, "index_events", None), collection=body.collection,
+            file_path=item.file_path, channel=channel_of(request), actor=principal.name,
+        )
+        try:
+            with _refusals_recorded(event):
+                _require_push(principal, indexer, IndexPushRequest(collection=body.collection, **item.model_dump()))
+        except HTTPException as exc:
+            results[position] = {"file_path": item.file_path, "status": "refused", "chunks": 0, "error": str(exc.detail)}
+            continue
+        accepted.append((position, item, event))
+    if accepted:
+        indexer.ensure_collection(body.collection)
+        started = time.monotonic()
+        try:
+            counts = indexer.index_files([IndexDoc(**item.model_dump()) for _, item, _ in accepted], body.collection)
+        except Exception as exc:
+            for _, _, event in accepted:
+                event(op="failed", error=f"{type(exc).__name__}: {exc}")
+            raise
+        _index_changed(request)
+        # One embedding pass: each file is credited its share of the batch's time.
+        share = round(_ms_since(started) / len(accepted))
+        for (position, item, event), count in zip(accepted, counts):
+            event(op="indexed" if count else "skipped", chunks=count, duration_ms=share)
+            results[position] = {"file_path": item.file_path, "status": "indexed" if count else "skipped", "chunks": count}
+    return {"results": results}
 
 
 @api_router.delete("/api/index/{collection}/{file_path:path}")

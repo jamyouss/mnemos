@@ -28,7 +28,7 @@ def _make_mock_embeddings():
     mock_embeddings = MagicMock()
     mock_embeddings.dimension = 384
     mock_embeddings.embed_query.return_value = [0.1] * 384
-    mock_embeddings.embed_documents.return_value = [[0.1] * 384]
+    mock_embeddings.embed_documents.side_effect = lambda texts, titles=None: [[0.1] * 384 for _ in texts]
     return mock_embeddings
 
 

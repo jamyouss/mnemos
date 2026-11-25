@@ -29,6 +29,8 @@ class FakeMnemos:
     deleted: list[str] = field(default_factory=list)
     requests: list[httpx.Request] = field(default_factory=list)
     fail_push_for: set[str] = field(default_factory=set)
+    # False: a server older than /api/index/batch, which answers it 404.
+    batch_route: bool = True
 
     def seed(self, file_path: str, mtime: float | None, tags: list[str]) -> None:
         self.files[file_path] = {"file_mtime": mtime, "tags": tags}
@@ -41,14 +43,25 @@ class FakeMnemos:
             tag = request.url.params["tag"]
             files = {p: f["file_mtime"] for p, f in self.files.items() if tag in f["tags"]}
             return httpx.Response(200, json={"collection": self.collection, "tag": tag, "files": files})
+        if request.method == "POST" and path == "/api/index/batch" and self.batch_route:
+            body = json.loads(request.content)
+            if body["collection"] != self.collection:
+                return httpx.Response(400, json={"detail": f"unexpected collection {body['collection']}"})
+            results = []
+            for item in body["items"]:
+                if item["file_path"] in self.fail_push_for:
+                    results.append({"file_path": item["file_path"], "status": "refused", "chunks": 0, "error": "rejected"})
+                    continue
+                self._store({**item, "collection": body["collection"]})
+                results.append({"file_path": item["file_path"], "status": "indexed", "chunks": 1})
+            return httpx.Response(200, json={"results": results})
         if request.method == "POST" and path == "/api/index":
             body = json.loads(request.content)
             if body["collection"] != self.collection:
                 return httpx.Response(400, json={"detail": f"unexpected collection {body['collection']}"})
             if body["file_path"] in self.fail_push_for:
                 return httpx.Response(400, json={"detail": "rejected"})
-            self.pushed.append(body)
-            self.files[body["file_path"]] = {"file_mtime": body.get("file_mtime"), "tags": body["tags"]}
+            self._store(body)
             return httpx.Response(200, json={"status": "indexed", "chunks": 1})
         if request.method == "DELETE" and path.startswith(prefix):
             file_path = unquote(request.url.raw_path.decode()[len(prefix):])
@@ -56,6 +69,10 @@ class FakeMnemos:
             self.files.pop(file_path, None)
             return httpx.Response(200, json={"status": "deleted"})
         return httpx.Response(404, json={"detail": f"no route {request.method} {path}"})
+
+    def _store(self, body: dict) -> None:
+        self.pushed.append(body)
+        self.files[body["file_path"]] = {"file_mtime": body.get("file_mtime"), "tags": body["tags"]}
 
     def client(self) -> MnemosClient:
         return MnemosClient(

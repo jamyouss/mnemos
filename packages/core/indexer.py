@@ -4,6 +4,7 @@ import logging
 import time
 import uuid
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from qdrant_client import QdrantClient
@@ -42,6 +43,17 @@ from core.skills import skill_payload
 from core.sparse import bm25_sparse
 
 _logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class IndexDoc:
+    """One file to index: its content and what the push said about it."""
+
+    file_path: str
+    content: str
+    file_mtime: float | None = None
+    tags: list[str] | None = None  # overrides the tags resolved from the path
+    source_url: str | None = None
 
 
 def _longest_prefix(rel_path: str, mapping: dict) -> str | None:
@@ -398,85 +410,80 @@ class Indexer:
         tags: list[str] | None = None,
         source_url: str | None = None,
     ) -> int:
-        # Defense-in-depth: even if a caller (push API, hook) forgot to
-        # pre-filter, vendored bundles / build outputs never reach the
-        # embedder. Watcher and bulk reindex still pre-filter to avoid
-        # the round-trip cost.
-        if self.should_skip(file_path):
-            _logger.debug("path_filter: skipping %s", file_path)
-            return 0
+        doc = IndexDoc(file_path=file_path, content=content, file_mtime=file_mtime, tags=tags, source_url=source_url)
+        return self.index_files([doc], collection)[0]
 
-        self.delete_file(file_path, collection)
+    def index_files(self, docs: list[IndexDoc], collection: str) -> list[int]:
+        """Index several files with one embedding pass; the chunk count of each, in order.
 
-        chunker = self._select_chunker(file_path)
-        chunks = split_long_chunks(chunker.chunk(content, file_path), self._max_chunk_chars)
+        One `embed_documents` call over every chunk: the model works through
+        large batches far faster than through one small call per file.
+        A file's old chunks go only once the new ones are computed, so a
+        failed embedding leaves the previous version searchable.
+        """
+        prepared: list[tuple[IndexDoc, list[dict], list[str], dict]] = []
+        counts = [0] * len(docs)
+        slots: list[int] = []
+        for position, doc in enumerate(docs):
+            # Defense-in-depth: even if a caller (push API, hook) forgot to
+            # pre-filter, vendored bundles / build outputs never reach the
+            # embedder. Watcher and bulk reindex still pre-filter to avoid
+            # the round-trip cost.
+            if self.should_skip(doc.file_path):
+                _logger.debug("path_filter: skipping %s", doc.file_path)
+                continue
+            chunker = self._select_chunker(doc.file_path)
+            chunks = split_long_chunks(chunker.chunk(doc.content, doc.file_path), self._max_chunk_chars)
+            if not chunks:
+                self.delete_file(doc.file_path, collection)
+                continue
+            # Optional Anthropic-style contextual enrichment: prepend an LLM-generated
+            # one-sentence preamble to each chunk before embedding + sparse indexing.
+            if self._contextual is not None and self._contextual.enabled:
+                chunks = self._contextual.enrich(doc.content, chunks, doc.file_path)
+            # Tags matter only for the code/memory collections; skills/docs leave the field unset.
+            resolved_tags = self.resolve_tags(doc.file_path, doc.tags) if collection in TAGGED_COLLECTIONS else []
+            # Skill name + description, so a search result can say which skill it came from.
+            skill_fields = skill_payload(doc.content, doc.file_path) if collection == "mnemos_skills" else {}
+            prepared.append((doc, chunks, resolved_tags, skill_fields))
+            slots.append(position)
+        if not prepared:
+            return counts
 
-        if not chunks:
-            return 0
-
-        # Optional Anthropic-style contextual enrichment: prepend an LLM-generated
-        # one-sentence preamble to each chunk before embedding + sparse indexing.
-        if self._contextual is not None and self._contextual.enabled:
-            chunks = self._contextual.enrich(content, chunks, file_path)
-
-        # Resolve tags once per file. Only relevant for the code/memory
-        # collections; skills/docs leave the field unset.
-        resolved_tags: list[str] = (
-            self.resolve_tags(file_path, tags)
-            if collection in TAGGED_COLLECTIONS
-            else []
-        )
-
-        # Skill name + description, so a search result can say which skill it
-        # came from. Read at query time by SkillResult; nothing wrote them
-        # before, which left mnemos_search_skills returning unnamed hits.
-        skill_fields = (
-            skill_payload(content, file_path)
-            if collection == "mnemos_skills"
-            else {}
-        )
-
-        texts = [c["content"] for c in chunks]
-        dense_vectors = self._embeddings.embed_documents(
-            texts, titles=[self._relative_path(file_path)] * len(texts)
-        )
-        sparse_vectors = [bm25_sparse(t) for t in texts]
+        texts = [c["content"] for _, chunks, _, _ in prepared for c in chunks]
+        titles = [self._relative_path(doc.file_path) for doc, chunks, _, _ in prepared for _ in chunks]
+        dense_vectors = iter(self._embeddings.embed_documents(texts, titles=titles))
 
         now = datetime.now(timezone.utc).isoformat()
-        dirs = path_dirs(file_path)
-        language = language_for(file_path)
-        points = []
-        for chunk, dense, sparse in zip(chunks, dense_vectors, sparse_vectors):
-            point_id = chunk_point_id(file_path, chunk.get("chunk_index", 0))
-            payload = {
-                **chunk,
-                **skill_fields,
-                "last_indexed_at": now,
-                "file_mtime": file_mtime or time.time(),
-                PATH_DIRS_FIELD: dirs,
-            }
-            if language and not payload.get("language"):
-                payload["language"] = language
-            if resolved_tags:
-                payload[TAGS_PAYLOAD_FIELD] = resolved_tags
-            if source_url:
-                payload["source_url"] = source_url
-            points.append(
-                PointStruct(
-                    id=point_id,
-                    vector={
-                        DENSE_VECTOR_NAME: dense,
-                        SPARSE_VECTOR_NAME: sparse,
-                    },
+        for position, (doc, chunks, resolved_tags, skill_fields) in zip(slots, prepared):
+            dirs = path_dirs(doc.file_path)
+            language = language_for(doc.file_path)
+            points = []
+            for chunk in chunks:
+                payload = {
+                    **chunk,
+                    **skill_fields,
+                    "last_indexed_at": now,
+                    "file_mtime": doc.file_mtime or time.time(),
+                    PATH_DIRS_FIELD: dirs,
+                }
+                if language and not payload.get("language"):
+                    payload["language"] = language
+                if resolved_tags:
+                    payload[TAGS_PAYLOAD_FIELD] = resolved_tags
+                if doc.source_url:
+                    payload["source_url"] = doc.source_url
+                points.append(PointStruct(
+                    id=chunk_point_id(doc.file_path, chunk.get("chunk_index", 0)),
+                    vector={DENSE_VECTOR_NAME: next(dense_vectors), SPARSE_VECTOR_NAME: bm25_sparse(chunk["content"])},
                     payload=payload,
-                )
-            )
-
-        # Batch upserts to stay under Qdrant payload size limits
-        batch_size = 50
-        for i in range(0, len(points), batch_size):
-            self._qdrant.upsert(collection_name=collection, points=points[i:i + batch_size])
-        return len(points)
+                ))
+            self.delete_file(doc.file_path, collection)
+            # Batch upserts to stay under Qdrant payload size limits
+            for i in range(0, len(points), 50):
+                self._qdrant.upsert(collection_name=collection, points=points[i:i + 50])
+            counts[position] = len(points)
+        return counts
 
     def delete_file(self, file_path: str, collection: str) -> None:
         self._qdrant.delete(

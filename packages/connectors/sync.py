@@ -14,7 +14,9 @@ Rules:
 * delete indexed files the run did not see — **only** once the source
   listing finished without error. A failed or truncated listing never
   deletes anything: "not seen" would then mean "not reached", not "gone";
-* one failed push (or render) is counted and logged, never fatal.
+* one failed push (or render) is counted and logged, never fatal;
+* documents to push are sent in batches (``/api/index/batch``), so the
+  server embeds many files in one pass; an older server gets them one by one.
 """
 
 from __future__ import annotations
@@ -26,6 +28,12 @@ from dataclasses import dataclass
 from connectors.mnemos import MnemosClient
 
 logger = logging.getLogger(__name__)
+
+# A batch closes at whichever comes first. Characters bound one request's
+# embedding time: ~150 chunks, about a minute on a 6-core CPU server, far
+# under MNEMOS_TIMEOUT (a timed-out batch is retried, embedded all over again).
+BATCH_FILES = 32
+BATCH_CHARS = 200_000
 
 
 class SourceError(RuntimeError):
@@ -118,12 +126,13 @@ def sync_scope(
 
     seen: set[str] = set()
     listing_complete = False
+    pusher = _Pusher(mnemos, tags, result)
     try:
         for item in items:
             if item.file_path in seen:
                 continue
             seen.add(item.file_path)
-            _sync_item(mnemos, item, indexed, tags, full, result)
+            _sync_item(mnemos, item, indexed, full, result, pusher)
         listing_complete = True
     except ListingTruncated as exc:
         result.truncated = True
@@ -131,6 +140,8 @@ def sync_scope(
     except Exception as exc:  # noqa: BLE001 — any source failure means "do not delete"
         result.error = f"source listing failed: {exc}"
         logger.error("[%s] source listing failed: %s — nothing deleted", scope_tag, exc)
+    # What was rendered is pushed even when the listing stopped early.
+    pusher.flush()
 
     if listing_complete:
         for file_path in sorted(set(indexed) - seen):
@@ -147,9 +158,9 @@ def _sync_item(
     mnemos: MnemosClient,
     item: SourceItem,
     indexed: dict[str, float | None],
-    tags: list[str],
     full: bool,
     result: SyncResult,
+    pusher: _Pusher,
 ) -> None:
     if not needs_push(
         item.updated, indexed.get(item.file_path), indexed=item.file_path in indexed, full=full
@@ -169,20 +180,63 @@ def _sync_item(
         result.failed += 1
         logger.error("[%s] render %s (%s) failed: %s", result.scope_tag, item.file_path, item.title, exc)
         return
-    try:
-        mnemos.push(
-            file_path=item.file_path,
-            content=content,
-            tags=tags,
-            source_url=item.source_url,
-            file_mtime=item.updated,
-        )
-    except Exception as exc:  # noqa: BLE001 — one bad document must not stop the run
-        result.failed += 1
-        logger.error("[%s] push %s (%s) failed: %s", result.scope_tag, item.file_path, item.title, exc)
-    else:
-        result.pushed += 1
-        logger.debug("[%s] pushed %s", result.scope_tag, item.file_path)
+    pusher.add(item, content)
+
+
+class _Pusher:
+    """Collects rendered documents and pushes them a batch at a time."""
+
+    def __init__(self, mnemos: MnemosClient, tags: list[str], result: SyncResult) -> None:
+        self._mnemos = mnemos
+        self._tags = tags
+        self._result = result
+        self._pending: list[tuple[SourceItem, dict]] = []
+        self._chars = 0
+        self._batched = True
+
+    def add(self, item: SourceItem, content: str) -> None:
+        self._pending.append((item, {
+            "file_path": item.file_path, "content": content, "tags": self._tags,
+            "source_url": item.source_url, "file_mtime": item.updated,
+        }))
+        self._chars += len(content)
+        if len(self._pending) >= BATCH_FILES or self._chars >= BATCH_CHARS:
+            self.flush()
+
+    def flush(self) -> None:
+        pending, self._pending, self._chars = self._pending, [], 0
+        if not pending:
+            return
+        if self._batched:
+            try:
+                answers = self._mnemos.push_many([_without_none(doc) for _, doc in pending])
+            except Exception as exc:  # noqa: BLE001 — the batch fails, the run goes on
+                for item, _ in pending:
+                    self._failed(item, str(exc))
+                return
+            if answers is not None:
+                for (item, _), answer in zip(pending, answers):
+                    if answer.get("status") in ("indexed", "skipped"):
+                        self._result.pushed += 1
+                    else:
+                        self._failed(item, answer.get("error") or answer.get("status"))
+                return
+            self._batched = False  # an older server: one request per document from now on
+        for item, doc in pending:
+            try:
+                self._mnemos.push(**doc)
+            except Exception as exc:  # noqa: BLE001 — one bad document must not stop the run
+                self._failed(item, str(exc))
+            else:
+                self._result.pushed += 1
+
+    def _failed(self, item: SourceItem, error: str | None) -> None:
+        self._result.failed += 1
+        logger.error("[%s] push %s (%s) failed: %s", self._result.scope_tag, item.file_path, item.title, error)
+
+
+def _without_none(doc: dict) -> dict:
+    return {k: v for k, v in doc.items() if v is not None}
 
 
 def _delete(mnemos: MnemosClient, file_path: str, result: SyncResult) -> None:

@@ -140,6 +140,7 @@ read-only key.
 | Skills and docs | Readable by every tenant; writable only with `write: "*"` |
 | Push with tags resolved by the server (no `tags` in the body) | One resolved tag in `write` is enough |
 | Push or memory with tags declared by the client (`tags` override, memories, connector pages) | Every tag must be in `write` |
+| `POST /api/index/batch` (connectors) | The two rules above, file by file: a refused file is answered `refused`, the others are indexed |
 | `/api/reindex`, `/internal/reindex`, `/api/memory/extract`, MCP `mnemos_reindex` | `write: "*"` |
 | Delete an indexed file | Every stored chunk of the file shares a tag with `write` |
 | Approve, reject, edit or delete a memory | One of the memory's tags in `write`; new tags given to it must all be in `write` |

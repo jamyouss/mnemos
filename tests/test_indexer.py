@@ -2,7 +2,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from core.indexer import Indexer
+from core.indexer import IndexDoc, Indexer
 
 
 @pytest.fixture
@@ -16,13 +16,34 @@ def mock_qdrant():
 def mock_embeddings():
     service = MagicMock()
     service.dimension = 384
-    service.embed_documents.return_value = [[0.1] * 384, [0.2] * 384]
+    service.embed_documents.side_effect = lambda texts, titles=None: [[0.1] * 384 for _ in texts]
     return service
 
 
 @pytest.fixture
 def indexer(mock_qdrant, mock_embeddings):
     return Indexer(qdrant_client=mock_qdrant, embedding_service=mock_embeddings)
+
+
+def test_several_files_share_one_embedding_pass(indexer, mock_embeddings, mock_qdrant):
+    docs = [
+        IndexDoc(file_path="a.md", content="# A\n\nalpha"),
+        IndexDoc(file_path="node_modules/x/index.js", content="x"),
+        IndexDoc(file_path="b.md", content="# B\n\nbeta"),
+    ]
+    counts = indexer.index_files(docs, "mnemos_docs")
+
+    assert counts[0] > 0 and counts[1] == 0 and counts[2] > 0
+    mock_embeddings.embed_documents.assert_called_once()
+    written = {p.payload["file_path"] for c in mock_qdrant.upsert.call_args_list for p in c.kwargs["points"]}
+    assert written == {"a.md", "b.md"}
+
+
+def test_a_failed_embedding_keeps_the_previous_chunks(indexer, mock_embeddings, mock_qdrant):
+    mock_embeddings.embed_documents.side_effect = RuntimeError("model crashed")
+    with pytest.raises(RuntimeError):
+        indexer.index_files([IndexDoc(file_path="a.md", content="# A\n\nalpha")], "mnemos_docs")
+    mock_qdrant.delete.assert_not_called()
 
 
 def test_select_chunker_for_go(indexer):
