@@ -122,6 +122,8 @@ IGNORE_FILENAMES: frozenset[str] = frozenset({
     "yarn.lock",
     "poetry.lock",
     ".last-run.json",
+    # OS folder metadata, binary: the bulk walker read it as text and failed.
+    ".DS_Store", "Thumbs.db",
 })
 
 # Basename substrings — generated test / audit reports. We do NOT ban all

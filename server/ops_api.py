@@ -122,7 +122,7 @@ def alerts(request: Request):
 
     if principal.admin or principal.write_all:
         docs = state.config_docs
-        if _source_names(docs):
+        if names := set(_source_names(docs)):
             sync = _sync_state(docs)
             silent = _age(sync["service_seen_at"])
             if silent is None:
@@ -133,7 +133,9 @@ def alerts(request: Request):
                 out.append(_alert("sync-silent", "error", "The sync service stopped reporting",
                                   f"Last heard from {int(silent // 60)} min ago; connector sources are not synced.",
                                   "/connectors"))
-            failed = sorted(name for name, run in sync["runs"].items() if run.get("state") == "failed")
+            # A removed source keeps its last report until it is pruned: not this alert's business.
+            failed = sorted(name for name, run in sync["runs"].items()
+                            if run.get("state") == "failed" and name in names)
             if failed:
                 out.append(_alert("sync-failed", "warning", "A connector sync failed",
                                   f"Last sync failed for {', '.join(failed)}.", "/connectors"))
@@ -152,9 +154,13 @@ def alerts(request: Request):
                               f"{failures['write_failures']} could not be stored on this server since it started; "
                               "they are in its log (mnemos.audit).", "/activity"))
         jobs, _ = state.index_events.query({"kind": "job"}, since=time.time() - 86400, limit=50)
-        broken = [j for j in jobs if j.get("state") in ("failed", "partial")]
+        # Newest first: a later run of the same reindex supersedes a failed one.
+        latest: dict[tuple, dict] = {}
+        for job in jobs:
+            latest.setdefault((job.get("collection"), job.get("path")), job)
+        broken = [j for j in latest.values() if j.get("state") in ("failed", "partial")]
         if broken:
             out.append(_alert("reindex-failed", "warning", "A reindex did not complete cleanly",
-                              f"{len(broken)} reindex job(s) in the last 24 h failed or left failed files.",
-                              "/indexing"))
+                              f"{len(broken)} reindex job(s) in the last 24 h failed or left failed files, "
+                              "and were not run again since.", "/indexing"))
     return {"alerts": out}

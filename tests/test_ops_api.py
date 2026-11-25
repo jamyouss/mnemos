@@ -52,8 +52,10 @@ def test_connectors_without_a_sync_service_then_a_silent_one(client, backend):
     assert _ids(client) == ["sync-never"]
     doc_store(backend).put("connectors_status", {"service_seen_at": _ago(10), "runs": {
         "tracker": {"state": "failed", "finished_at": _ago(10), "results": []},
+        "removed-since": {"state": "failed", "finished_at": _ago(10), "results": []},
     }})
     assert _ids(client) == ["sync-silent", "sync-failed"]
+    assert "removed-since" not in str(client.get("/api/alerts", headers=ROOT).json())
     # A key with no say over connectors sees none of it.
     assert _ids(client, DEV) == []
 
@@ -71,6 +73,17 @@ def test_an_unreachable_llm_is_an_alert_for_everyone(client, monkeypatch):
         "qdrant": {"ok": True}, "llm": {"ok": False, "provider": "ollama", "error": "connection refused"},
     })
     assert _ids(client, DEV) == ["llm-down"]
+
+
+def test_a_failed_reindex_is_an_alert_until_it_is_run_again(client):
+    skills = {"collection": "mnemos_skills", "path": "/data/claude-config/skills"}
+    docs = {"collection": "mnemos_docs", "path": "/data/claude-config/docs", "state": "done"}
+    query = client.app.state.index_events.query
+    query.return_value = ([{**skills, "state": "partial"}, docs], None)
+    assert _ids(client) == ["reindex-failed"]
+    # Newest first: the same reindex done afterwards supersedes the failure.
+    query.return_value = ([{**skills, "state": "done"}, {**skills, "state": "partial"}, docs], None)
+    assert _ids(client) == []
 
 
 def test_key_uses_from_two_pods_merge_latest_first(backend):

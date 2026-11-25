@@ -61,7 +61,7 @@ connectors configured but no sync service ever seen, the sync service silent
 for over 3 minutes or a source's last sync failed, the watcher silent for
 over 3 minutes (it beats every minute; a watcher never seen raises nothing),
 audit entries that could not be stored, a reindex job failed or left failed
-files in the last 24 h. Each links to the page that explains it, can be
+files in the last 24 h and was not run again since. Each links to the page that explains it, can be
 dismissed for the session, and shows only to keys that can act on it
 (`GET /api/alerts`). An unreachable Qdrant shows as the server being down.
 

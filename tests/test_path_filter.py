@@ -71,6 +71,12 @@ def test_existing_patterns_still_skipped(path: str) -> None:
     assert should_skip_path(path) is True
 
 
+def test_os_folder_metadata_is_skipped_but_not_look_alikes() -> None:
+    assert should_skip_path("/data/claude-config/skills/.DS_Store") is True
+    assert should_skip_path("/data/codebase/x/assets/Thumbs.db") is True
+    assert should_skip_path("/data/codebase/x/docs/DS_Store.md") is False
+
+
 # ---------------------------------------------------------------------------
 # New patterns: the actual fix
 # ---------------------------------------------------------------------------
