@@ -174,6 +174,16 @@ export function sourceName(source: Pick<ConnectorSource, 'type' | 'name'>): stri
   return source.name?.trim() || source.type
 }
 
+/** Every word of `query` appears, case-insensitively, in the source's name, type, address, scopes, branch or tags. */
+export function sourceMatches(source: SourceForm, query: string): boolean {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean)
+  if (!words.length) return true
+  const text = [sourceName(source), source.type, source.url, source.urls, source.keys, source.branch, source.paths, source.tags]
+    .join(' ')
+    .toLowerCase()
+  return words.every((w) => text.includes(w))
+}
+
 interface SyncRequest {
   id: number
   sources: string[] | null

@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import type { Component } from 'vue'
-import { BookOpenIcon, GitBranchIcon, GlobeIcon, PlugIcon, PlusIcon, RefreshCcwDotIcon, RefreshCwIcon, TicketIcon, TriangleAlertIcon } from '@lucide/vue'
+import { BookOpenIcon, GitBranchIcon, GlobeIcon, PlugIcon, PlusIcon, RefreshCcwDotIcon, RefreshCwIcon, SearchXIcon, TicketIcon, TriangleAlertIcon } from '@lucide/vue'
 import { useIntervalFn } from '@vueuse/core'
 import { toast } from 'vue-sonner'
 import { ApiError, type ConnectorsResponse, type ConnectorSyncState } from '~/composables/useApi'
 import {
-  ago, newSource, oldestPending, pendingRequests, serviceHealth, sourceName, syncStalled, toForm, toPayload, waitingLabel,
+  ago, newSource, oldestPending, pendingRequests, serviceHealth, sourceMatches, sourceName, syncStalled, toForm, toPayload, waitingLabel,
   type SourceForm, type SourceType,
 } from '~/utils/connectors'
 import { canReadSetup, isAdmin } from '~/utils/tenants'
@@ -116,8 +116,26 @@ const addable: { type: SourceType; label: string; icon: Component }[] = [
   { type: 'git', label: 'Git repository', icon: GitBranchIcon },
 ]
 
-function add(type: SourceType) {
+const query = ref('')
+const page = ref(1)
+const pageSize = ref(10)
+const matching = computed(() => sources.value.filter((s) => sourceMatches(s, query.value)))
+const shown = computed(() => matching.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value))
+watch([query, pageSize], () => { page.value = 1 })
+// A removed source can empty the last page: stay on the last one that has sources.
+watch(() => matching.value.length, (n) => { page.value = Math.min(page.value, Math.max(1, Math.ceil(n / pageSize.value))) })
+
+function update(id: number, value: SourceForm) {
+  const i = sources.value.findIndex((s) => s.id === id)
+  if (i >= 0) sources.value[i] = value
+}
+
+async function add(type: SourceType) {
   sources.value.push(newSource(type))
+  // Show the new card: no filter hides it, and its page is the last one.
+  query.value = ''
+  await nextTick()
+  page.value = Math.ceil(sources.value.length / pageSize.value)
 }
 
 function remove(id: number) {
@@ -263,10 +281,23 @@ onBeforeRouteLeave(() => {
         </CardContent>
       </Card>
 
+      <div v-if="sources.length > 1" class="flex flex-wrap items-center gap-3">
+        <Input
+          v-model="query"
+          type="search"
+          placeholder="Search by name, URL, space, project or tag…"
+          class="h-9 min-w-56 flex-1"
+          aria-label="Search sources"
+        />
+        <span v-if="query.trim()" class="text-sm text-muted-foreground tabular-nums" aria-live="polite">
+          {{ matching.length }} of {{ sources.length }} sources
+        </span>
+      </div>
+
       <ConnectorSourceCard
-        v-for="(s, i) in sources"
+        v-for="s in shown"
         :key="s.id"
-        v-model="sources[i]!"
+        :model-value="s"
         :editable="editable"
         :indexed="indexed"
         :saved="savedNames.has(sourceName(s))"
@@ -275,9 +306,19 @@ onBeforeRouteLeave(() => {
         :sync-blocked="dirty"
         :run="sync?.runs[sourceName(s)]"
         :now="now"
+        @update:model-value="update(s.id, $event)"
         @remove="remove(s.id)"
         @sync="requestSync([sourceName(s)])"
       />
+
+      <EmptyState
+        v-if="sources.length && !matching.length"
+        :icon="SearchXIcon"
+        title="No source matches"
+        :detail="`Nothing matches “${query.trim()}”. Search looks at names, URLs, spaces, projects, branches and tags.`"
+      />
+
+      <ListPager v-model:page="page" v-model:page-size="pageSize" :total="matching.length" :sizes="[10, 15, 30, 50, 100]" />
 
       <EmptyState
         v-if="!sources.length"

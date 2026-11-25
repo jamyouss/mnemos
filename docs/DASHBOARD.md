@@ -224,7 +224,8 @@ collapsed to their name, type and chunk count; a click on the header opens
 the form. Each card shows its scope tags (`jira:OPS`, `web:docs.example.com`)
 and how many chunks `mnemos_knowledge` (or `mnemos_code`, for a git source)
 holds under each — `not synced yet` is the answer to "did the ingester ever
-run?".
+run?". A search box filters the cards on every word typed (name, URL,
+spaces, projects, branch, tags), and the list pages by 10, 15, 30, 50 or 100.
 
 **Sync all** in the header and **Sync** on a saved card ask the ingester to
 sync now; asking again while the same request waits does not queue a twin.

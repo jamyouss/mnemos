@@ -1,9 +1,26 @@
 import { describe, expect, it } from 'vitest'
 import {
-  ago, newSource, oldestPending, pendingSummary, runSummary, scopeTags, serviceHealth, serviceSummary, sourceName,
-  syncStalled, toForm, toPayload, waitingLabel,
+  ago, newSource, oldestPending, pendingSummary, runSummary, scopeTags, serviceHealth, serviceSummary, sourceMatches,
+  sourceName, syncStalled, toForm, toPayload, waitingLabel,
   type ConnectorSource,
 } from './connectors'
+
+describe('sourceMatches', () => {
+  const auth = toForm({
+    type: 'git', name: 'LPEL - Lib - auth', url: 'https://gitlab.example.com/lpel/front/libraries/auth', tags: ['lpel-front-libs'],
+  })
+
+  it('needs every word, in any field, whatever the case', () => {
+    expect(sourceMatches(auth, 'lib AUTH')).toBe(true)
+    expect(sourceMatches(auth, 'libraries lpel-front-libs')).toBe(true)
+    expect(sourceMatches(auth, 'lib checkout')).toBe(false)
+  })
+
+  it('lets everything through on a blank query, and finds an unnamed source by its type', () => {
+    expect(sourceMatches(auth, '  ')).toBe(true)
+    expect(sourceMatches(newSource('jira'), 'jira')).toBe(true)
+  })
+})
 
 describe('toPayload', () => {
   it('round-trips a stored source unchanged', () => {
