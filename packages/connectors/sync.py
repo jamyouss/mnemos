@@ -16,13 +16,15 @@ Rules:
   deletes anything: "not seen" would then mean "not reached", not "gone";
 * one failed push (or render) is counted and logged, never fatal;
 * documents to push are sent in batches (``/api/index/batch``), so the
-  server embeds many files in one pass; an older server gets them one by one.
+  server embeds many files in one pass, while the next batch is read from
+  the source; an older server gets them one by one.
 """
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Iterable
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 
 from connectors.mnemos import MnemosClient
@@ -111,8 +113,14 @@ def sync_scope(
     items: Iterable[SourceItem],
     user_tags: Iterable[str] = (),
     full: bool = False,
+    prefetch: Callable[[list[SourceItem]], None] | None = None,
 ) -> SyncResult:
-    """Mirror ``items`` into Mnemos under the ``<source>:<scope>`` tag."""
+    """Mirror ``items`` into Mnemos under the ``<source>:<scope>`` tag.
+
+    ``prefetch``, when the source has one, downloads the contents of the next
+    items to push in one go, before they are rendered one by one. The source
+    must keep contents readable after its listing ends (``GitSource`` does).
+    """
     scope_tag = f"{source}:{scope}"
     tags = scope_tags(source, scope, user_tags)
     result = SyncResult(scope_tag=scope_tag)
@@ -127,21 +135,46 @@ def sync_scope(
     seen: set[str] = set()
     listing_complete = False
     pusher = _Pusher(mnemos, tags, result)
+    window: list[SourceItem] = []
+
+    def render_window() -> None:
+        if prefetch is not None and window:
+            try:
+                prefetch(list(window))
+            except Exception as exc:  # noqa: BLE001 — each content is then fetched on its own
+                logger.warning("[%s] prefetch failed, contents fetched one by one: %s", scope_tag, exc)
+        for pending in window:
+            _render(mnemos, pending, indexed, result, pusher)
+        window.clear()
+
     try:
-        for item in items:
-            if item.file_path in seen:
-                continue
-            seen.add(item.file_path)
-            _sync_item(mnemos, item, indexed, full, result, pusher)
-        listing_complete = True
-    except ListingTruncated as exc:
-        result.truncated = True
-        logger.warning("[%s] listing truncated (%s): nothing deleted", scope_tag, exc)
-    except Exception as exc:  # noqa: BLE001 — any source failure means "do not delete"
-        result.error = f"source listing failed: {exc}"
-        logger.error("[%s] source listing failed: %s — nothing deleted", scope_tag, exc)
-    # What was rendered is pushed even when the listing stopped early.
-    pusher.flush()
+        try:
+            for item in items:
+                if item.file_path in seen:
+                    continue
+                seen.add(item.file_path)
+                if not needs_push(
+                    item.updated, indexed.get(item.file_path), indexed=item.file_path in indexed, full=full
+                ):
+                    result.unchanged += 1
+                elif prefetch is None:
+                    _render(mnemos, item, indexed, result, pusher)
+                else:
+                    window.append(item)
+                    if len(window) >= BATCH_FILES:
+                        render_window()
+            listing_complete = True
+        except ListingTruncated as exc:
+            result.truncated = True
+            logger.warning("[%s] listing truncated (%s): nothing deleted", scope_tag, exc)
+        except Exception as exc:  # noqa: BLE001 — any source failure means "do not delete"
+            result.error = f"source listing failed: {exc}"
+            logger.error("[%s] source listing failed: %s — nothing deleted", scope_tag, exc)
+        # What was listed is pushed even when the listing stopped early.
+        render_window()
+        pusher.flush()
+    finally:
+        pusher.close()
 
     if listing_complete:
         for file_path in sorted(set(indexed) - seen):
@@ -154,19 +187,13 @@ def sync_scope(
     return result
 
 
-def _sync_item(
+def _render(
     mnemos: MnemosClient,
     item: SourceItem,
     indexed: dict[str, float | None],
-    full: bool,
     result: SyncResult,
     pusher: _Pusher,
 ) -> None:
-    if not needs_push(
-        item.updated, indexed.get(item.file_path), indexed=item.file_path in indexed, full=full
-    ):
-        result.unchanged += 1
-        return
     try:
         content = item.markdown()
     except SkipItem as exc:
@@ -184,7 +211,12 @@ def _sync_item(
 
 
 class _Pusher:
-    """Collects rendered documents and pushes them a batch at a time."""
+    """Collects rendered documents and pushes them a batch at a time.
+
+    One batch is in flight while the next one is read from the source, so the
+    server embeds while the source is downloaded. Outcomes are tallied on the
+    sync thread only, when the batch is waited for.
+    """
 
     def __init__(self, mnemos: MnemosClient, tags: list[str], result: SyncResult) -> None:
         self._mnemos = mnemos
@@ -192,7 +224,9 @@ class _Pusher:
         self._result = result
         self._pending: list[tuple[SourceItem, dict]] = []
         self._chars = 0
-        self._batched = True
+        self._batched = True  # touched by the push thread only
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mnemos-push")
+        self._in_flight: Future | None = None
 
     def add(self, item: SourceItem, content: str) -> None:
         self._pending.append((item, {
@@ -201,38 +235,57 @@ class _Pusher:
         }))
         self._chars += len(content)
         if len(self._pending) >= BATCH_FILES or self._chars >= BATCH_CHARS:
-            self.flush()
+            self._submit()
 
     def flush(self) -> None:
+        """Push what is pending and wait until every batch is answered."""
+        self._submit()
+        self._wait()
+
+    def close(self) -> None:
+        self._executor.shutdown(wait=True)
+
+    def _submit(self) -> None:
         pending, self._pending, self._chars = self._pending, [], 0
         if not pending:
             return
+        self._wait()  # one batch in flight at most: the server embeds one at a time anyway
+        self._in_flight = self._executor.submit(self._send, pending)
+
+    def _wait(self) -> None:
+        if self._in_flight is None:
+            return
+        outcomes, self._in_flight = self._in_flight.result(), None
+        for item, error in outcomes:
+            if error is None:
+                self._result.pushed += 1
+            else:
+                self._result.failed += 1
+                logger.error("[%s] push %s (%s) failed: %s", self._result.scope_tag, item.file_path, item.title, error)
+
+    def _send(self, pending: list[tuple[SourceItem, dict]]) -> list[tuple[SourceItem, str | None]]:
+        """Push one batch; each document with its error, None when indexed. Never raises."""
         if self._batched:
             try:
                 answers = self._mnemos.push_many([_without_none(doc) for _, doc in pending])
             except Exception as exc:  # noqa: BLE001 — the batch fails, the run goes on
-                for item, _ in pending:
-                    self._failed(item, str(exc))
-                return
+                return [(item, str(exc)) for item, _ in pending]
             if answers is not None:
-                for (item, _), answer in zip(pending, answers):
-                    if answer.get("status") in ("indexed", "skipped"):
-                        self._result.pushed += 1
-                    else:
-                        self._failed(item, answer.get("error") or answer.get("status"))
-                return
+                return [
+                    (item, None if answer.get("status") in ("indexed", "skipped")
+                     else answer.get("error") or answer.get("status"))
+                    for (item, _), answer in zip(pending, answers)
+                ]
             self._batched = False  # an older server: one request per document from now on
+        outcomes: list[tuple[SourceItem, str | None]] = []
         for item, doc in pending:
             try:
                 self._mnemos.push(**doc)
             except Exception as exc:  # noqa: BLE001 — one bad document must not stop the run
-                self._failed(item, str(exc))
+                outcomes.append((item, str(exc)))
             else:
-                self._result.pushed += 1
-
-    def _failed(self, item: SourceItem, error: str | None) -> None:
-        self._result.failed += 1
-        logger.error("[%s] push %s (%s) failed: %s", self._result.scope_tag, item.file_path, item.title, error)
+                outcomes.append((item, None))
+        return outcomes
 
 
 def _without_none(doc: dict) -> dict:

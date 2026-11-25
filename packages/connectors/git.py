@@ -3,10 +3,11 @@
 
 Each run makes a *blobless* clone (``--filter=blob:none``): every commit and
 tree, no file contents. That is enough to list the files and date each one
-by the last commit touching it, in one ``git log``; contents are fetched one
-by one, only for the files the sync actually pushes. Unchanged files cost no
-download and no embedding. Nothing outlives the run: the clone sits in a
-temporary directory and Mnemos remains the only state.
+by the last commit touching it, in one ``git log``; contents are fetched
+only for the files the sync actually pushes, a batch per request
+(:meth:`GitSource.prefetch`). Unchanged files cost no download and no
+embedding. Nothing outlives the run: the clone sits in a temporary
+directory removed by :meth:`GitSource.close`, and Mnemos remains the only state.
 
 A token, when given, travels as an HTTP header scoped to the repository's
 origin through ``GIT_CONFIG_*`` variables: it never appears in a URL, a
@@ -19,8 +20,10 @@ import base64
 import fnmatch
 import logging
 import os
+import shutil
 import subprocess
 import tempfile
+import weakref
 from collections.abc import Callable, Iterable, Iterator
 from functools import partial
 from urllib.parse import urlsplit
@@ -145,23 +148,61 @@ class GitSource:
         # Same private-CA setting as the HTTP connectors; git does not read it itself.
         if os.environ.get("SSL_CERT_FILE") and "GIT_SSL_CAINFO" not in os.environ:
             self._env["GIT_SSL_CAINFO"] = os.environ["SSL_CERT_FILE"]
+        self._repo: str | None = None
+        self._cleanup: weakref.finalize | None = None
+        self._shas: dict[str, str] = {}  # file_path → blob sha, for prefetch
+
+    def __enter__(self) -> GitSource:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
+    def close(self) -> None:
+        """Remove the clone. Contents can no longer be read afterwards."""
+        if self._cleanup is not None:
+            self._cleanup()
+        self._cleanup, self._repo = None, None
+        self._shas.clear()
 
     def items(self, scope: str) -> Iterator[SourceItem]:
-        with tempfile.TemporaryDirectory(prefix="mnemos-git-") as repo:
-            clone = ["clone", "--quiet", "--filter=blob:none", "--no-checkout", "--single-branch"]
-            if self._branch:
-                clone += ["--branch", self._branch]
-            self._git(*clone, "--", self._url, repo, timeout=_CLONE_TIMEOUT)
-            branch = self._branch or self._git("symbolic-ref", "--short", "HEAD", cwd=repo).strip()
-            updated = self._last_changes(repo)
-            for sha, path in self._files(repo):
-                yield SourceItem(
-                    file_path=file_path(scope, path),
-                    title=path,
-                    source_url=browse_url(self._url, branch, path),
-                    updated=updated.get(path),
-                    content=partial(self._read, repo, sha, path),
-                )
+        """The files of the branch. The clone outlives the listing, until :meth:`close`,
+        so contents stay readable after the last item is yielded."""
+        self.close()
+        repo = self._repo = tempfile.mkdtemp(prefix="mnemos-git-")
+        # Removed on close(), or when the source is garbage-collected without it.
+        self._cleanup = weakref.finalize(self, shutil.rmtree, repo, True)
+        clone = ["clone", "--quiet", "--filter=blob:none", "--no-checkout", "--single-branch"]
+        if self._branch:
+            clone += ["--branch", self._branch]
+        self._git(*clone, "--", self._url, repo, timeout=_CLONE_TIMEOUT)
+        branch = self._branch or self._git("symbolic-ref", "--short", "HEAD", cwd=repo).strip()
+        updated = self._last_changes(repo)
+        for sha, path in self._files(repo):
+            item_path = file_path(scope, path)
+            self._shas[item_path] = sha
+            yield SourceItem(
+                file_path=item_path,
+                title=path,
+                source_url=browse_url(self._url, branch, path),
+                updated=updated.get(path),
+                content=partial(self._read, repo, sha, path),
+            )
+
+    def prefetch(self, items: Iterable[SourceItem]) -> None:
+        """Download the contents of ``items`` in one request.
+
+        Without it, the blobless clone fetches each blob on first read: one
+        round trip per file, which dominates a first sync over a slow link.
+        """
+        shas = [self._shas[i.file_path] for i in items if i.file_path in self._shas]
+        if not shas or self._repo is None:
+            return
+        self._git_bytes(
+            "-c", "fetch.negotiationAlgorithm=noop", "fetch", "origin", "--no-tags", "--no-write-fetch-head",
+            "--recurse-submodules=no", "--filter=blob:none", "--stdin",
+            cwd=self._repo, input="\n".join(shas).encode() + b"\n",
+        )
 
     def _wanted(self, path: str) -> bool:
         if os.path.splitext(path)[1].lower() in _BINARY_EXTENSIONS:
@@ -210,13 +251,16 @@ class GitSource:
     def _git(self, *args: str, cwd: str | None = None, timeout: float = _COMMAND_TIMEOUT) -> str:
         return self._git_bytes(*args, cwd=cwd, timeout=timeout).decode("utf-8", errors="replace")
 
-    def _git_bytes(self, *args: str, cwd: str | None = None, timeout: float = _COMMAND_TIMEOUT) -> bytes:
+    def _git_bytes(
+        self, *args: str, cwd: str | None = None, timeout: float = _COMMAND_TIMEOUT, input: bytes | None = None,
+    ) -> bytes:
         try:
             done = self._run(
-                ["git", *args], cwd=cwd, env=self._env, capture_output=True, timeout=timeout, check=False
+                ["git", *args], cwd=cwd, env=self._env, input=input, capture_output=True, timeout=timeout,
+                check=False,
             )
         except FileNotFoundError as exc:
-            # The git binary, or the clone directory once the listing is over.
+            # The git binary, or the clone directory once the source is closed.
             raise SourceError(f"cannot run git: {exc}") from exc
         except subprocess.TimeoutExpired as exc:
             raise SourceError(f"git {args[0]} timed out after {timeout:.0f}s") from exc

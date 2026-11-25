@@ -399,10 +399,11 @@ then walks the source:
 - Pushes are idempotent, so re-running after a failure is always safe.
 - Pushes go in batches of up to 32 documents or 200 000 characters
   (`POST /api/index/batch`): the server embeds a whole batch in one pass,
-  about 2.5× faster on a CPU than file by file. A refused document fails alone;
-  a batch the server cannot take (timeout, 5xx after retries) counts each
-  of its documents as failed. Against a server without that route the
-  engine falls back to one `POST /api/index` per document.
+  about 2.5× faster on a CPU than file by file, while the engine reads the
+  next batch from the source (one batch in flight at a time). A refused
+  document fails alone; a batch the server cannot take (timeout, 5xx after
+  retries) counts each of its documents as failed. Against a server without
+  that route the engine falls back to one `POST /api/index` per document.
 
 ## Scheduling
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from collections.abc import Iterator
 
 import httpx
@@ -248,3 +249,32 @@ def test_a_failed_batch_counts_every_document_and_the_run_goes_on(mnemos, monkey
 
     assert (result.pushed, result.failed, result.deleted) == (0, 2, 1)
     assert calls == [2]
+
+
+def test_the_next_batch_is_read_while_the_server_embeds(mnemos, monkeypatch):
+    from connectors.sync import BATCH_FILES
+
+    next_batch_read = threading.Event()
+    overlapped: list[bool] = []
+    original = MnemosClient.push_many
+
+    def slow_server(self, docs):
+        # Sequential pushing would leave this waiting for the timeout.
+        overlapped.append(next_batch_read.wait(timeout=2))
+        return original(self, docs)
+
+    def render(i: int) -> str:
+        if i == BATCH_FILES:
+            next_batch_read.set()
+        return f"# Page {i}"
+
+    monkeypatch.setattr(MnemosClient, "push_many", slow_server)
+    items = [
+        SourceItem(file_path=f"confluence/ENG/{i}.md", title=str(i), source_url="u", updated=1.0,
+                   content=lambda i=i: render(i))
+        for i in range(BATCH_FILES + 3)
+    ]
+    result = _sync(mnemos, items)
+
+    assert overlapped == [True, True]
+    assert result.pushed == BATCH_FILES + 3 and result.ok

@@ -115,6 +115,28 @@ def test_a_second_sync_pushes_only_what_changed_and_drops_what_is_gone(origin):
     assert mnemos.deleted == ["git/example.com/acme~demo/docs/guide.md"]
 
 
+def test_contents_are_prefetched_in_one_request_and_readable_after_the_listing(origin, caplog):
+    import subprocess as sp
+
+    calls: list[tuple[list[str], bytes | None]] = []
+
+    def run(args, **kwargs):
+        calls.append((args, kwargs.get("input")))
+        return sp.run(args, **kwargs)
+
+    mnemos = FakeMnemos(collection="mnemos_code")
+    with _source(origin, paths=["src", "docs", "README.md"], run=run) as source:
+        # Fewer files than a window: every content is read after the listing has ended.
+        result = sync_scope(mnemos.client().for_collection("mnemos_code"), source="git", scope=SCOPE,
+                            items=source.items(SCOPE), prefetch=source.prefetch)
+
+    assert (result.pushed, result.failed) == (4, 0)
+    assert mnemos.files["git/example.com/acme~demo/src/app.go"]
+    fetches = [(args, data) for args, data in calls if "fetch" in args]
+    assert len(fetches) == 1 and fetches[0][1].count(b"\n") == 4
+    assert "prefetch failed" not in caplog.text
+
+
 def test_a_failed_clone_is_a_source_error(tmp_path, monkeypatch):
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
     with pytest.raises(SourceError, match="git clone failed"):

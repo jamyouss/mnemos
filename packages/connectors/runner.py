@@ -63,14 +63,14 @@ def _report(report: Report | None, name: str, state: str, results: list[SyncResu
 def _run_source(source: SourceConfig, mnemos: MnemosClient, full: bool) -> list[SyncResult]:
     if isinstance(source, GitConfig):
         scope = git.repo_scope(source.url)
-        repo = git.GitSource(
+        with git.GitSource(
             source.url, user=source.user, token=source.token, branch=source.branch,
             paths=source.paths, exclude=source.exclude, max_file_kb=source.max_file_kb,
-        )
-        return [
-            sync_scope(mnemos.for_collection(source.collection), source=git.SOURCE, scope=scope,
-                       items=repo.items(scope), user_tags=source.tags, full=full)
-        ]
+        ) as repo:
+            return [
+                sync_scope(mnemos.for_collection(source.collection), source=git.SOURCE, scope=scope,
+                           items=repo.items(scope), user_tags=source.tags, full=full, prefetch=repo.prefetch)
+            ]
 
     if isinstance(source, WebConfig):
         with transport.make_client() as client:
