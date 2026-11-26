@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { indexFileUrl, skipExplanation } from './indexFiles'
+import { displayTags, fileLabel, indexFileUrl, skipExplanation } from './indexFiles'
 
 describe('indexFileUrl', () => {
   it('keeps the leading slash of a server path, so the route sees it whole', () => {
@@ -19,5 +19,26 @@ describe('skipExplanation', () => {
 
   it('explains a path outside every declared project', () => {
     expect(skipExplanation({ rule: 'declared-only', project_prefix: null, reason: null })).toMatch(/not under any declared project prefix/)
+  })
+})
+
+describe('fileLabel', () => {
+  it('reads a git file as its name in its repository and folder', () => {
+    expect(fileLabel('git/gitlab.example.com/lpel~pnx-phoenix~front~libraries~utils/src/lib/date.ts'))
+      .toEqual({ name: 'date.ts', place: 'libraries/utils › src/lib' })
+    expect(fileLabel('git/github.com/acme~app/README.md')).toEqual({ name: 'README.md', place: 'acme/app' })
+  })
+
+  it('names a web page by its address, a mounted file by its folder', () => {
+    expect(fileLabel('web/docs.example.com/3f2a.md', 'https://docs.example.com/guide/install'))
+      .toEqual({ name: 'install', place: 'docs.example.com' })
+    expect(fileLabel('/data/codebase/acme/web/app.ts')).toEqual({ name: 'app.ts', place: 'acme/web' })
+  })
+})
+
+describe('displayTags', () => {
+  it('drops connector markers and counts what does not fit', () => {
+    const tags = ['lpel-front-lib-utils', 'lpel', 'lpel-front', 'laposte', 'git', 'git:gitlab.example.com/lpel/utils']
+    expect(displayTags(tags)).toEqual({ shown: ['lpel-front-lib-utils', 'lpel', 'lpel-front'], more: ['laposte'] })
   })
 })

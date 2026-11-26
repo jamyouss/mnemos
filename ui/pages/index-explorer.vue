@@ -5,7 +5,7 @@ import { toast } from 'vue-sonner'
 import type { IndexedFile, IndexedFileDetail, PathCheck } from '~/composables/useApi'
 import { buttonVariants } from '~/components/ui/button'
 import { ago } from '~/utils/connectors'
-import { chunkerLabel, INDEX_COLLECTIONS, REINDEX_ROOTS, shortPath, skipExplanation, TAGGED_COLLECTIONS } from '~/utils/indexFiles'
+import { chunkerLabel, displayTags, fileLabel, INDEX_COLLECTIONS, REINDEX_ROOTS, shortPath, skipExplanation, TAGGED_COLLECTIONS } from '~/utils/indexFiles'
 import { canWriteAll } from '~/utils/tenants'
 
 // `pages/index.vue` is the dashboard, so this page names its route itself.
@@ -49,6 +49,8 @@ watch(data, (page) => {
   now.value = Date.now()
 }, { immediate: true })
 const rows = computed(() => [...(data.value?.items ?? []), ...more.value])
+// Two chips keep a row on one line; the rest is counted, every tag stays in the file sheet.
+const labelled = computed(() => rows.value.map((f) => ({ ...f, label: fileLabel(f.file_path, f.source_url), chips: displayTags(f.tags, 2) })))
 const total = computed(() => data.value?.total ?? 0)
 const filtered = computed(() => !!(filters.value.tag || filters.value.directory))
 const announced = computed(() => {
@@ -204,38 +206,48 @@ async function runCheck() {
       <CardContent class="px-0">
         <EmptyState v-if="error" tone="error" title="Could not list the index" :detail="error.message" class="mx-6" />
         <div v-else-if="rows.length" class="overflow-x-auto" :aria-busy="pending">
-          <Table :class="pending && 'opacity-60 transition-opacity'">
+          <Table class="md:table-fixed" :class="pending && 'opacity-60 transition-opacity'">
             <TableHeader>
               <TableRow>
                 <TableHead class="pl-6">File</TableHead>
-                <TableHead class="hidden md:table-cell">Tags</TableHead>
-                <TableHead class="hidden sm:table-cell">Language</TableHead>
-                <TableHead class="hidden pr-6 text-right sm:table-cell">Last indexed</TableHead>
+                <TableHead class="hidden w-72 md:table-cell">Tags</TableHead>
+                <TableHead class="hidden w-28 sm:table-cell">Language</TableHead>
+                <TableHead class="hidden w-28 pr-6 text-right sm:table-cell">Last indexed</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              <TableRow v-for="f in rows" :key="`${f.collection}:${f.file_path}`" class="cursor-pointer" @click="openFile(f.collection, f.file_path)">
-                <TableCell class="max-w-[calc(100vw-4rem)] pl-6 whitespace-normal sm:max-w-md">
+              <TableRow v-for="f in labelled" :key="`${f.collection}:${f.file_path}`" class="cursor-pointer" @click="openFile(f.collection, f.file_path)">
+                <TableCell class="max-w-[calc(100vw-4rem)] min-w-0 pl-6 whitespace-normal md:max-w-none">
                   <button
                     type="button"
-                    class="-mx-1 block max-w-full truncate rounded-md px-1 text-left font-mono text-xs outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
+                    class="-mx-1 block max-w-full truncate rounded-md px-1 text-left text-sm font-medium outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
                     :title="f.file_path"
                     @click.stop="openFile(f.collection, f.file_path)"
                   >
-                    <span class="sr-only">Open </span>{{ shortPath(f.file_path) }}
+                    <span class="sr-only">Open </span>{{ f.label.name }}
                   </button>
+                  <p v-if="f.label.place" class="mt-0.5 truncate font-mono text-xs text-muted-foreground" :title="f.file_path">{{ f.label.place }}</p>
                   <p class="mt-0.5 truncate text-xs text-muted-foreground md:hidden">
-                    <template v-if="f.tags.length">{{ f.tags.join(', ') }}</template>
-                    <span class="sm:hidden"><template v-if="f.tags.length"> · </template>{{ f.language ?? '—' }}<template v-if="f.last_indexed_at"> · {{ ago(f.last_indexed_at, now) }}</template></span>
+                    <template v-if="f.chips.shown.length">{{ f.chips.shown.join(', ') }}</template>
+                    <span class="sm:hidden"><template v-if="f.chips.shown.length"> · </template>{{ f.language ?? '—' }}<template v-if="f.last_indexed_at"> · {{ ago(f.last_indexed_at, now) }}</template></span>
                   </p>
                 </TableCell>
-                <TableCell class="hidden max-w-64 md:table-cell">
-                  <div class="flex flex-wrap gap-1">
-                    <Badge v-for="(t, i) in f.tags" :key="t" :variant="i === 0 ? 'secondary' : 'outline'" class="font-mono text-[11px]">{{ t }}</Badge>
-                    <span v-if="!f.tags.length" class="text-muted-foreground">—</span>
+                <TableCell class="hidden md:table-cell">
+                  <div class="flex min-w-0 items-center gap-1">
+                    <Badge
+                      v-for="(t, i) in f.chips.shown"
+                      :key="t"
+                      :variant="i === 0 ? 'secondary' : 'outline'"
+                      class="block max-w-full min-w-0 shrink truncate font-mono text-[11px]"
+                      :title="t"
+                    >{{ t }}</Badge>
+                    <Badge v-if="f.chips.more.length" variant="outline" class="shrink-0 font-mono text-[11px] text-muted-foreground" :title="f.chips.more.join(', ')">
+                      +{{ f.chips.more.length }}
+                    </Badge>
+                    <span v-if="!f.chips.shown.length" class="text-muted-foreground">—</span>
                   </div>
                 </TableCell>
-                <TableCell class="hidden whitespace-nowrap sm:table-cell">{{ f.language ?? '—' }}</TableCell>
+                <TableCell class="hidden truncate sm:table-cell">{{ f.language ?? '—' }}</TableCell>
                 <TableCell class="hidden pr-6 text-right whitespace-nowrap text-muted-foreground sm:table-cell" :title="f.last_indexed_at ? fmtTime(f.last_indexed_at) : undefined">
                   {{ f.last_indexed_at ? ago(f.last_indexed_at, now) : '—' }}
                 </TableCell>
