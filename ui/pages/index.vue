@@ -123,14 +123,7 @@ const fmtMs = (x: number) => (x >= 1000 ? `${(x / 1000).toFixed(1)} s` : `${Math
       <AlertDescription>The dashboard cannot reach the mnemos server. Check that it is running.</AlertDescription>
     </Alert>
 
-    <Alert v-if="me && !admin">
-      <AlertTitle>Index and memories only</AlertTitle>
-      <AlertDescription>
-        Search traffic and retrieval settings are visible to admins only. You are signed in as “{{ me.name }}”.
-      </AlertDescription>
-    </Alert>
-
-    <HealthStrip :health="health.data.value" :pending="health.pending.value" :log-enabled="log.data.value?.enabled" />
+    <HealthStrip :health="health.data.value" :pending="health.pending.value" :log-enabled="log.data.value?.enabled" :show-log="admin" />
 
     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2" :class="admin && 'lg:grid-cols-3 xl:grid-cols-6'">
       <StatCard label="Indexed chunks" :icon="DatabaseIcon" :value="status.data.value ? totalChunks.toLocaleString() : '…'" :hint="`${collections.length} collections`" />
